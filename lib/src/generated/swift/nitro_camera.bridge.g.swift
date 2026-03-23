@@ -27,15 +27,16 @@ public func _call_add(_ a: Double, _ b: Double) -> Double {
 }
 
 @_cdecl("_call_getGreeting")
-public func _call_getGreeting(_ name: String) -> String {
-    guard let impl = NitroCameraRegistry.impl else { return "" }
+public func _call_getGreeting(_ name: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    let nameStr = name.map { String(cString: $0) } ?? ""
+    guard let impl = NitroCameraRegistry.impl else { return strdup("") }
     let sema = DispatchSemaphore(value: 0)
-    var result: String? = nil
+    var result = ""
     Task.detached {
-        result = try? await impl.getGreeting(name: name)
+        result = (try? await impl.getGreeting(name: nameStr)) ?? ""
         sema.signal()
     }
     sema.wait()
-    return result ?? ""
+    return strdup(result)
 }
 
