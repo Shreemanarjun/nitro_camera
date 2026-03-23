@@ -1,0 +1,1 @@
+../../lib/src/generated/swift/nitro_camera.bridge.g.swift
