@@ -13,14 +13,18 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.view.TextureRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.CompletableDeferred
-import nitro.nitro_camera_module.*
+import nitro.nitro_camera_module.CameraDevice
+import nitro.nitro_camera_module.CameraFrame
+import nitro.nitro_camera_module.HybridNitroCameraSpec
+import nitro.nitro_camera_module.PhotoResult
+import nitro.nitro_camera_module.RecordingResult
 
 /**
  * Camera2 implementation of [HybridNitroCameraSpec].
@@ -118,27 +122,67 @@ class NitroCameraImpl(
         val textureEntry = withContext(Dispatchers.Main) { textureRegistry.createSurfaceTexture() }
         val textureId = textureEntry.id()
 
+        // VALIDATE DeviceID before hitting the JNI layer to prevent pending exceptions
+        val availableIds = cameraManager.cameraIdList.toList()
+        if (!availableIds.contains(deviceId)) {
+            Log.e(TAG, "Unknown camera device $deviceId. Available: ${availableIds.joinToString()}.")
+            withContext(Dispatchers.Main) { 
+                try { textureEntry.release() } catch (_: Exception) {}
+            }
+            return 0L // Graceful failure instead of crash
+        }
+        
+        // Ensure we can get characteristics without throwing
+        try {
+            cameraManager.getCameraCharacteristics(deviceId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get characteristics for $deviceId: ${e.message}")
+            withContext(Dispatchers.Main) { 
+                try { textureEntry.release() } catch (_: Exception) {}
+            }
+            return 0L
+        }
+
         try {
             // Open camera on openHandler; suspendCancellableCoroutine resumes when callback fires
             val camera = suspendCancellableCoroutine { cont ->
                 cont.invokeOnCancellation { 
-                    Handler(Looper.getMainLooper()).post { textureEntry.release() }
+                    Handler(Looper.getMainLooper()).post { 
+                        try { textureEntry.release() } catch (_: Exception) {}
+                    }
                 }
-                cameraManager.openCamera(
-                    deviceId,
-                    object : android.hardware.camera2.CameraDevice.StateCallback() {
-                        override fun onOpened(cam: android.hardware.camera2.CameraDevice) =
-                            cont.resumeWith(Result.success(cam))
-                        override fun onDisconnected(cam: android.hardware.camera2.CameraDevice) {
-                            cam.close(); cont.cancel()
-                        }
-                        override fun onError(cam: android.hardware.camera2.CameraDevice, error: Int) {
-                            cam.close()
-                            cont.resumeWith(Result.failure(Exception("Camera open error $error for $deviceId")))
-                        }
-                    },
-                    openHandler,
-                )
+                
+                try {
+                    cameraManager.openCamera(
+                        deviceId,
+                        object : android.hardware.camera2.CameraDevice.StateCallback() {
+                            override fun onOpened(cam: android.hardware.camera2.CameraDevice) {
+                                if (cont.isActive) {
+                                    // Use the onCancellation lambda to ensure cam is closed 
+                                    // if the coroutine is cancelled after resumption
+                                    cont.resume(cam) { cam.close() }
+                                } else {
+                                    cam.close()
+                                }
+                            }
+                            override fun onDisconnected(cam: android.hardware.camera2.CameraDevice) {
+                                cam.close()
+                                if (cont.isActive) cont.cancel()
+                            }
+                            override fun onError(cam: android.hardware.camera2.CameraDevice, error: Int) {
+                                Log.e(TAG, "Hardware onError: $error for $deviceId")
+                                cam.close()
+                                if (cont.isActive) {
+                                    cont.resumeWith(Result.failure(Exception("Camera open error $error for $deviceId")))
+                                }
+                            }
+                        },
+                        openHandler,
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "cameraManager.openCamera exception: ${e.message}")
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
             }
 
             val session = NitraCameraSession(
@@ -160,8 +204,11 @@ class NitroCameraImpl(
             Log.d(TAG, "openCamera($deviceId) → textureId=$textureId")
             return textureId
         } catch (e: Exception) {
-            Handler(Looper.getMainLooper()).post { textureEntry.release() }
-            throw e
+            Log.e(TAG, "General openCamera failure: ${e.message}")
+            withContext(Dispatchers.Main) { 
+                try { textureEntry.release() } catch (_: Exception) {}
+            }
+            return 0L // Graceful failure - never throw to Nitrogen bridge
         }
     }
 

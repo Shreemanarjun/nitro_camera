@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
 import android.media.ImageReader
@@ -41,26 +42,42 @@ class NitraCameraSession(
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
 
+    // Dedicated GL Rendering thread to prevent camera controls from blocking the preview
+    private val glThread = HandlerThread("NitraGLThread").apply { start() }
+    private val glHandler = Handler(glThread.looper)
+
     // GPU Filtering Path: Camera -> Renderer -> Flutter
-    private val renderer = NitraRenderer(width, height).apply {
-        setup(Surface(textureEntry.surfaceTexture().apply { setDefaultBufferSize(width, height) }))
-    }
+    private val renderer = NitraRenderer(width, height)
 
     // This is the surface we Hand off to the camera
     private val previewSurface: Surface by lazy {
-        renderer.inputSurface!!
+        renderer.inputSurface ?: throw IllegalStateException("Renderer not ready")
     }
 
-    private val surfaceTexture = renderer.inputSurfaceTexture!!.apply {
-        setOnFrameAvailableListener({
-            if (!isClosed) {
-                renderer.drawFrame()
+    init {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        glHandler.post {
+            try {
+                // Ensure we use the surface texture correctly. 
+                // We wrap it in a Surface only when needed and release it later.
+                renderer.setup(Surface(textureEntry.surfaceTexture().apply { 
+                    setDefaultBufferSize(width, height) 
+                }))
+            } finally {
+                latch.countDown()
             }
-        }, cameraHandler)
+        }
+        // Wait for GL thread to finish setup to avoid NullPointerException in camera startup
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     @Volatile private var isClosed = false
     @Volatile private var captureSession: CameraCaptureSession? = null
+
+    // Buffer reference for lifecycle management
+    private val surfaceTexture: SurfaceTexture? by lazy {
+        renderer.inputSurfaceTexture
+    }
 
     // CPU frame path
     var frameProcessingEnabled = false
@@ -133,6 +150,26 @@ class NitraCameraSession(
 
     private fun sendPreviewRequest(session: CameraCaptureSession) {
         if (isClosed) return
+        
+        // 1. Hook up the frame-available listener to the dedicated GL thread
+        // Defensive check: ensure renderer is initialized
+        val inputST = renderer.inputSurfaceTexture ?: return
+        
+        // Clear old listener first to avoid stray frames
+        inputST.setOnFrameAvailableListener(null)
+        
+        inputST.setOnFrameAvailableListener({
+            glHandler.post {
+                if (!isClosed) {
+                    try {
+                        renderer.drawFrame()
+                    } catch (e: Exception) {
+                        Log.e("NitroCamera", "Render error: ${e.message}")
+                    }
+                }
+            }
+        }, glHandler)
+
         try {
             val builder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_PREVIEW)
             builder.addTarget(previewSurface)
@@ -154,19 +191,39 @@ class NitraCameraSession(
     suspend fun close() {
         if (isClosed) return
         isClosed = true
+        
+        // Wait a tiny bit to avoid hardware race conditions during sensor switching
+        kotlinx.coroutines.delay(100)
+        
         try { captureSession?.stopRepeating() } catch (_: Exception) {}
         try { captureSession?.close() } catch (_: Exception) {}
         captureSession = null
         try { cameraDevice.close() } catch (_: Exception) {}
         try { previewSurface.release() } catch (_: Exception) {}
-        try { surfaceTexture.release() } catch (_: Exception) {}
+        try { renderer.inputSurfaceTexture?.release() } catch (_: Exception) {}
         try { frameReader.close() } catch (_: Exception) {}
         mediaManager.release()
-        renderer.release()
         
-        // Flutter texture unregistration MUST happen on the Main thread
+        // 1. FAST CLEANUP: We wait briefly (150ms) for the GPU to drain its queue.
+        // We use postAtFrontOfQueue to jump ahead of frame-draw tasks.
+        val releaseLatch = java.util.concurrent.CountDownLatch(1)
+        glHandler.postAtFrontOfQueue {
+            try {
+                renderer.release()
+            } finally {
+                glThread.quitSafely()
+                releaseLatch.countDown()
+            }
+        }
+        
+        // Wait for GL cleanup (timeout is a safety measure)
+        if (!releaseLatch.await(150, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            Log.w("NitroCamera", "GL cleanup timed out, Proceeding with switch...")
+        }
+        
+        // 2. Flutter texture unregistration MUST happen on the Main thread
         withContext(Dispatchers.Main) { 
-            textureEntry.release() 
+            try { textureEntry.release() } catch (_: Exception) {}
         }
         cameraThread.quitSafely()
     }

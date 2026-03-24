@@ -28,6 +28,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var vertexBuffer: FloatBuffer
     private var texCoordBuffer: FloatBuffer
 
+    private var isFirstFrame = true
     private var transformMatrix = FloatArray(16)
     private val vertexShader = "attribute vec4 position;\n" +
             "attribute vec4 texCoord;\n" +
@@ -179,31 +180,35 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
             // 1. Update Texture (Critical: must be on GL thread)
             val st = inputSurfaceTexture ?: return
+            var hasFrame = false
             try {
                 st.updateTexImage()
                 st.getTransformMatrix(transformMatrix)
+                hasFrame = true
             } catch (e: Exception) {
                 // If this fails, the camera likely hasn't pushed a frame yet.
-                // We'll skip this draw to avoid GL_INVALID_OPERATION
-                return
+                // We'll proceed with a Black-Clear to avoid a "stuck" frozen preview
+                if (isFirstFrame) {
+                    android.opengl.Matrix.setIdentityM(transformMatrix, 0)
+                }
             }
 
             GLES20.glViewport(0, 0, width, height)
-            // GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT) // Removed red clear
-            GLES20.glUseProgram(program)
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
-
-            GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             
-            GLES20.glEnableVertexAttribArray(phLoc)
-            GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
-            
-            GLES20.glEnableVertexAttribArray(thLoc)
-            GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
-            
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            if (hasFrame) {
+                isFirstFrame = false
+                GLES20.glUseProgram(program)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+                GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
+                GLES20.glEnableVertexAttribArray(phLoc)
+                GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
+                GLES20.glEnableVertexAttribArray(thLoc)
+                GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            }
 
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
                 Log.e("NitroCamera", "NitraRenderer: eglSwapBuffers failed")
