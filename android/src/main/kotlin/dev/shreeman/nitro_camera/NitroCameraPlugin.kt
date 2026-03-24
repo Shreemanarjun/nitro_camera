@@ -11,9 +11,14 @@ class NitroCameraPlugin : FlutterPlugin {
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         NitroCameraJniBridge.register(
-            NitroCameraImpl(binding.applicationContext)
+            NitroCameraImpl(
+                context        = binding.applicationContext,
+                textureRegistry = binding.textureRegistry,
+            )
         )
     }
 
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {}
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        // Sessions are closed when the Dart side calls closeCamera.
+    }
 }

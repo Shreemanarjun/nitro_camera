@@ -2,13 +2,104 @@
 import Foundation
 import Combine
 
+// --- Enums ---
+public enum CameraPosition: Int64 {
+  case front = 0
+  case back = 1
+  case external = 2
+}
+
+public enum CameraLensType: Int64 {
+  case unknown = 0
+  case wideAngle = 1
+  case ultraWideAngle = 2
+  case telephoto = 3
+}
+
+public enum FlashMode: Int64 {
+  case off = 0
+  case on = 1
+  case auto = 2
+}
+
+public enum AutoFocusMode: Int64 {
+  case off = 0
+  case continuous = 1
+  case locked = 2
+}
+
+public enum PermissionStatus: Int64 {
+  case notDetermined = 0
+  case granted = 1
+  case denied = 2
+  case restricted = 3
+}
+
+// --- Structs ---
+public struct CameraDevice {
+  public var id: String
+  public var name: String
+  public var position: Int64
+  public var lensType: Int64
+  public var sensorOrientation: Int64
+  public var minZoom: Double
+  public var maxZoom: Double
+  public var neutralZoom: Double
+  public var hasFlash: Int64
+  public var hasTorch: Int64
+  public var maxPhotoWidth: Int64
+  public var maxPhotoHeight: Int64
+}
+
+public struct CameraFrame {
+  public var pixels: UnsafeMutablePointer<UInt8>?
+  public var size: Int64
+  public var width: Int64
+  public var height: Int64
+  public var timestamp: Int64
+  public var orientation: Int64
+  public var textureId: Int64
+}
+
+public struct PhotoResult {
+  public var path: String
+  public var width: Int64
+  public var height: Int64
+  public var fileSize: Int64
+}
+
+public struct RecordingResult {
+  public var path: String
+  public var durationMs: Int64
+  public var fileSize: Int64
+}
+
 /**
  * Protocol for the NitroCamera module.
  * Conform to this in your Swift source code.
  */
 public protocol HybridNitroCameraProtocol: AnyObject {
-    func add(a: Double, b: Double) -> Double
-    func getGreeting(name: String) async throws -> String
+    func requestCameraPermission() async throws -> Int64
+    func getCameraPermissionStatus() async throws -> Int64
+    func getDeviceCount() async throws -> Int64
+    func getDevice(index: Int64) async throws -> CameraDevice
+    func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64
+    func closeCamera(textureId: Int64) async throws -> Void
+    func startPreview(textureId: Int64) async throws -> Void
+    func stopPreview(textureId: Int64) async throws -> Void
+    func setZoom(textureId: Int64, zoom: Double) async throws -> Void
+    func setFocusPoint(textureId: Int64, x: Double, y: Double) async throws -> Void
+    func setAutoFocus(textureId: Int64, mode: Int64) async throws -> Void
+    func setExposure(textureId: Int64, value: Double) async throws -> Void
+    func setFlash(textureId: Int64, mode: Int64) async throws -> Void
+    func setTorch(textureId: Int64, enabled: Int64) async throws -> Void
+    func setWhiteBalance(textureId: Int64, temperature: Int64) async throws -> Void
+    func setHdr(textureId: Int64, enabled: Int64) async throws -> Void
+    func takePhoto(textureId: Int64) async throws -> PhotoResult
+    func startVideoRecording(textureId: Int64, outputPath: String) async throws -> Void
+    func stopVideoRecording(textureId: Int64) async throws -> RecordingResult
+    func enableFrameProcessing(textureId: Int64, enabled: Int64) async throws -> Void
+    var frameStream: AnyPublisher<CameraFrame, Never> { get }
 }
 
 public class NitroCameraRegistry {
@@ -17,26 +108,274 @@ public class NitroCameraRegistry {
     public static func register(_ impl: HybridNitroCameraProtocol) {
         NitroCameraRegistry.impl = impl
     }
+
+    // Stream: frameStream cancellables keyed by dartPort
+    public static var _frameStreamCancellables = [Int64: AnyCancellable]()
 }
 
 // MARK: - C bridge stubs — exported as C symbols called by the generated .cpp shim
 
-@_cdecl("_call_add")
-public func _call_add(_ a: Double, _ b: Double) -> Double {
-    return NitroCameraRegistry.impl?.add(a: a, b: b) ?? 0.0
-}
-
-@_cdecl("_call_getGreeting")
-public func _call_getGreeting(_ name: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
-    let nameStr = name.map { String(cString: $0) } ?? ""
-    guard let impl = NitroCameraRegistry.impl else { return strdup("") }
+@_cdecl("_call_requestCameraPermission")
+public func _call_requestCameraPermission() -> Int64 {
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
     let sema = DispatchSemaphore(value: 0)
-    var result = ""
+    var result: Int64? = nil
     Task.detached {
-        result = (try? await impl.getGreeting(name: nameStr)) ?? ""
+        result = try? await impl.requestCameraPermission()
         sema.signal()
     }
     sema.wait()
-    return strdup(result)
+    return result ?? 0
 }
 
+@_cdecl("_call_getCameraPermissionStatus")
+public func _call_getCameraPermissionStatus() -> Int64 {
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
+    let sema = DispatchSemaphore(value: 0)
+    var result: Int64? = nil
+    Task.detached {
+        result = try? await impl.getCameraPermissionStatus()
+        sema.signal()
+    }
+    sema.wait()
+    return result ?? 0
+}
+
+@_cdecl("_call_getDeviceCount")
+public func _call_getDeviceCount() -> Int64 {
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
+    let sema = DispatchSemaphore(value: 0)
+    var result: Int64? = nil
+    Task.detached {
+        result = try? await impl.getDeviceCount()
+        sema.signal()
+    }
+    sema.wait()
+    return result ?? 0
+}
+
+@_cdecl("_call_getDevice")
+public func _call_getDevice(_ index: Int64) -> UnsafeMutableRawPointer? {
+    guard let impl = NitroCameraRegistry.impl else { return nil }
+    let sema = DispatchSemaphore(value: 0)
+    var result: CameraDevice? = nil
+    Task.detached {
+        result = try? await impl.getDevice(index: index)
+        sema.signal()
+    }
+    sema.wait()
+    guard let r = result else { return nil }
+    let ptr = UnsafeMutablePointer<CameraDevice>.allocate(capacity: 1)
+    ptr.initialize(to: r)
+    return UnsafeMutableRawPointer(ptr)
+}
+
+@_cdecl("_call_openCamera")
+public func _call_openCamera(_ deviceId: UnsafePointer<CChar>?, _ width: Int64, _ height: Int64, _ fps: Int64, _ enableAudio: Int64) -> Int64 {
+    let deviceIdStr = deviceId.map { String(cString: $0) } ?? ""
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
+    let sema = DispatchSemaphore(value: 0)
+    var result: Int64? = nil
+    Task.detached {
+        result = try? await impl.openCamera(deviceId: deviceIdStr, width: width, height: height, fps: fps, enableAudio: enableAudio)
+        sema.signal()
+    }
+    sema.wait()
+    return result ?? 0
+}
+
+@_cdecl("_call_closeCamera")
+public func _call_closeCamera(_ textureId: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.closeCamera(textureId: textureId)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_startPreview")
+public func _call_startPreview(_ textureId: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.startPreview(textureId: textureId)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_stopPreview")
+public func _call_stopPreview(_ textureId: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.stopPreview(textureId: textureId)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setZoom")
+public func _call_setZoom(_ textureId: Int64, _ zoom: Double) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setZoom(textureId: textureId, zoom: zoom)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setFocusPoint")
+public func _call_setFocusPoint(_ textureId: Int64, _ x: Double, _ y: Double) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setFocusPoint(textureId: textureId, x: x, y: y)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setAutoFocus")
+public func _call_setAutoFocus(_ textureId: Int64, _ mode: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setAutoFocus(textureId: textureId, mode: mode)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setExposure")
+public func _call_setExposure(_ textureId: Int64, _ value: Double) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setExposure(textureId: textureId, value: value)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setFlash")
+public func _call_setFlash(_ textureId: Int64, _ mode: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setFlash(textureId: textureId, mode: mode)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setTorch")
+public func _call_setTorch(_ textureId: Int64, _ enabled: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setTorch(textureId: textureId, enabled: enabled)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setWhiteBalance")
+public func _call_setWhiteBalance(_ textureId: Int64, _ temperature: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setWhiteBalance(textureId: textureId, temperature: temperature)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setHdr")
+public func _call_setHdr(_ textureId: Int64, _ enabled: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setHdr(textureId: textureId, enabled: enabled)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_takePhoto")
+public func _call_takePhoto(_ textureId: Int64) -> UnsafeMutableRawPointer? {
+    guard let impl = NitroCameraRegistry.impl else { return nil }
+    let sema = DispatchSemaphore(value: 0)
+    var result: PhotoResult? = nil
+    Task.detached {
+        result = try? await impl.takePhoto(textureId: textureId)
+        sema.signal()
+    }
+    sema.wait()
+    guard let r = result else { return nil }
+    let ptr = UnsafeMutablePointer<PhotoResult>.allocate(capacity: 1)
+    ptr.initialize(to: r)
+    return UnsafeMutableRawPointer(ptr)
+}
+
+@_cdecl("_call_startVideoRecording")
+public func _call_startVideoRecording(_ textureId: Int64, _ outputPath: UnsafePointer<CChar>?) -> Void {
+    let outputPathStr = outputPath.map { String(cString: $0) } ?? ""
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.startVideoRecording(textureId: textureId, outputPath: outputPathStr)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_stopVideoRecording")
+public func _call_stopVideoRecording(_ textureId: Int64) -> UnsafeMutableRawPointer? {
+    guard let impl = NitroCameraRegistry.impl else { return nil }
+    let sema = DispatchSemaphore(value: 0)
+    var result: RecordingResult? = nil
+    Task.detached {
+        result = try? await impl.stopVideoRecording(textureId: textureId)
+        sema.signal()
+    }
+    sema.wait()
+    guard let r = result else { return nil }
+    let ptr = UnsafeMutablePointer<RecordingResult>.allocate(capacity: 1)
+    ptr.initialize(to: r)
+    return UnsafeMutableRawPointer(ptr)
+}
+
+@_cdecl("_call_enableFrameProcessing")
+public func _call_enableFrameProcessing(_ textureId: Int64, _ enabled: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.enableFrameProcessing(textureId: textureId, enabled: enabled)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_register_frameStream_stream")
+public func _register_frameStream_stream(
+    _ dartPort: Int64,
+    _ emitCb: @convention(c) (Int64, UnsafeMutableRawPointer?) -> Void
+) {
+    NitroCameraRegistry._frameStreamCancellables[dartPort] =
+        NitroCameraRegistry.impl?.frameStream.sink { item in
+            // Heap-allocate the struct so Dart can read it via the pointer.
+            let ptr = UnsafeMutablePointer<CameraFrame>.allocate(capacity: 1)
+            ptr.initialize(to: item)
+            emitCb(dartPort, UnsafeMutableRawPointer(ptr))
+        }
+}
+
+@_cdecl("_release_frameStream_stream")
+public func _release_frameStream_stream(_ dartPort: Int64) {
+    NitroCameraRegistry._frameStreamCancellables[dartPort]?.cancel()
+    NitroCameraRegistry._frameStreamCancellables.removeValue(forKey: dartPort)
+}
