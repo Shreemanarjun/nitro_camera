@@ -49,12 +49,20 @@ class _FrameOverlayState extends State<FrameOverlay> {
     );
     
     final img = await completer.future;
-    if (mounted) setState(() => _image = img);
+    if (mounted) {
+      setState(() {
+        _image?.dispose();
+        _image = img;
+      });
+    } else {
+      img.dispose();
+    }
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _image?.dispose();
     _fpsCounter.dispose();
     super.dispose();
   }

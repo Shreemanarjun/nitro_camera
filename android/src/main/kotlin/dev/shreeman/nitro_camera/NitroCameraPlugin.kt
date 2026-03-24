@@ -28,8 +28,8 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         impl?.activity = binding.activity
-        binding.addRequestPermissionsResultListener { requestCode, permissions, grantResults ->
-            impl?.handlePermissionResult(requestCode, permissions, grantResults) ?: false
+        binding.addRequestPermissionsResultListener { requestCode, _, grantResults ->
+            impl?.handlePermissionResult(requestCode, grantResults) ?: false
         }
     }
 

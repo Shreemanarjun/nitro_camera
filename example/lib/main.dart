@@ -35,7 +35,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
   int? _activeTextureId;
   int _width = 1280;
   int _height = 720;
-  int _fps = 30;
+  int _fps = 60;
 
   // Custom Filter State
   String _currentFilterName = 'NORMAL';

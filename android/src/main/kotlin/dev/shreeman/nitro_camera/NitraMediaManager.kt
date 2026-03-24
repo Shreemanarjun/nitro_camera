@@ -11,14 +11,11 @@ import android.os.Build
 import android.os.Handler
 import android.util.Log
 import android.view.Surface
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
 import nitro.nitro_camera_module.*
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.resume
 
 // Alias to avoid conflict with Nitrogen-generated CameraDevice struct
 import android.hardware.camera2.CameraDevice as AndroidCameraDevice
@@ -51,42 +48,38 @@ class NitraMediaManager(
     var isRecording = false
         private set
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun takePhoto(captureSession: CameraCaptureSession?): PhotoResult = suspendCancellableCoroutine { cont ->
         val session = captureSession ?: run {
-            cont.resumeWithException(Exception("No active session for photo capture"))
+            cont.resumeWith(Result.failure(Exception("No active session for photo capture")))
             return@suspendCancellableCoroutine
         }
 
         Log.d("NitroCamera", "NitraMediaManager: Preparing photo capture...")
         photoReader.setOnImageAvailableListener({ reader ->
             val image = reader.acquireNextImage() ?: run {
-                if (cont.isActive) cont.resumeWithException(Exception("No image acquired"))
+                if (cont.isActive) cont.resumeWith(Result.failure(Exception("No image acquired")))
                 return@setOnImageAvailableListener
             }
             try {
                 val buffer: ByteBuffer = image.planes[0].buffer
                 val bytes = ByteArray(buffer.remaining())
                 buffer.get(bytes)
-                
                 val imgWidth = image.width.toLong()
                 val imgHeight = image.height.toLong()
                 image.close()
-
                 val tmp = File(context.cacheDir, "cap_${System.currentTimeMillis()}.jpg")
                 FileOutputStream(tmp).use { it.write(bytes) }
-                
                 if (cont.isActive) {
-                    cont.resume(PhotoResult(
+                    cont.resumeWith(Result.success(PhotoResult(
                         path     = tmp.absolutePath,
                         width    = imgWidth,
                         height   = imgHeight,
                         fileSize = bytes.size.toLong()
-                    ))
+                    )))
                 }
             } catch (e: Exception) {
                 image.close()
-                if (cont.isActive) cont.resumeWithException(e)
+                if (cont.isActive) cont.resumeWith(Result.failure(e))
             } finally {
                 reader.setOnImageAvailableListener(null, null)
             }
@@ -100,7 +93,7 @@ class NitraMediaManager(
             captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0)
             session.capture(captureBuilder.build(), null, cameraHandler)
         } catch (e: Exception) {
-            if (cont.isActive) cont.resumeWithException(e)
+            if (cont.isActive) cont.resumeWith(Result.failure(e))
         }
     }
 

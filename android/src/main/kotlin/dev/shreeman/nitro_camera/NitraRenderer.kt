@@ -29,27 +29,23 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var texCoordBuffer: FloatBuffer
 
     private var transformMatrix = FloatArray(16)
-    private val vertexShader = """
-        attribute vec4 position;
-        attribute vec4 texCoord;
-        varying vec2 vTextureCoord;
-        uniform mat4 uSTMatrix;
-        void main() {
-            gl_Position = position;
-            vTextureCoord = (uSTMatrix * texCoord).xy;
-        }
-    """.trimIndent()
+    private val vertexShader = "attribute vec4 position;\n" +
+            "attribute vec4 texCoord;\n" +
+            "varying vec2 vTextureCoord;\n" +
+            "uniform mat4 uSTMatrix;\n" +
+            "void main() {\n" +
+            "    gl_Position = position;\n" +
+            "    vTextureCoord = (uSTMatrix * texCoord).xy;\n" +
+            "}\n"
 
     // Default Fragment Shader (Pass-through)
-    private var fragmentShader = """
-        #extension GL_OES_EGL_image_external : require
-        precision mediump float;
-        varying vec2 vTextureCoord;
-        uniform samplerExternalOES sTexture;
-        void main() {
-            gl_FragColor = texture2D(sTexture, vTextureCoord);
-        }
-    """.trimIndent()
+    private var fragmentShader = "#extension GL_OES_EGL_image_external : require\n" +
+            "precision mediump float;\n" +
+            "varying vec2 vTextureCoord;\n" +
+            "uniform samplerExternalOES sTexture;\n" +
+            "void main() {\n" +
+            "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
+            "}\n"
 
     init {
         val vords = floatArrayOf(
@@ -102,65 +98,65 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
+        phLoc = GLES20.glGetAttribLocation(program, "position")
+        thLoc = GLES20.glGetAttribLocation(program, "texCoord")
+        mhLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
+
+        if (phLoc == -1 || thLoc == -1 || mhLoc == -1) {
+            Log.e("NitroCamera", "NitraRenderer: Failed to locate shader variables!")
+            return
+        }
+
         inputSurfaceTexture = SurfaceTexture(textureId).apply {
             setDefaultBufferSize(width, height)
         }
         inputSurface = Surface(inputSurfaceTexture)
     }
 
-    fun updateShader(shaderSource: String) {
-        GLES20.glDeleteProgram(program)
-        program = createProgram(vertexShader, shaderSource)
-        fragmentShader = shaderSource
-    }
+    private var phLoc: Int = -1
+    private var thLoc: Int = -1
+    private var mhLoc: Int = -1
 
     fun drawFrame() {
-        if (program == 0 || inputSurfaceTexture == null || eglDisplay == EGL14.EGL_NO_DISPLAY) return
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) return
+        if (program == 0 || phLoc == -1) {
+            initGL() 
+            if (program == 0 || phLoc == -1) return
+        }
         
         try {
             EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
-            inputSurfaceTexture?.updateTexImage()
-            inputSurfaceTexture?.getTransformMatrix(transformMatrix)
-
-            GLES20.glUseProgram(program)
-            GLES20.glViewport(0, 0, width, height)
             
-            val ph = GLES20.glGetAttribLocation(program, "position")
-            val th = GLES20.glGetAttribLocation(program, "texCoord")
-            val mh = GLES20.glGetUniformLocation(program, "uSTMatrix")
+            val st = inputSurfaceTexture ?: return
+            st.updateTexImage()
+            st.getTransformMatrix(transformMatrix)
 
-            if (ph < 0 || th < 0 || mh < 0) {
-                if (System.currentTimeMillis() % 1000 < 50) { // Log infrequently to avoid flooding
-                    Log.w("NitroCamera", "NitraRenderer: Shader variable locations not found (ph=$ph, th=$th, mh=$mh)")
-                }
-                return
-            }
-
-            GLES20.glVertexAttribPointer(ph, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
-            GLES20.glVertexAttribPointer(th, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
-            GLES20.glEnableVertexAttribArray(ph)
-            GLES20.glEnableVertexAttribArray(th)
-            GLES20.glUniformMatrix4fv(mh, 1, false, transformMatrix, 0)
-
-            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glViewport(0, 0, width, height)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glUseProgram(program)
+
+            GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
+            
+            GLES20.glEnableVertexAttribArray(phLoc)
+            GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
+            
+            GLES20.glEnableVertexAttribArray(thLoc)
+            GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
+            
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
-                Log.e("NitroCamera", "NitraRenderer: eglSwapBuffers failed")
+                val err = EGL14.eglGetError()
+                if (err != EGL14.EGL_SUCCESS) {
+                    Log.e("NitroCamera", "NitraRenderer: eglSwapBuffers failed: 0x${Integer.toHexString(err)}")
+                }
             }
-            checkGLError("drawFrame")
+            // checkGLError("drawFrame") // Too noisy for 60fps
         } catch (e: Exception) {
             Log.e("NitroCamera", "NitraRenderer: Draw internal error: ${e.message}")
         }
     }
 
-    private fun checkGLError(op: String) {
-        val error = GLES20.glGetError()
-        if (error != GLES20.GL_NO_ERROR) {
-            Log.e("NitroCamera", "NitraRenderer: $op: glError 0x${Integer.toHexString(error)}")
-        }
-    }
 
     fun release() {
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
@@ -188,21 +184,34 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private fun createProgram(vs: String, fs: String): Int {
         val vShader = loadShader(GLES20.GL_VERTEX_SHADER, vs)
         val fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fs)
+        if (vShader == 0 || fShader == 0) return 0
+        
         val p = GLES20.glCreateProgram()
         GLES20.glAttachShader(p, vShader)
         GLES20.glAttachShader(p, fShader)
         GLES20.glLinkProgram(p)
+        
+        val linkStatus = IntArray(1)
+        GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] != GLES20.GL_TRUE) {
+            Log.e("NitroCamera", "NitraRenderer: Program link error: ${GLES20.glGetProgramInfoLog(p)}")
+            GLES20.glDeleteProgram(p)
+            return 0
+        }
         return p
     }
 
     private fun loadShader(type: Int, source: String): Int {
         val s = GLES20.glCreateShader(type)
+        if (s == 0) return 0
         GLES20.glShaderSource(s, source)
         GLES20.glCompileShader(s)
         val compiled = IntArray(1)
         GLES20.glGetShaderiv(s, GLES20.GL_COMPILE_STATUS, compiled, 0)
         if (compiled[0] == 0) {
-            Log.e("NitroCamera", "NitraRenderer: Shader compile error: ${GLES20.glGetShaderInfoLog(s)}")
+            Log.e("NitroCamera", "NitraRenderer: Shader compile error (${if (type == GLES20.GL_VERTEX_SHADER) "VS" else "FS"}): ${GLES20.glGetShaderInfoLog(s)}")
+            GLES20.glDeleteShader(s)
+            return 0
         }
         return s
     }

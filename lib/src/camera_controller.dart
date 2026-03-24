@@ -21,7 +21,7 @@ class CameraController extends ChangeNotifier {
   /// Requested preview height. Defaults to 720.
   final int previewHeight;
 
-  /// Requested frame rate. Defaults to 30.
+  /// Requested frame rate. Use 0 to let the native side pick the highest available. Defaults to 60.
   final int fps;
 
   /// Whether to capture audio when recording video. Defaults to false.
@@ -31,7 +31,7 @@ class CameraController extends ChangeNotifier {
     required this.deviceId,
     this.previewWidth  = 1280,
     this.previewHeight = 720,
-    this.fps           = 30,
+    this.fps           = 60,
     this.enableAudio   = false,
   });
 

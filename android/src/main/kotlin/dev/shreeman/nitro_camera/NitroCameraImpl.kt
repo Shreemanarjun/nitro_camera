@@ -8,248 +8,185 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Handler
 import android.os.HandlerThread
-import android.hardware.camera2.params.MeteringRectangle
+import android.util.Log
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.view.TextureRegistry
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
 import nitro.nitro_camera_module.*
-import kotlin.coroutines.resumeWithException
 
 /**
- * Real Camera2 implementation of HybridNitroCameraSpec.
+ * Camera2 implementation of [HybridNitroCameraSpec].
  *
- * Preview renders GPU-accelerated via Flutter SurfaceTexture (zero CPU copy).
- * The optional frame processor delivers pixel data via [frameStream].
+ * Preview: camera → Flutter SurfaceTexture → Texture(textureId).
+ * Zero CPU copy on the hot path; EGL not used for preview.
  */
-@SuppressLint("LogNotTimber")
+@SuppressLint("LogNotTimber", "MissingPermission")
 class NitroCameraImpl(
     private val context: Context,
     private val textureRegistry: TextureRegistry,
 ) : HybridNitroCameraSpec {
 
-    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
-    private val openLock = Mutex()
-
     private val cameraManager: CameraManager
         get() = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-    private val sessions = mutableMapOf<Long, NitraCameraSession>()
+    private val sessions     = mutableMapOf<Long, NitraCameraSession>()
     private val sessionsLock = Any()
 
-    private val openThread = HandlerThread("NitraCameraOpen").also { it.start() }
+    // Dedicated thread for Camera2 callbacks — never blocks the UI thread
+    private val openThread  = HandlerThread("NitraCameraOpen").also { it.start() }
     private val openHandler = Handler(openThread.looper)
 
-    private val _frameFlow = MutableSharedFlow<CameraFrame>(extraBufferCapacity = 2)
+    private val _frameFlow = MutableSharedFlow<CameraFrame>(extraBufferCapacity = 8)
     override val frameStream: Flow<CameraFrame> = _frameFlow.asSharedFlow()
 
-    @Volatile
-    var activity: android.app.Activity? = null
+    // Activity reference — set by NitroCameraPlugin for permission requests
+    @Volatile var activity: android.app.Activity? = null
 
     companion object {
-        const val PERMISSION_REQUEST_CODE = 9921
+        private const val PERM_CAMERA = 9921
+        private const val PERM_MIC    = 9922
+        private const val TAG         = "NitroCamera"
     }
 
-    // ---- Permissions ----
+    private var pendingCameraDeferred: CompletableDeferred<Long>? = null
+    private var pendingMicDeferred:    CompletableDeferred<Long>? = null
 
-    private var pendingCameraDeferred: kotlinx.coroutines.CompletableDeferred<Long>? = null
-    private var pendingMicDeferred:    kotlinx.coroutines.CompletableDeferred<Long>? = null
+    // ---- Permissions --------------------------------------------------------
 
     override suspend fun requestCameraPermission(): Long {
         if (getCameraPermissionStatus() == 1L) return 1L
         val act = activity ?: return 2L
-
-        val deferred = kotlinx.coroutines.CompletableDeferred<Long>()
-        pendingCameraDeferred = deferred
-        
-        androidx.core.app.ActivityCompat.requestPermissions(
-            act,
-            arrayOf(Manifest.permission.CAMERA),
-            PERMISSION_REQUEST_CODE
-        )
-        
-        return deferred.await()
+        val def = CompletableDeferred<Long>()
+        pendingCameraDeferred = def
+        ActivityCompat.requestPermissions(act, arrayOf(Manifest.permission.CAMERA), PERM_CAMERA)
+        return def.await()
     }
 
-    override suspend fun getCameraPermissionStatus(): Long {
-        return checkPermission(Manifest.permission.CAMERA)
-    }
+    override suspend fun getCameraPermissionStatus(): Long =
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED) 1L else 2L
 
     override suspend fun requestMicrophonePermission(): Long {
         if (getMicrophonePermissionStatus() == 1L) return 1L
         val act = activity ?: return 2L
-
-        val deferred = kotlinx.coroutines.CompletableDeferred<Long>()
-        pendingMicDeferred = deferred
-
-        androidx.core.app.ActivityCompat.requestPermissions(
-            act,
-            arrayOf(Manifest.permission.RECORD_AUDIO),
-            PERMISSION_REQUEST_CODE + 1
-        )
-        return deferred.await()
+        val def = CompletableDeferred<Long>()
+        pendingMicDeferred = def
+        ActivityCompat.requestPermissions(act, arrayOf(Manifest.permission.RECORD_AUDIO), PERM_MIC)
+        return def.await()
     }
 
-    fun handlePermissionResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) 1L else 2L
-            pendingCameraDeferred?.complete(status)
-            pendingCameraDeferred = null
-            return true
+    override suspend fun getMicrophonePermissionStatus(): Long =
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED) 1L else 2L
+
+    fun handlePermissionResult(code: Int, grantResults: IntArray): Boolean {
+        val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) 1L else 2L
+        return when (code) {
+            PERM_CAMERA -> { pendingCameraDeferred?.complete(status); pendingCameraDeferred = null; true }
+            PERM_MIC    -> { pendingMicDeferred?.complete(status);    pendingMicDeferred    = null; true }
+            else        -> false
         }
-        if (requestCode == PERMISSION_REQUEST_CODE + 1) {
-            val status = if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) 1L else 2L
-            pendingMicDeferred?.complete(status)
-            pendingMicDeferred = null
-            return true
-        }
-        return false
     }
 
-    override suspend fun getMicrophonePermissionStatus(): Long {
-        return checkPermission(Manifest.permission.RECORD_AUDIO)
-    }
+    // ---- Device enumeration -------------------------------------------------
 
-    private fun checkPermission(permission: String): Long {
-        val granted = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-        val status = if (granted) 1L else 2L
-        android.util.Log.d("NitroCamera", "checkPermission($permission): $status")
-        return status
-    }
-
-    // ---- Device enumeration ----
-
-    override suspend fun getDeviceCount(): Long {
-        val count = cameraManager.cameraIdList.size.toLong()
-        android.util.Log.d("NitroCamera", "getDeviceCount: $count")
-        return count
-    }
+    override suspend fun getDeviceCount(): Long = cameraManager.cameraIdList.size.toLong()
 
     override suspend fun getDevice(index: Long): CameraDevice {
         val ids = cameraManager.cameraIdList
-        android.util.Log.d("NitroCamera", "getDevice($index) from ${ids.size} devices")
-        require(index >= 0 && index < ids.size) { "Camera index $index out of range" }
+        require(index in 0 until ids.size) { "Camera index $index out of range (${ids.size} devices)" }
         return buildCameraDevice(ids[index.toInt()])
     }
 
-    // ---- Camera lifecycle ----
+    // ---- Camera lifecycle ---------------------------------------------------
 
-    @SuppressLint("MissingPermission")
     override suspend fun openCamera(
-        deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long
-    ): Long = openLock.withLock {
-        // 1. Pre-check permissions immediately on caller thread
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-             throw SecurityException("Camera permission not granted.")
-        }
+        deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long,
+    ): Long {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED) throw SecurityException("Camera permission not granted")
 
-        // 2. Perform UI-linked registry work on Main thread
-        val textureEntry = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-            textureRegistry.createSurfaceTexture()
-        }
+        // Register Flutter texture on the main thread (required by Flutter engine)
+        val textureEntry = withContext(Dispatchers.Main) { textureRegistry.createSurfaceTexture() }
         val textureId = textureEntry.id()
 
-        // 3. Perform blocking open on background dispatcher
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-             val deferred = kotlinx.coroutines.CompletableDeferred<Long>()
-             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                 try {
-                     android.util.Log.d("NitroCamera", "Initiating openCamera($deviceId) on Texture $textureId")
-                     cameraManager.openCamera(
-                        deviceId,
-                        object : android.hardware.camera2.CameraDevice.StateCallback() {
-                            override fun onOpened(camera: android.hardware.camera2.CameraDevice) {
-                                try {
-                                    val session = NitraCameraSession(
-                                        context      = context,
-                                        textureEntry = textureEntry,
-                                        textureId    = textureId,
-                                        cameraDevice = camera,
-                                        width        = width.toInt(),
-                                        height       = height.toInt(),
-                                        fps          = fps.toInt(),
-                                        enableAudio  = enableAudio != 0L
-                                    )
-                                    session.onFrame = { frame -> _frameFlow.tryEmit(frame) }
-                                    synchronized(sessionsLock) { sessions[textureId] = session }
-                                    session.startPreview()
-                                    deferred.complete(textureId)
-                                } catch (e: Exception) {
-                                    camera.close()
-                                    textureEntry.release()
-                                    deferred.completeExceptionally(e)
-                                }
-                            }
+        try {
+            // Open camera on openHandler; suspendCancellableCoroutine resumes when callback fires
+            val camera = suspendCancellableCoroutine { cont ->
+                cont.invokeOnCancellation { textureEntry.release() }
+                cameraManager.openCamera(
+                    deviceId,
+                    object : android.hardware.camera2.CameraDevice.StateCallback() {
+                        override fun onOpened(cam: android.hardware.camera2.CameraDevice) =
+                            cont.resumeWith(Result.success(cam))
+                        override fun onDisconnected(cam: android.hardware.camera2.CameraDevice) {
+                            cam.close(); cont.cancel()
+                        }
+                        override fun onError(cam: android.hardware.camera2.CameraDevice, error: Int) {
+                            cam.close()
+                            cont.resumeWith(Result.failure(Exception("Camera open error $error for $deviceId")))
+                        }
+                    },
+                    openHandler,
+                )
+            }
 
-                            override fun onDisconnected(camera: android.hardware.camera2.CameraDevice) {
-                                camera.close()
-                                deferred.completeExceptionally(Exception("Disconnected"))
-                            }
+            val session = NitraCameraSession(
+                context      = context,
+                textureEntry = textureEntry,
+                textureId    = textureId,
+                cameraDevice = camera,
+                width        = width.toInt(),
+                height       = height.toInt(),
+                requestedFps = fps.toInt(),
+                enableAudio  = enableAudio != 0L,
+            )
+            session.onFrame = { frame -> _frameFlow.tryEmit(frame) }
+            synchronized(sessionsLock) { sessions[textureId] = session }
 
-                            override fun onError(camera: android.hardware.camera2.CameraDevice, error: Int) {
-                                camera.close()
-                                deferred.completeExceptionally(Exception("Hardware error $error"))
-                            }
-                        },
-                        openHandler
-                    )
-                 } catch (e: Exception) {
-                     deferred.completeExceptionally(e)
-                 }
-             }
-             kotlinx.coroutines.withTimeout(5000) { deferred.await() }
+            // Non-blocking — camera session is configured via async Camera2 callbacks
+            session.startPreview()
+
+            Log.d(TAG, "openCamera($deviceId) → textureId=$textureId")
+            return textureId
+        } catch (e: Exception) {
+            textureEntry.release()
+            throw e
         }
     }
 
-    override suspend fun closeCamera(textureId: Long) = openLock.withLock {
+    override suspend fun closeCamera(textureId: Long) {
         val s = synchronized(sessionsLock) { sessions.remove(textureId) } ?: return
-        
-        android.util.Log.d("NitroCamera", "Closing session for texture $textureId")
-        
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-             val deferred = kotlinx.coroutines.CompletableDeferred<Unit>()
-             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                 try {
-                     s.close()
-                     deferred.complete(Unit)
-                 } catch (e: Exception) {
-                     android.util.Log.e("NitroCamera", "Error closing session: ${e.message}")
-                     deferred.complete(Unit) // Still finalize
-                 }
-             }
-             kotlinx.coroutines.withTimeout(3000) { deferred.await() }
-        }
+        Log.d(TAG, "closeCamera(textureId=$textureId)")
+        // Close on IO to avoid blocking the calling coroutine
+        withContext(Dispatchers.IO) { s.close() }
     }
 
     override suspend fun startPreview(textureId: Long) { session(textureId)?.startPreview() }
-    override suspend fun stopPreview(textureId: Long)  { session(textureId)?.stopPreview()  }
+    override suspend fun stopPreview(textureId: Long)  { session(textureId)?.stopPreview() }
 
-    // ---- Camera controls ----
+    // ---- Camera controls ----------------------------------------------------
 
-    override suspend fun setZoom(textureId: Long, zoom: Double)           { session(textureId)?.setZoom(zoom) }
-    override suspend fun setFocusPoint(textureId: Long, x: Double, y: Double) { session(textureId)?.setFocusPoint(x, y) }
-    override suspend fun setAutoFocus(textureId: Long, mode: Long)         { session(textureId)?.setAutoFocus(mode) }
-    override suspend fun setExposure(textureId: Long, value: Double)       { session(textureId)?.setExposure(value) }
-    override suspend fun setFlash(textureId: Long, mode: Long)             { session(textureId)?.setFlash(mode) }
-    override suspend fun setTorch(textureId: Long, enabled: Long)          { session(textureId)?.setTorch(enabled != 0L) }
-    override suspend fun setWhiteBalance(textureId: Long, temperature: Long) { session(textureId)?.setWhiteBalance(temperature) }
-    override suspend fun setHdr(textureId: Long, enabled: Long)            { session(textureId)?.setHdr(enabled != 0L) }
+    override suspend fun setZoom(textureId: Long, zoom: Double)                { session(textureId)?.setZoom(zoom) }
+    override suspend fun setFocusPoint(textureId: Long, x: Double, y: Double)  { session(textureId)?.setFocusPoint(x, y) }
+    override suspend fun setAutoFocus(textureId: Long, mode: Long)              { session(textureId)?.setAutoFocus(mode) }
+    override suspend fun setExposure(textureId: Long, value: Double)            { session(textureId)?.setExposure(value) }
+    override suspend fun setFlash(textureId: Long, mode: Long)                  { session(textureId)?.setFlash(mode) }
+    override suspend fun setTorch(textureId: Long, enabled: Long)               { session(textureId)?.setTorch(enabled != 0L) }
+    override suspend fun setWhiteBalance(textureId: Long, temperature: Long)    { session(textureId)?.setWhiteBalance(temperature) }
+    override suspend fun setHdr(textureId: Long, enabled: Long)                 { session(textureId)?.setHdr(enabled != 0L) }
 
-    // ---- Photo capture ----
+    // ---- Photo / Video ------------------------------------------------------
 
-    override suspend fun takePhoto(textureId: Long): PhotoResult {
-        val s = session(textureId) ?: error("No active camera session for textureId=$textureId")
-        return s.takePhoto()
-    }
-
-    // ---- Video recording ----
+    override suspend fun takePhoto(textureId: Long): PhotoResult =
+        session(textureId)?.takePhoto() ?: error("No session for textureId=$textureId")
 
     override suspend fun startVideoRecording(textureId: Long, outputPath: String) {
         session(textureId)?.startVideoRecording(outputPath)
@@ -258,33 +195,24 @@ class NitroCameraImpl(
     override suspend fun stopVideoRecording(textureId: Long): RecordingResult =
         session(textureId)?.stopVideoRecording() ?: RecordingResult("", 0L, 0L)
 
-    // ---- Frame processing ----
-    
-    override suspend fun setFrameFormat(textureId: Long, format: Long) {
-        session(textureId)?.setFrameFormat(format)
-    }
-
-    override suspend fun setFilterShader(textureId: Long, shaderSource: String) {
-        session(textureId)?.setFilterShader(shaderSource)
-    }
-
-    override suspend fun updateOverlay(textureId: Long, overlayData: String) {
-        // Reserved for future GPU-overlays (vectors/text)
-        Log.d("NitroCamera", "updateOverlay called for texture $textureId")
-    }
+    // ---- Frame processing ---------------------------------------------------
 
     override suspend fun enableFrameProcessing(textureId: Long, enabled: Long) {
         session(textureId)?.frameProcessingEnabled = (enabled != 0L)
     }
 
-    // ---- Helpers ----
+    override suspend fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
+    override suspend fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
+    override suspend fun updateOverlay(textureId: Long, overlayData: String)      { /* reserved */ }
+
+    // ---- Helpers ------------------------------------------------------------
 
     private fun session(textureId: Long) = synchronized(sessionsLock) { sessions[textureId] }
 
     private fun buildCameraDevice(cameraId: String): CameraDevice {
-        val chars    = cameraManager.getCameraCharacteristics(cameraId)
-        val facing   = chars.get(CameraCharacteristics.LENS_FACING)
-        val position = when (facing) {
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+
+        val position = when (chars.get(CameraCharacteristics.LENS_FACING)) {
             CameraCharacteristics.LENS_FACING_FRONT -> 0L
             CameraCharacteristics.LENS_FACING_BACK  -> 1L
             else                                     -> 2L
@@ -295,20 +223,30 @@ class NitroCameraImpl(
 
         val map   = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val sizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)?.sortedByDescending { it.width }
-        val maxW  = sizes?.firstOrNull()?.width?.toLong() ?: 1920L
+        val maxW  = sizes?.firstOrNull()?.width?.toLong()  ?: 1920L
         val maxH  = sizes?.firstOrNull()?.height?.toLong() ?: 1080L
 
-        val focal     = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val lensType  = when {
-            focal == null || focal.isEmpty() -> 0L
-            focal[0] < 2.0f  -> 2L  // ultra-wide
-            focal[0] > 5.0f  -> 3L  // telephoto
-            else              -> 1L  // wide
+        // Lens type heuristic from focal length
+        val focal    = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val lensType = if (focal == null || focal.size == 0) {
+            0L
+        } else {
+            val f = focal[0]
+            when {
+                f < 2.3f -> 2L  // ultra-wide
+                f > 5.0f -> 3L  // telephoto
+                else     -> 1L  // wide-angle
+            }
         }
+
+        // Best name: use lens type + position
+        val posName  = if (position == 0L) "Front" else if (position == 1L) "Back" else "External"
+        val lensName = when (lensType) { 2L -> "Ultra Wide" 3L -> "Telephoto" else -> "Wide" }
+        val name     = if (position == 0L) "Front Camera" else "$lensName Camera"
 
         return CameraDevice(
             id                = cameraId,
-            name              = "Camera $cameraId",
+            name              = name,
             position          = position,
             lensType          = lensType,
             sensorOrientation = orientation,

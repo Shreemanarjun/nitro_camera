@@ -20,7 +20,7 @@ class NitraCameraPreview extends StatefulWidget {
     required this.device,
     this.width = 1280,
     this.height = 720,
-    this.fps = 30,
+    this.fps = 60,
     this.enableAudio = false,
     this.filterShader,
     this.onFrame,
@@ -122,11 +122,12 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
 
   Future<void> _restartCamera() async {
     if (_isOpening) return;
-    setState(() {
-      _textureId = null;
-      _error = null;
-    });
-    await _closeCamera();
+    final oldId = _textureId;
+    setState(() { _textureId = null; _error = null; });
+    // Close old session without awaiting — open new camera immediately
+    if (oldId != null) {
+      NitroCamera.instance.closeCamera(oldId).ignore();
+    }
     if (mounted) await _openCameraInternal();
   }
 
@@ -159,13 +160,7 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
       );
     }
 
-    // Determine preview aspect ratio from device if possible
-    // Note: Most mobile sensors are 4:3 or 16:9
-    final double aspectRatio = widget.device.position == 1 ? 0.75 : 0.75; // Front/Back portrait
-
-    return AspectRatio(
-      aspectRatio: aspectRatio,
-      child: Texture(textureId: _textureId!),
-    );
+    // Fill the available space; let the parent control sizing via Positioned.fill / Expanded
+    return Texture(textureId: _textureId!);
   }
 }

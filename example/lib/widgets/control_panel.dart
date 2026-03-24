@@ -117,14 +117,19 @@ class ControlPanel extends StatelessWidget {
                           spacing: 8,
                           children: [
                             _ChoiceBtn(
-                              label: '30 FPS',
+                              label: '30',
                               isSelected: selectedFps == 30,
                               onTap: () => onFpsChanged(30),
                             ),
                             _ChoiceBtn(
-                              label: '60 FPS',
+                              label: '60',
                               isSelected: selectedFps == 60,
                               onTap: () => onFpsChanged(60),
+                            ),
+                            _ChoiceBtn(
+                              label: 'MAX',
+                              isSelected: selectedFps == 0,
+                              onTap: () => onFpsChanged(0),
                             ),
                           ],
                         ),
