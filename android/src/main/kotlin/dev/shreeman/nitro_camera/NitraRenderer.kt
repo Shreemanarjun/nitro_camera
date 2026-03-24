@@ -38,14 +38,16 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             "    vTextureCoord = (uSTMatrix * texCoord).xy;\n" +
             "}\n"
 
-    // Default Fragment Shader (Pass-through)
-    private var fragmentShader = "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;\n" +
-            "varying vec2 vTextureCoord;\n" +
-            "uniform samplerExternalOES sTexture;\n" +
-            "void main() {\n" +
-            "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
-            "}\n"
+    private val PASSTHROUGH_FS =
+        "#extension GL_OES_EGL_image_external : require\n" +
+        "precision mediump float;\n" +
+        "varying vec2 vTextureCoord;\n" +
+        "uniform samplerExternalOES sTexture;\n" +
+        "void main() {\n" +
+        "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
+        "}\n"
+
+    private var fragmentShader = PASSTHROUGH_FS
 
     init {
         val vords = floatArrayOf(
@@ -77,18 +79,21 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
         EGL14.eglChooseConfig(eglDisplay, configSpec, 0, configs, 0, 1, numConfigs, 0)
-        
+
         val attribList = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, configs[0], EGL14.EGL_NO_CONTEXT, attribList, 0)
-        
+
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, configs[0], outputSurface, surfaceAttribs, 0)
-        
+
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
     }
 
     private fun initGL() {
-        program = createProgram(vertexShader, fragmentShader)
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
+        
+        setupProgram()
+
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         textureId = textures[0]
@@ -98,42 +103,98 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
-        phLoc = GLES20.glGetAttribLocation(program, "position")
-        thLoc = GLES20.glGetAttribLocation(program, "texCoord")
-        mhLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
-
-        if (phLoc == -1 || thLoc == -1 || mhLoc == -1) {
-            Log.e("NitroCamera", "NitraRenderer: Failed to locate shader variables!")
-            return
-        }
-
         inputSurfaceTexture = SurfaceTexture(textureId).apply {
             setDefaultBufferSize(width, height)
         }
         inputSurface = Surface(inputSurfaceTexture)
+        
+        // IMPORTANT: Release context from this thread so the rendering thread can pick it up later in drawFrame()
+        EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+    }
+
+    private fun setupProgram() {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
+        
+        program = createProgram(vertexShader, fragmentShader)
+        
+        // Graceful Fallback: if custom shader fails, use passthrough
+        if (program == 0 && fragmentShader != PASSTHROUGH_FS) {
+            Log.w("NitroCamera", "NitraRenderer: Custom shader failed, falling back to passthrough")
+            program = createProgram(vertexShader, PASSTHROUGH_FS)
+        }
+
+        if (program == 0) {
+            Log.e("NitroCamera", "NitraRenderer: GPU Pipeline Critical Failure")
+            return
+        }
+
+        phLoc = GLES20.glGetAttribLocation(program, "position")
+        thLoc = GLES20.glGetAttribLocation(program, "texCoord")
+        mhLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
     }
 
     private var phLoc: Int = -1
     private var thLoc: Int = -1
     private var mhLoc: Int = -1
 
+    fun updateShader(shader: String) {
+        if (fragmentShader == shader) return
+        
+        if (shader.isEmpty()) {
+            fragmentShader = PASSTHROUGH_FS
+        } else {
+            // Build a compatibility wrapper for user shaders
+            fragmentShader = 
+                "#extension GL_OES_EGL_image_external : require\n" +
+                "precision mediump float;\n" +
+                "varying vec2 vTextureCoord;\n" +
+                "uniform samplerExternalOES sTexture;\n" +
+                "\n" +
+                "// Compatibility macros for user-friendly filter writing\n" +
+                "#define fragColor gl_FragColor\n" +
+                "#define uv vTextureCoord\n" +
+                "#define inputColor (texture2D(sTexture, vTextureCoord))\n" +
+                "\n" +
+                shader
+        }
+        
+        // Signal drawFrame to re-init the program
+        if (program != 0) {
+            program = 0
+            phLoc = -1
+        }
+    }
+
     fun drawFrame() {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) return
-        if (program == 0 || phLoc == -1) {
-            initGL() 
-            if (program == 0 || phLoc == -1) return
-        }
         
         try {
             EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
             
+            if (program == 0 || phLoc == -1) {
+                Log.d("NitroCamera", "NitraRenderer: initProgram (w=$width, h=$height)")
+                setupProgram() 
+                if (program == 0 || phLoc == -1) return
+            }
+
+            // 1. Update Texture (Critical: must be on GL thread)
             val st = inputSurfaceTexture ?: return
-            st.updateTexImage()
-            st.getTransformMatrix(transformMatrix)
+            try {
+                st.updateTexImage()
+                st.getTransformMatrix(transformMatrix)
+            } catch (e: Exception) {
+                // If this fails, the camera likely hasn't pushed a frame yet.
+                // We'll skip this draw to avoid GL_INVALID_OPERATION
+                return
+            }
 
             GLES20.glViewport(0, 0, width, height)
+            GLES20.glClearColor(1.0f, 0.0f, 0.0f, 1.0f) // RED CLEAR FOR DEBUG
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glUseProgram(program)
+
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
 
             GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
             
@@ -146,6 +207,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
             if (!EGL14.eglSwapBuffers(eglDisplay, eglSurface)) {
+                Log.e("NitroCamera", "NitraRenderer: eglSwapBuffers failed")
                 val err = EGL14.eglGetError()
                 if (err != EGL14.EGL_SUCCESS) {
                     Log.e("NitroCamera", "NitraRenderer: eglSwapBuffers failed: 0x${Integer.toHexString(err)}")

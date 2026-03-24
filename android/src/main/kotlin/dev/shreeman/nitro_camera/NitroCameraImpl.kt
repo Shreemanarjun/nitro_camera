@@ -8,6 +8,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -120,7 +121,9 @@ class NitroCameraImpl(
         try {
             // Open camera on openHandler; suspendCancellableCoroutine resumes when callback fires
             val camera = suspendCancellableCoroutine { cont ->
-                cont.invokeOnCancellation { textureEntry.release() }
+                cont.invokeOnCancellation { 
+                    Handler(Looper.getMainLooper()).post { textureEntry.release() }
+                }
                 cameraManager.openCamera(
                     deviceId,
                     object : android.hardware.camera2.CameraDevice.StateCallback() {
@@ -157,7 +160,7 @@ class NitroCameraImpl(
             Log.d(TAG, "openCamera($deviceId) → textureId=$textureId")
             return textureId
         } catch (e: Exception) {
-            textureEntry.release()
+            Handler(Looper.getMainLooper()).post { textureEntry.release() }
             throw e
         }
     }
@@ -228,7 +231,7 @@ class NitroCameraImpl(
 
         // Lens type heuristic from focal length
         val focal    = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val lensType = if (focal == null || focal.size == 0) {
+        val lensType = if (focal == null || focal.isEmpty()) {
             0L
         } else {
             val f = focal[0]

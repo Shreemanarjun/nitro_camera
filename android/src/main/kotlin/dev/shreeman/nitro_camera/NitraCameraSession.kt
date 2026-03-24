@@ -41,11 +41,23 @@ class NitraCameraSession(
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
 
-    // Flutter SurfaceTexture — camera writes directly here (GPU, zero-copy)
-    private val surfaceTexture = textureEntry.surfaceTexture().apply {
-        setDefaultBufferSize(width, height)
+    // GPU Filtering Path: Camera -> Renderer -> Flutter
+    private val renderer = NitraRenderer(width, height).apply {
+        setup(Surface(textureEntry.surfaceTexture().apply { setDefaultBufferSize(width, height) }))
     }
-    private val previewSurface = Surface(surfaceTexture)
+
+    // This is the surface we Hand off to the camera
+    private val previewSurface: Surface by lazy {
+        renderer.inputSurface!!
+    }
+
+    private val surfaceTexture = renderer.inputSurfaceTexture!!.apply {
+        setOnFrameAvailableListener({
+            if (!isClosed) {
+                renderer.drawFrame()
+            }
+        }, cameraHandler)
+    }
 
     @Volatile private var isClosed = false
     @Volatile private var captureSession: CameraCaptureSession? = null
@@ -150,6 +162,7 @@ class NitraCameraSession(
         try { surfaceTexture.release() } catch (_: Exception) {}
         try { frameReader.close() } catch (_: Exception) {}
         mediaManager.release()
+        renderer.release()
         
         // Flutter texture unregistration MUST happen on the Main thread
         withContext(Dispatchers.Main) { 
@@ -319,7 +332,9 @@ class NitraCameraSession(
 
     fun setFrameFormat(format: Long) { /* placeholder */ }
     fun setFilterShader(shader: String) {
-        Log.d("NitroCamera", "setFilterShader: ${shader.length} chars (GPU filter path TBD)")
+        cameraHandler.post {
+            renderer.updateShader(shader)
+        }
     }
 
     // ---- Frame delivery ------------------------------------------------------
