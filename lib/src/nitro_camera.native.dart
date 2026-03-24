@@ -158,6 +158,15 @@ abstract class NitroCamera extends HybridObject {
   @nitroAsync
   Future<int> getCameraPermissionStatus();
 
+  /// Requests microphone permission from the OS.
+  /// Returns a [PermissionStatus] value.
+  @nitroAsync
+  Future<int> requestMicrophonePermission();
+
+  /// Returns the current microphone permission status without prompting.
+  @nitroAsync
+  Future<int> getMicrophonePermissionStatus();
+
   // ---- Device enumeration ----
 
   /// Returns the number of physical camera devices.
@@ -263,6 +272,25 @@ abstract class NitroCamera extends HybridObject {
   /// [enabled]: 1 = on, 0 = off.
   @nitroAsync
   Future<void> enableFrameProcessing(int textureId, int enabled);
+
+  /// Sets the pixel format for the [frameStream].
+  /// [format]: 0 = YUV_420_888 (Planar), 1 = BGRA_8888 (Interleaved RGB).
+  @nitroAsync
+  Future<void> setFrameFormat(int textureId, int format);
+
+  /// Updates the GPU-accelerated filter shader on the camera preview.
+  /// Pass a valid GLSL Fragment Shader source. 
+  /// The shader should expect:
+  /// - `uniform samplerExternalOES sTexture`
+  /// - `varying vec2 vTextureCoord`
+  @nitroAsync
+  Future<void> setFilterShader(int textureId, String shaderSource);
+
+  /// Draws a persistent shape or text vector onto the camera overlay.
+  /// Renders directly on the GPU using the custom pipeline.
+  /// [overlayData] is a serialized JSON/Buffer of draw commands.
+  @nitroAsync
+  Future<void> updateOverlay(int textureId, String overlayData);
 
   /// Stream of raw camera frames for custom image processing pipelines.
   /// Only active for sessions where [enableFrameProcessing] was called with 1.

@@ -225,6 +225,8 @@ class _NitroCameraImpl extends NitroCamera {
 
   late final int Function() _requestCameraPermissionPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_request_camera_permission');
   late final int Function() _getCameraPermissionStatusPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_get_camera_permission_status');
+  late final int Function() _requestMicrophonePermissionPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_request_microphone_permission');
+  late final int Function() _getMicrophonePermissionStatusPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_get_microphone_permission_status');
   late final int Function() _getDeviceCountPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_get_device_count');
   late final Pointer<Void> Function(int) _getDevicePtr = _dylib.lookupFunction<Pointer<Void> Function(Int64), Pointer<Void> Function(int)>('nitro_camera_get_device');
   late final int Function(Pointer<Utf8>, int, int, int, int) _openCameraPtr = _dylib.lookupFunction<Int64 Function(Pointer<Utf8>, Int64, Int64, Int64, Int64), int Function(Pointer<Utf8>, int, int, int, int)>('nitro_camera_open_camera');
@@ -243,6 +245,9 @@ class _NitroCameraImpl extends NitroCamera {
   late final void Function(int, Pointer<Utf8>) _startVideoRecordingPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_start_video_recording');
   late final Pointer<Void> Function(int) _stopVideoRecordingPtr = _dylib.lookupFunction<Pointer<Void> Function(Int64), Pointer<Void> Function(int)>('nitro_camera_stop_video_recording');
   late final void Function(int, int) _enableFrameProcessingPtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_enable_frame_processing');
+  late final void Function(int, int) _setFrameFormatPtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_frame_format');
+  late final void Function(int, Pointer<Utf8>) _setFilterShaderPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_set_filter_shader');
+  late final void Function(int, Pointer<Utf8>) _updateOverlayPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_update_overlay');
   late final void Function(int) _registerFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_register_frame_stream_stream');
   late final void Function(int) _releaseFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_release_frame_stream_stream');
   @override
@@ -261,6 +266,18 @@ class _NitroCameraImpl extends NitroCamera {
   Future<int> getCameraPermissionStatus() async {
     checkDisposed();
     return NitroRuntime.callAsync(_getCameraPermissionStatusPtr, []);
+  }
+
+  @override
+  Future<int> requestMicrophonePermission() async {
+    checkDisposed();
+    return NitroRuntime.callAsync(_requestMicrophonePermissionPtr, []);
+  }
+
+  @override
+  Future<int> getMicrophonePermissionStatus() async {
+    checkDisposed();
+    return NitroRuntime.callAsync(_getMicrophonePermissionStatusPtr, []);
   }
 
   @override
@@ -378,6 +395,30 @@ class _NitroCameraImpl extends NitroCamera {
   Future<void> enableFrameProcessing(int textureId, int enabled) async {
     checkDisposed();
     return NitroRuntime.callAsync(_enableFrameProcessingPtr, [textureId, enabled]);
+  }
+
+  @override
+  Future<void> setFrameFormat(int textureId, int format) async {
+    checkDisposed();
+    return NitroRuntime.callAsync(_setFrameFormatPtr, [textureId, format]);
+  }
+
+  @override
+  Future<void> setFilterShader(int textureId, String shaderSource) async {
+    checkDisposed();
+    return withArena((arena) async {
+      final result = await NitroRuntime.callAsync(_setFilterShaderPtr, [textureId, shaderSource.toNativeUtf8(allocator: arena)]);
+      return result;
+    });
+  }
+
+  @override
+  Future<void> updateOverlay(int textureId, String overlayData) async {
+    checkDisposed();
+    return withArena((arena) async {
+      final result = await NitroRuntime.callAsync(_updateOverlayPtr, [textureId, overlayData.toNativeUtf8(allocator: arena)]);
+      return result;
+    });
   }
 
   @override

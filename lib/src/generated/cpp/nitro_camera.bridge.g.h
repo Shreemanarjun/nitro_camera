@@ -88,6 +88,8 @@ extern "C" {
 // Methods
 int64_t nitro_camera_request_camera_permission(void);
 int64_t nitro_camera_get_camera_permission_status(void);
+int64_t nitro_camera_request_microphone_permission(void);
+int64_t nitro_camera_get_microphone_permission_status(void);
 int64_t nitro_camera_get_device_count(void);
 void* nitro_camera_get_device(int64_t index);
 int64_t nitro_camera_open_camera(const char* deviceId, int64_t width, int64_t height, int64_t fps, int64_t enableAudio);
@@ -106,6 +108,9 @@ void* nitro_camera_take_photo(int64_t textureId);
 void nitro_camera_start_video_recording(int64_t textureId, const char* outputPath);
 void* nitro_camera_stop_video_recording(int64_t textureId);
 void nitro_camera_enable_frame_processing(int64_t textureId, int64_t enabled);
+void nitro_camera_set_frame_format(int64_t textureId, int64_t format);
+void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource);
+void nitro_camera_update_overlay(int64_t textureId, const char* overlayData);
 
 // Streams
 // Stream<CameraFrame> frameStream

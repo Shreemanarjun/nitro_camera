@@ -169,6 +169,22 @@ int64_t nitro_camera_get_camera_permission_status(void) {
     return env->CallStaticLongMethod(g_bridgeClass, methodId);
 }
 
+int64_t nitro_camera_request_microphone_permission(void) {
+    JNIEnv* env = GetEnv();
+    if (env == nullptr) return 0;
+    jmethodID methodId = env->GetStaticMethodID(g_bridgeClass, "requestMicrophonePermission_call", "()J");
+    if (methodId == nullptr) { LOGE("Method not found"); return 0; }
+    return env->CallStaticLongMethod(g_bridgeClass, methodId);
+}
+
+int64_t nitro_camera_get_microphone_permission_status(void) {
+    JNIEnv* env = GetEnv();
+    if (env == nullptr) return 0;
+    jmethodID methodId = env->GetStaticMethodID(g_bridgeClass, "getMicrophonePermissionStatus_call", "()J");
+    if (methodId == nullptr) { LOGE("Method not found"); return 0; }
+    return env->CallStaticLongMethod(g_bridgeClass, methodId);
+}
+
 int64_t nitro_camera_get_device_count(void) {
     JNIEnv* env = GetEnv();
     if (env == nullptr) return 0;
@@ -330,6 +346,32 @@ void nitro_camera_enable_frame_processing(int64_t textureId, int64_t enabled) {
     env->CallStaticVoidMethod(g_bridgeClass, methodId, textureId, enabled);
 }
 
+void nitro_camera_set_frame_format(int64_t textureId, int64_t format) {
+    JNIEnv* env = GetEnv();
+    if (env == nullptr) return;
+    jmethodID methodId = env->GetStaticMethodID(g_bridgeClass, "setFrameFormat_call", "(JJ)V");
+    if (methodId == nullptr) { LOGE("Method not found"); return; }
+    env->CallStaticVoidMethod(g_bridgeClass, methodId, textureId, format);
+}
+
+void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource) {
+    JNIEnv* env = GetEnv();
+    if (env == nullptr) return;
+    jmethodID methodId = env->GetStaticMethodID(g_bridgeClass, "setFilterShader_call", "(JLjava/lang/String;)V");
+    if (methodId == nullptr) { LOGE("Method not found"); return; }
+    jstring j_shaderSource = env->NewStringUTF(shaderSource);
+    env->CallStaticVoidMethod(g_bridgeClass, methodId, textureId, j_shaderSource);
+}
+
+void nitro_camera_update_overlay(int64_t textureId, const char* overlayData) {
+    JNIEnv* env = GetEnv();
+    if (env == nullptr) return;
+    jmethodID methodId = env->GetStaticMethodID(g_bridgeClass, "updateOverlay_call", "(JLjava/lang/String;)V");
+    if (methodId == nullptr) { LOGE("Method not found"); return; }
+    jstring j_overlayData = env->NewStringUTF(overlayData);
+    env->CallStaticVoidMethod(g_bridgeClass, methodId, textureId, j_overlayData);
+}
+
 void nitro_camera_register_frame_stream_stream(int64_t dart_port) {
     JNIEnv* env = GetEnv();
     if (env == nullptr) return;
@@ -370,6 +412,16 @@ int64_t nitro_camera_request_camera_permission(void) {
 extern int64_t _call_getCameraPermissionStatus(void);
 int64_t nitro_camera_get_camera_permission_status(void) {
     return _call_getCameraPermissionStatus();
+}
+
+extern int64_t _call_requestMicrophonePermission(void);
+int64_t nitro_camera_request_microphone_permission(void) {
+    return _call_requestMicrophonePermission();
+}
+
+extern int64_t _call_getMicrophonePermissionStatus(void);
+int64_t nitro_camera_get_microphone_permission_status(void) {
+    return _call_getMicrophonePermissionStatus();
 }
 
 extern int64_t _call_getDeviceCount(void);
@@ -460,6 +512,21 @@ void* nitro_camera_stop_video_recording(int64_t textureId) {
 extern void _call_enableFrameProcessing(int64_t textureId, int64_t enabled);
 void nitro_camera_enable_frame_processing(int64_t textureId, int64_t enabled) {
     _call_enableFrameProcessing(textureId, enabled);
+}
+
+extern void _call_setFrameFormat(int64_t textureId, int64_t format);
+void nitro_camera_set_frame_format(int64_t textureId, int64_t format) {
+    _call_setFrameFormat(textureId, format);
+}
+
+extern void _call_setFilterShader(int64_t textureId, const char* shaderSource);
+void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource) {
+    _call_setFilterShader(textureId, shaderSource);
+}
+
+extern void _call_updateOverlay(int64_t textureId, const char* overlayData);
+void nitro_camera_update_overlay(int64_t textureId, const char* overlayData) {
+    _call_updateOverlay(textureId, overlayData);
 }
 
 void _emit_frameStream_to_dart(int64_t dartPort, void* item) {

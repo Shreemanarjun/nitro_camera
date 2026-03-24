@@ -86,6 +86,8 @@ data class RecordingResult(val path: String, val durationMs: Long, val fileSize:
 interface HybridNitroCameraSpec {
     suspend fun requestCameraPermission(): Long
     suspend fun getCameraPermissionStatus(): Long
+    suspend fun requestMicrophonePermission(): Long
+    suspend fun getMicrophonePermissionStatus(): Long
     suspend fun getDeviceCount(): Long
     suspend fun getDevice(index: Long): CameraDevice
     suspend fun openCamera(deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long
@@ -104,6 +106,9 @@ interface HybridNitroCameraSpec {
     suspend fun startVideoRecording(textureId: Long, outputPath: String): Unit
     suspend fun stopVideoRecording(textureId: Long): RecordingResult
     suspend fun enableFrameProcessing(textureId: Long, enabled: Long): Unit
+    suspend fun setFrameFormat(textureId: Long, format: Long): Unit
+    suspend fun setFilterShader(textureId: Long, shaderSource: String): Unit
+    suspend fun updateOverlay(textureId: Long, overlayData: String): Unit
     val frameStream: Flow<CameraFrame>
 }
 
@@ -128,6 +133,18 @@ object NitroCameraJniBridge {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
         return runBlocking {
             impl.getCameraPermissionStatus()
+        }
+    }
+    @JvmStatic fun requestMicrophonePermission_call(): Long {
+        val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
+        return runBlocking {
+            impl.requestMicrophonePermission()
+        }
+    }
+    @JvmStatic fun getMicrophonePermissionStatus_call(): Long {
+        val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
+        return runBlocking {
+            impl.getMicrophonePermissionStatus()
         }
     }
     @JvmStatic fun getDeviceCount_call(): Long {
@@ -236,6 +253,24 @@ object NitroCameraJniBridge {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
         return runBlocking {
             impl.enableFrameProcessing(textureId, enabled)
+        }
+    }
+    @JvmStatic fun setFrameFormat_call(textureId: Long, format: Long): Unit {
+        val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
+        return runBlocking {
+            impl.setFrameFormat(textureId, format)
+        }
+    }
+    @JvmStatic fun setFilterShader_call(textureId: Long, shaderSource: String): Unit {
+        val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
+        return runBlocking {
+            impl.setFilterShader(textureId, shaderSource)
+        }
+    }
+    @JvmStatic fun updateOverlay_call(textureId: Long, overlayData: String): Unit {
+        val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
+        return runBlocking {
+            impl.updateOverlay(textureId, overlayData)
         }
     }
     private val _streamJobs = mutableMapOf<Long, kotlinx.coroutines.Job>()

@@ -81,6 +81,8 @@ public struct RecordingResult {
 public protocol HybridNitroCameraProtocol: AnyObject {
     func requestCameraPermission() async throws -> Int64
     func getCameraPermissionStatus() async throws -> Int64
+    func requestMicrophonePermission() async throws -> Int64
+    func getMicrophonePermissionStatus() async throws -> Int64
     func getDeviceCount() async throws -> Int64
     func getDevice(index: Int64) async throws -> CameraDevice
     func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64
@@ -99,6 +101,9 @@ public protocol HybridNitroCameraProtocol: AnyObject {
     func startVideoRecording(textureId: Int64, outputPath: String) async throws -> Void
     func stopVideoRecording(textureId: Int64) async throws -> RecordingResult
     func enableFrameProcessing(textureId: Int64, enabled: Int64) async throws -> Void
+    func setFrameFormat(textureId: Int64, format: Int64) async throws -> Void
+    func setFilterShader(textureId: Int64, shaderSource: String) async throws -> Void
+    func updateOverlay(textureId: Int64, overlayData: String) async throws -> Void
     var frameStream: AnyPublisher<CameraFrame, Never> { get }
 }
 
@@ -135,6 +140,32 @@ public func _call_getCameraPermissionStatus() -> Int64 {
     var result: Int64? = nil
     Task.detached {
         result = try? await impl.getCameraPermissionStatus()
+        sema.signal()
+    }
+    sema.wait()
+    return result ?? 0
+}
+
+@_cdecl("_call_requestMicrophonePermission")
+public func _call_requestMicrophonePermission() -> Int64 {
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
+    let sema = DispatchSemaphore(value: 0)
+    var result: Int64? = nil
+    Task.detached {
+        result = try? await impl.requestMicrophonePermission()
+        sema.signal()
+    }
+    sema.wait()
+    return result ?? 0
+}
+
+@_cdecl("_call_getMicrophonePermissionStatus")
+public func _call_getMicrophonePermissionStatus() -> Int64 {
+    guard let impl = NitroCameraRegistry.impl else { return 0 }
+    let sema = DispatchSemaphore(value: 0)
+    var result: Int64? = nil
+    Task.detached {
+        result = try? await impl.getMicrophonePermissionStatus()
         sema.signal()
     }
     sema.wait()
@@ -360,6 +391,41 @@ public func _call_enableFrameProcessing(_ textureId: Int64, _ enabled: Int64) ->
     sema.wait()
 }
 
+@_cdecl("_call_setFrameFormat")
+public func _call_setFrameFormat(_ textureId: Int64, _ format: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setFrameFormat(textureId: textureId, format: format)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setFilterShader")
+public func _call_setFilterShader(_ textureId: Int64, _ shaderSource: UnsafePointer<CChar>?) -> Void {
+    let shaderSourceStr = shaderSource.map { String(cString: $0) } ?? ""
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setFilterShader(textureId: textureId, shaderSource: shaderSourceStr)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_updateOverlay")
+public func _call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafePointer<CChar>?) -> Void {
+    let overlayDataStr = overlayData.map { String(cString: $0) } ?? ""
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.updateOverlay(textureId: textureId, overlayData: overlayDataStr)
+        sema.signal()
+    }
+    sema.wait()
+}
+
 @_cdecl("_register_frameStream_stream")
 public func _register_frameStream_stream(
     _ dartPort: Int64,
@@ -367,10 +433,7 @@ public func _register_frameStream_stream(
 ) {
     NitroCameraRegistry._frameStreamCancellables[dartPort] =
         NitroCameraRegistry.impl?.frameStream.sink { item in
-            // Heap-allocate the struct so Dart can read it via the pointer.
-            let ptr = UnsafeMutablePointer<CameraFrame>.allocate(capacity: 1)
-            ptr.initialize(to: item)
-            emitCb(dartPort, UnsafeMutableRawPointer(ptr))
+            emitCb(dartPort, item)
         }
 }
 
