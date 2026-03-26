@@ -81,6 +81,12 @@ class NitraCameraSession(
 
     // CPU frame path
     var frameProcessingEnabled = false
+        set(value) {
+            if (field != value) {
+                field = value
+                captureSession?.let { sendPreviewRequest(it) }
+            }
+        }
     var onFrame: ((CameraFrame) -> Unit)? = null
     private var pixelFormat: Long = 1 // 1: RGBA (rendered by Flutter typically), 0: YUV
     private var samplingRate: Long = 1
@@ -120,8 +126,7 @@ class NitraCameraSession(
 
     fun startPreview() {
         if (isClosed) return
-        val surfaces = mutableListOf(previewSurface, mediaManager.photoReader.surface)
-        if (frameProcessingEnabled) surfaces.add(frameReader.surface)
+        val surfaces = mutableListOf(previewSurface, mediaManager.photoReader.surface, frameReader.surface)
 
         try {
             cameraDevice.createCaptureSession(
@@ -174,8 +179,11 @@ class NitraCameraSession(
         }, glHandler)
 
         try {
-            val builder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_PREVIEW)
+            val builder = cameraDevice.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
             builder.addTarget(previewSurface)
+            if (frameProcessingEnabled) {
+                builder.addTarget(frameReader.surface)
+            }
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             bestFpsRange()?.let { range ->

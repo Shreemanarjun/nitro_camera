@@ -28,7 +28,9 @@ class _FrameOverlayState extends State<FrameOverlay> {
   @override
   void initState() {
     super.initState();
+    debugPrint("FrameOverlay initialized. isProcessing: ${widget.isProcessing}");
     _sub = NitroCamera.instance.frameStream.listen((frame) {
+      debugPrint("Frame received in Dart! textureId=${frame.textureId}");
       if (!mounted || !widget.isProcessing) return;
       _updateFps();
       _analyzeAndProcess(frame);
@@ -53,6 +55,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
 
     try {
       if (shouldForce) {
+        debugPrint("MANUAL ANALYSIS TRIGGERED: Waiting for next frame...");
         setState(() => _isManualScanning = true);
       }
       final result = await compute(_analyzeInBackground, {
@@ -60,6 +63,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
         'force': shouldForce,
       });
       if (shouldForce && mounted) {
+        debugPrint("MANUAL ANALYSIS FINISHED. Result: $result");
         setState(() => _isManualScanning = false);
       }
       if (result != null && mounted) {
@@ -85,7 +89,8 @@ class _FrameOverlayState extends State<FrameOverlay> {
     try {
       final frame = input['frame'] as CameraFrame;
       final force = input['force'] as bool;
-      
+      if (force) debugPrint("Applying high-precision scanner hints...");
+
       // 1. Create LuminanceSource
       final ls = _NitroLuminanceSource(frame.pixels, frame.width, frame.height);
 

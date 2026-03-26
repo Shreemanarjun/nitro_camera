@@ -237,7 +237,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         // Implementation stub
     }
 
-    public func updateOverlay(textureId: Int64, overlayData: String) async throws {
+    public func updateOverlay(textureId: Int64, overlayData: [UInt8]) async throws {
         // Implementation stub
     }
 

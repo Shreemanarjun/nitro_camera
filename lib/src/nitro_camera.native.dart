@@ -311,9 +311,9 @@ abstract class NitroCamera extends HybridObject {
 
   /// Draws a persistent shape or text vector onto the camera overlay.
   /// Renders directly on the GPU using the custom pipeline.
-  /// [overlayData] is a serialized JSON/Buffer of draw commands.
+  /// [overlayData] is a serialized binary Buffer of draw commands.
   @nitroAsync
-  Future<void> updateOverlay(int textureId, String overlayData);
+  Future<void> updateOverlay(int textureId, @zeroCopy Uint8List overlayData);
 
   /// Stream of raw camera frames for custom image processing pipelines.
   /// Only active for sessions where [enableFrameProcessing] was called with 1.

@@ -196,7 +196,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         g_mid_setFrameFormat_call = env->GetStaticMethodID(g_bridgeClass, "setFrameFormat_call", "(JJ)V");
         g_mid_setSamplingRate_call = env->GetStaticMethodID(g_bridgeClass, "setSamplingRate_call", "(JJ)V");
         g_mid_setFilterShader_call = env->GetStaticMethodID(g_bridgeClass, "setFilterShader_call", "(JLjava/lang/String;)V");
-        g_mid_updateOverlay_call = env->GetStaticMethodID(g_bridgeClass, "updateOverlay_call", "(JLjava/lang/String;)V");
+        g_mid_updateOverlay_call = env->GetStaticMethodID(g_bridgeClass, "updateOverlay_call", "(JLjava/nio/ByteBuffer;)V");
         g_mid_nitro_camera_register_frame_stream_stream_call = env->GetStaticMethodID(g_bridgeClass, "nitro_camera_register_frame_stream_stream_call", "(J)V");
         g_mid_nitro_camera_release_frame_stream_stream_call = env->GetStaticMethodID(g_bridgeClass, "nitro_camera_release_frame_stream_stream_call", "(J)V");
     }
@@ -584,14 +584,14 @@ void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource)
     if (env->ExceptionCheck()) { nitro_report_jni_exception(env, env->ExceptionOccurred()); }
 }
 
-void nitro_camera_update_overlay(int64_t textureId, const char* overlayData) {
+void nitro_camera_update_overlay(int64_t textureId, uint8_t* overlayData, int64_t overlayData_length) {
     JNIEnv* env = GetEnv();
     if (env == nullptr) return;
     jmethodID methodId = g_mid_updateOverlay_call;
     if (methodId == nullptr) { LOGE("Method not found"); return; }
 
     nitro_camera_clear_error();
-    jstring j_overlayData = env->NewStringUTF(overlayData);
+    jobject j_overlayData = env->NewDirectByteBuffer(overlayData, overlayData_length);
     env->CallStaticVoidMethod(g_bridgeClass, methodId, textureId, j_overlayData);
     if (env->ExceptionCheck()) { nitro_report_jni_exception(env, env->ExceptionOccurred()); }
 }
@@ -1044,17 +1044,17 @@ void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource)
 #endif
 }
 
-extern void _call_updateOverlay(int64_t textureId, const char* overlayData);
-void nitro_camera_update_overlay(int64_t textureId, const char* overlayData) {
+extern void _call_updateOverlay(int64_t textureId, uint8_t* overlayData, int64_t overlayData_length);
+void nitro_camera_update_overlay(int64_t textureId, uint8_t* overlayData, int64_t overlayData_length) {
     nitro_camera_clear_error();
 #ifdef __OBJC__
     @try {
-        _call_updateOverlay(textureId, overlayData);
+        _call_updateOverlay(textureId, overlayData, overlayData_length);
     } @catch (NSException* e) {
         nitro_report_error([e.name UTF8String], [e.reason UTF8String], nullptr, nullptr);
     }
 #else
-    _call_updateOverlay(textureId, overlayData);
+    _call_updateOverlay(textureId, overlayData, overlayData_length);
 #endif
 }
 

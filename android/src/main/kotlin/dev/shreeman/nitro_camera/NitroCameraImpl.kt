@@ -139,18 +139,18 @@ class NitroCameraImpl(
         val availableIds = cameraManager.cameraIdList.toList()
         if (!availableIds.contains(deviceId)) {
             Log.e(TAG, "Unknown camera device $deviceId. Available: ${availableIds.joinToString()}.")
-            withContext(Dispatchers.Main) { 
+            withContext(Dispatchers.Main) {
                 try { textureEntry.release() } catch (_: Exception) {}
             }
             return 0L // Graceful failure instead of crash
         }
-        
+
         // Ensure we can get characteristics without throwing
         try {
             cameraManager.getCameraCharacteristics(deviceId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get characteristics for $deviceId: ${e.message}")
-            withContext(Dispatchers.Main) { 
+            withContext(Dispatchers.Main) {
                 try { textureEntry.release() } catch (_: Exception) {}
             }
             return 0L
@@ -159,19 +159,19 @@ class NitroCameraImpl(
         try {
             // Open camera on openHandler; suspendCancellableCoroutine resumes when callback fires
             val camera = suspendCancellableCoroutine { cont ->
-                cont.invokeOnCancellation { 
-                    Handler(Looper.getMainLooper()).post { 
+                cont.invokeOnCancellation {
+                    Handler(Looper.getMainLooper()).post {
                         try { textureEntry.release() } catch (_: Exception) {}
                     }
                 }
-                
+
                 try {
                     cameraManager.openCamera(
                         deviceId,
                         object : android.hardware.camera2.CameraDevice.StateCallback() {
                             override fun onOpened(cam: android.hardware.camera2.CameraDevice) {
                                 if (cont.isActive) {
-                                    // Use the onCancellation lambda to ensure cam is closed 
+                                    // Use the onCancellation lambda to ensure cam is closed
                                     // if the coroutine is cancelled after resumption
                                     cont.resume(cam) { cam.close() }
                                 } else {
@@ -218,7 +218,7 @@ class NitroCameraImpl(
             return textureId
         } catch (e: Exception) {
             Log.e(TAG, "General openCamera failure: ${e.message}")
-            withContext(Dispatchers.Main) { 
+            withContext(Dispatchers.Main) {
                 try { textureEntry.release() } catch (_: Exception) {}
             }
             return 0L // Graceful failure - never throw to Nitrogen bridge
@@ -271,7 +271,7 @@ class NitroCameraImpl(
     override suspend fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
     override suspend fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
     override suspend fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
-    override suspend fun updateOverlay(textureId: Long, overlayData: String)      { /* reserved */ }
+    override suspend fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer)      { /* reserved */ }
 
     // ---- Helpers ------------------------------------------------------------
 

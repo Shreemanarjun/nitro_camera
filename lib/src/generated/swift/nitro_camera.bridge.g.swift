@@ -326,7 +326,7 @@ public protocol HybridNitroCameraProtocol: AnyObject {
     func setFrameFormat(textureId: Int64, format: Int64) async throws -> Void
     func setSamplingRate(textureId: Int64, samplingRate: Int64) async throws -> Void
     func setFilterShader(textureId: Int64, shaderSource: String) async throws -> Void
-    func updateOverlay(textureId: Int64, overlayData: String) async throws -> Void
+    func updateOverlay(textureId: Int64, overlayData: Data) async throws -> Void
     var frameStream: AnyPublisher<CameraFrame, Never> { get }
 }
 
@@ -686,12 +686,12 @@ public func _call_setFilterShader(_ textureId: Int64, _ shaderSource: UnsafePoin
 }
 
 @_cdecl("_call_updateOverlay")
-public func _call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafePointer<CChar>?) -> Void {
-    let overlayDataStr = overlayData.map { String(cString: $0) } ?? ""
+public func _call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafeMutablePointer<UInt8>?, _ overlayData_length: Int64) -> Void {
+    let overlayDataArr = overlayData.map { Array(UnsafeBufferPointer(start: $0, count: Int(overlayData_length))) } ?? []
     guard let impl = NitroCameraRegistry.impl else { return }
     let sema = DispatchSemaphore(value: 0)
     Task.detached {
-        try? await impl.updateOverlay(textureId: textureId, overlayData: overlayDataStr)
+        try? await impl.updateOverlay(textureId: textureId, overlayData: overlayDataArr)
         sema.signal()
     }
     sema.wait()

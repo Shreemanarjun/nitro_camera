@@ -91,7 +91,7 @@ void nitro_camera_enable_frame_processing(int64_t textureId, int64_t enabled);
 void nitro_camera_set_frame_format(int64_t textureId, int64_t format);
 void nitro_camera_set_sampling_rate(int64_t textureId, int64_t samplingRate);
 void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource);
-void nitro_camera_update_overlay(int64_t textureId, const char* overlayData);
+void nitro_camera_update_overlay(int64_t textureId, uint8_t* overlayData, int64_t overlayData_length);
 
 // Streams
 // Stream<CameraFrame> frameStream

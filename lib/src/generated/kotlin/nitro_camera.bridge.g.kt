@@ -241,7 +241,7 @@ interface HybridNitroCameraSpec {
     suspend fun setFrameFormat(textureId: Long, format: Long): Unit
     suspend fun setSamplingRate(textureId: Long, samplingRate: Long): Unit
     suspend fun setFilterShader(textureId: Long, shaderSource: String): Unit
-    suspend fun updateOverlay(textureId: Long, overlayData: String): Unit
+    suspend fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer): Unit
     val frameStream: Flow<CameraFrame>
 }
 
@@ -428,7 +428,7 @@ object NitroCameraJniBridge {
             runBlocking { impl.setFilterShader(textureId, shaderSource) }
         }).get()
     }
-    @JvmStatic fun updateOverlay_call(textureId: Long, overlayData: String): Unit {
+    @JvmStatic fun updateOverlay_call(textureId: Long, overlayData: java.nio.ByteBuffer): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.updateOverlay(textureId, overlayData) }

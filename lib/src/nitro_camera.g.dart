@@ -221,7 +221,7 @@ class _NitroCameraImpl extends NitroCamera {
   late final void Function(int, int) _setFrameFormatPtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_frame_format');
   late final void Function(int, int) _setSamplingRatePtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_sampling_rate');
   late final void Function(int, Pointer<Utf8>) _setFilterShaderPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_set_filter_shader');
-  late final void Function(int, Pointer<Utf8>) _updateOverlayPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_update_overlay');
+  late final void Function(int, Pointer<Uint8>, int) _updateOverlayPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Uint8>, Int64), void Function(int, Pointer<Uint8>, int)>('nitro_camera_update_overlay');
   late final void Function(int) _registerFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_register_frame_stream_stream');
   late final void Function(int) _releaseFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_release_frame_stream_stream');
   @override
@@ -484,11 +484,11 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<void> updateOverlay(int textureId, String overlayData) async {
+  Future<void> updateOverlay(int textureId, Uint8List overlayData) async {
     checkDisposed();
     final arena = Arena();
     try {
-      final res = await NitroRuntime.callAsync<void>(_updateOverlayPtr, [textureId, overlayData.toNativeUtf8(allocator: arena)]);
+      final res = await NitroRuntime.callAsync<void>(_updateOverlayPtr, [textureId, overlayData.toPointer(arena), overlayData.length]);
       NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
       return res;
     } finally {
