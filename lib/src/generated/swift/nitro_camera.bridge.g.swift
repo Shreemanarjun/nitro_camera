@@ -62,8 +62,10 @@ public struct CameraDevice {
   public var hasTorch: Int64
   public var maxPhotoWidth: Int64
   public var maxPhotoHeight: Int64
+  public var focalLength: Double
+  public var aperture: Double
 
-  public init(id: String, name: String, position: Int64, lensType: Int64, sensorOrientation: Int64, minZoom: Double, maxZoom: Double, neutralZoom: Double, hasFlash: Int64, hasTorch: Int64, maxPhotoWidth: Int64, maxPhotoHeight: Int64) {
+  public init(id: String, name: String, position: Int64, lensType: Int64, sensorOrientation: Int64, minZoom: Double, maxZoom: Double, neutralZoom: Double, hasFlash: Int64, hasTorch: Int64, maxPhotoWidth: Int64, maxPhotoHeight: Int64, focalLength: Double, aperture: Double) {
     self.id = id
     self.name = name
     self.position = position
@@ -76,6 +78,8 @@ public struct CameraDevice {
     self.hasTorch = hasTorch
     self.maxPhotoWidth = maxPhotoWidth
     self.maxPhotoHeight = maxPhotoHeight
+    self.focalLength = focalLength
+    self.aperture = aperture
   }
 
   public static func fromNative(_ ptr: UnsafeMutablePointer<UInt8>) -> CameraDevice {
@@ -96,6 +100,8 @@ public struct CameraDevice {
       hasTorch: r.readInt(),
       maxPhotoWidth: r.readInt(),
       maxPhotoHeight: r.readInt(),
+      focalLength: r.readDouble(),
+      aperture: r.readDouble(),
     )
   }
 
@@ -112,6 +118,8 @@ public struct CameraDevice {
     w.writeInt(hasTorch)
     w.writeInt(maxPhotoWidth)
     w.writeInt(maxPhotoHeight)
+    w.writeDouble(focalLength)
+    w.writeDouble(aperture)
   }
 
   public func toNative() -> UnsafeMutablePointer<UInt8>? {
@@ -302,6 +310,7 @@ public protocol HybridNitroCameraProtocol: AnyObject {
     func requestMicrophonePermission() async throws -> Int64
     func getMicrophonePermissionStatus() async throws -> Int64
     func getAvailableCameraDevicesJson() async throws -> String
+    func getAvailableCameraDevices() async throws -> [CameraDevice]
     func getDeviceCount() async throws -> Int64
     func getDevice(index: Int64) async throws -> CameraDevice
     func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64
@@ -327,6 +336,7 @@ public protocol HybridNitroCameraProtocol: AnyObject {
     func setSamplingRate(textureId: Int64, samplingRate: Int64) async throws -> Void
     func setFilterShader(textureId: Int64, shaderSource: String) async throws -> Void
     func updateOverlay(textureId: Int64, overlayData: Data) async throws -> Void
+    func reset() async throws -> Void
     var frameStream: AnyPublisher<CameraFrame, Never> { get }
 }
 
@@ -406,6 +416,20 @@ public func _call_getAvailableCameraDevicesJson() -> UnsafeMutablePointer<CChar>
     }
     sema.wait()
     return strdup(result)
+}
+
+@_cdecl("_call_getAvailableCameraDevices")
+public func _call_getAvailableCameraDevices() -> UnsafeMutablePointer<UInt8>? {
+    guard let impl = NitroCameraRegistry.impl else { return nil }
+    let sema = DispatchSemaphore(value: 0)
+    var result: [CameraDevice]? = nil
+    Task.detached {
+        result = try? await impl.getAvailableCameraDevices()
+        sema.signal()
+    }
+    sema.wait()
+    guard let r = result else { return nil }
+    return NitroRecordWriter.encodeList(r) { w, e in e.writeFields(w) }
 }
 
 @_cdecl("_call_getDeviceCount")
@@ -692,6 +716,17 @@ public func _call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafeMutable
     let sema = DispatchSemaphore(value: 0)
     Task.detached {
         try? await impl.updateOverlay(textureId: textureId, overlayData: overlayDataArr)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_reset")
+public func _call_reset() -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.reset()
         sema.signal()
     }
     sema.wait()

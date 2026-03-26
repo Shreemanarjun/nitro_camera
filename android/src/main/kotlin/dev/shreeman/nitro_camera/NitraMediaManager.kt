@@ -5,6 +5,8 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureFailure
+import android.hardware.camera2.TotalCaptureResult
 import android.media.ImageReader
 import android.media.MediaRecorder
 import android.os.Build
@@ -49,13 +51,12 @@ class NitraMediaManager(
     var isRecording = false
         private set
 
-    suspend fun takePhoto(captureSession: CameraCaptureSession?): PhotoResult = suspendCancellableCoroutine { cont ->
-        val session = captureSession ?: run {
-            cont.resumeWith(Result.failure(Exception("No active session for photo capture")))
-            return@suspendCancellableCoroutine
-        }
-
-        Log.d("NitroCamera", "NitraMediaManager: Preparing photo capture...")
+    suspend fun takePhotoWithRequest(
+        session: CameraCaptureSession,
+        request: CaptureRequest,
+        onComplete: (() -> Unit)? = null
+    ): PhotoResult = suspendCancellableCoroutine { cont ->
+        Log.d("NitroCamera", "NitraMediaManager: capturing photo with request...")
         photoReader.setOnImageAvailableListener({ reader ->
             val image = reader.acquireNextImage() ?: run {
                 if (cont.isActive) cont.resumeWith(Result.failure(Exception("No image acquired")))
@@ -87,12 +88,14 @@ class NitraMediaManager(
         }, cameraHandler)
 
         try {
-            val captureBuilder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_STILL_CAPTURE)
-            captureBuilder.addTarget(photoReader.surface)
-            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0)
-            session.capture(captureBuilder.build(), null, cameraHandler)
+            session.capture(request, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    onComplete?.invoke()
+                }
+                override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
+                    onComplete?.invoke()
+                }
+            }, cameraHandler)
         } catch (e: Exception) {
             if (cont.isActive) cont.resumeWith(Result.failure(e))
         }
@@ -109,7 +112,7 @@ class NitraMediaManager(
             @Suppress("DEPRECATION")
             MediaRecorder()
         }
-        
+
         if (enableAudio) recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -160,7 +163,7 @@ class NitraMediaManager(
         val duration = System.currentTimeMillis() - recordingStartMs
         val file = File(path)
         val size = if (file.exists()) file.length() else 0L
-        
+
         return RecordingResult(path, duration, size)
     }
 

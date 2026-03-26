@@ -110,6 +110,8 @@ extension CameraDeviceRecordExt on CameraDevice {
         hasTorch: r.readInt(),
         maxPhotoWidth: r.readInt(),
         maxPhotoHeight: r.readInt(),
+        focalLength: r.readDouble(),
+        aperture: r.readDouble(),
       );
 
   void writeFields(RecordWriter w) {
@@ -125,6 +127,8 @@ extension CameraDeviceRecordExt on CameraDevice {
     w.writeInt(hasTorch);
     w.writeInt(maxPhotoWidth);
     w.writeInt(maxPhotoHeight);
+    w.writeDouble(focalLength);
+    w.writeDouble(aperture);
   }
 
   Pointer<Uint8> toNative(Allocator alloc) {
@@ -197,6 +201,7 @@ class _NitroCameraImpl extends NitroCamera {
   late final int Function() _requestMicrophonePermissionPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_request_microphone_permission');
   late final int Function() _getMicrophonePermissionStatusPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_get_microphone_permission_status');
   late final Pointer<Utf8> Function() _getAvailableCameraDevicesJsonPtr = _dylib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('nitro_camera_get_available_camera_devices_json');
+  late final Pointer<Uint8> Function() _getAvailableCameraDevicesPtr = _dylib.lookupFunction<Pointer<Uint8> Function(), Pointer<Uint8> Function()>('nitro_camera_get_available_camera_devices');
   late final int Function() _getDeviceCountPtr = _dylib.lookupFunction<Int64 Function(), int Function()>('nitro_camera_get_device_count');
   late final Pointer<Uint8> Function(int) _getDevicePtr = _dylib.lookupFunction<Pointer<Uint8> Function(Int64), Pointer<Uint8> Function(int)>('nitro_camera_get_device');
   late final int Function(Pointer<Utf8>, int, int, int, int) _openCameraPtr = _dylib.lookupFunction<Int64 Function(Pointer<Utf8>, Int64, Int64, Int64, Int64), int Function(Pointer<Utf8>, int, int, int, int)>('nitro_camera_open_camera');
@@ -222,6 +227,7 @@ class _NitroCameraImpl extends NitroCamera {
   late final void Function(int, int) _setSamplingRatePtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_sampling_rate');
   late final void Function(int, Pointer<Utf8>) _setFilterShaderPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_set_filter_shader');
   late final void Function(int, Pointer<Uint8>, int) _updateOverlayPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Uint8>, Int64), void Function(int, Pointer<Uint8>, int)>('nitro_camera_update_overlay');
+  late final void Function() _resetPtr = _dylib.lookupFunction<Void Function(), void Function()>('nitro_camera_reset');
   late final void Function(int) _registerFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_register_frame_stream_stream');
   late final void Function(int) _releaseFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_release_frame_stream_stream');
   @override
@@ -268,6 +274,16 @@ class _NitroCameraImpl extends NitroCamera {
     final res = await NitroRuntime.callAsync<Pointer<Utf8>>(_getAvailableCameraDevicesJsonPtr, []);
     NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
     return res.toDartStringWithFree();
+  }
+
+  @override
+  Future<List<CameraDevice>> getAvailableCameraDevices() async {
+    checkDisposed();
+    final rawPtr = await NitroRuntime.callAsync<Pointer<Uint8>>(_getAvailableCameraDevicesPtr, []);
+    NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
+    final decoded = RecordReader.decodeList(rawPtr, (r) => CameraDeviceRecordExt.fromReader(r));
+    malloc.free(rawPtr);
+    return decoded;
   }
 
   @override
@@ -494,6 +510,14 @@ class _NitroCameraImpl extends NitroCamera {
     } finally {
       arena.releaseAll();
     }
+  }
+
+  @override
+  Future<void> reset() async {
+    checkDisposed();
+    final res = await NitroRuntime.callAsync<void>(_resetPtr, []);
+    NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
+    return res;
   }
 
   @override

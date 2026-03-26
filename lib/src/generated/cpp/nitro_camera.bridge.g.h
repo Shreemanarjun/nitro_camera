@@ -67,6 +67,7 @@ int64_t nitro_camera_get_camera_permission_status(void);
 int64_t nitro_camera_request_microphone_permission(void);
 int64_t nitro_camera_get_microphone_permission_status(void);
 const char* nitro_camera_get_available_camera_devices_json(void);
+void* nitro_camera_get_available_camera_devices(void);
 int64_t nitro_camera_get_device_count(void);
 void* nitro_camera_get_device(int64_t index);
 int64_t nitro_camera_open_camera(const char* deviceId, int64_t width, int64_t height, int64_t fps, int64_t enableAudio);
@@ -92,6 +93,7 @@ void nitro_camera_set_frame_format(int64_t textureId, int64_t format);
 void nitro_camera_set_sampling_rate(int64_t textureId, int64_t samplingRate);
 void nitro_camera_set_filter_shader(int64_t textureId, const char* shaderSource);
 void nitro_camera_update_overlay(int64_t textureId, uint8_t* overlayData, int64_t overlayData_length);
+void nitro_camera_reset(void);
 
 // Streams
 // Stream<CameraFrame> frameStream

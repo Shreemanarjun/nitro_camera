@@ -1,0 +1,7 @@
+targets:
+  $default:
+    builders:
+      nitro_generator:
+        enabled: true
+        generate_for:
+          - lib/src/*.native.dart

@@ -65,6 +65,8 @@ class CameraDevice {
   final int hasTorch;          // bool as int64 (0 / 1)
   final int maxPhotoWidth;
   final int maxPhotoHeight;
+  final double focalLength;
+  final double aperture;
 
   const CameraDevice({
     required this.id,
@@ -79,6 +81,8 @@ class CameraDevice {
     this.hasTorch = 0,
     required this.maxPhotoWidth,
     required this.maxPhotoHeight,
+    this.focalLength = 3.5,
+    this.aperture = 1.8,
   });
 }
 
@@ -170,12 +174,13 @@ abstract class NitroCamera extends HybridObject {
   // ---- Device enumeration ----
 
   /// Returns a JSON-encoded array of all available camera devices, including
-  /// their supported formats. Parse with [CameraDeviceInfo.listFromJson].
-  ///
-  /// Prefer using the high-level [CameraController.getAvailableCameraDevices]
-  /// which parses and returns typed [CameraDeviceInfo] objects.
+  /// their supported formats.
   @nitroAsync
   Future<String> getAvailableCameraDevicesJson();
+
+  /// Returns a list of all available camera devices.
+  @nitroAsync
+  Future<List<CameraDevice>> getAvailableCameraDevices();
 
   // Legacy low-level device accessors (kept for ABI compatibility).
   @nitroAsync
@@ -302,7 +307,7 @@ abstract class NitroCamera extends HybridObject {
   Future<void> setSamplingRate(int textureId, int samplingRate);
 
   /// Updates the GPU-accelerated filter shader on the camera preview.
-  /// Pass a valid GLSL Fragment Shader source. 
+  /// Pass a valid GLSL Fragment Shader source.
   /// The shader should expect:
   /// - `uniform samplerExternalOES sTexture`
   /// - `varying vec2 vTextureCoord`
@@ -314,6 +319,12 @@ abstract class NitroCamera extends HybridObject {
   /// [overlayData] is a serialized binary Buffer of draw commands.
   @nitroAsync
   Future<void> updateOverlay(int textureId, @zeroCopy Uint8List overlayData);
+
+  /// Resets the native camera metadata caches and releases overall hardware locks.
+  /// Call this to recover from serious [CAMERA_ERROR] or when hardware
+  /// configuration changes (e.g. plugging in a USB camera).
+  @nitroAsync
+  Future<void> reset();
 
   /// Stream of raw camera frames for custom image processing pipelines.
   /// Only active for sessions where [enableFrameProcessing] was called with 1.

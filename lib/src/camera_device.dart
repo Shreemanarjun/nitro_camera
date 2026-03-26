@@ -50,6 +50,9 @@ class CameraDeviceInfo {
   /// Identifiers of the underlying physical cameras (e.g. "wide-angle-camera").
   final List<String> physicalDevices;
 
+  final double focalLength;
+  final double aperture;
+  
   /// Available capture formats, sorted by descending resolution.
   final List<CameraDeviceFormat> formats;
 
@@ -76,6 +79,8 @@ class CameraDeviceInfo {
     this.hardwareLevel = 'full',
     this.physicalDevices = const [],
     this.formats = const [],
+    this.focalLength = 3.5,
+    this.aperture = 1.8,
   });
 
   factory CameraDeviceInfo.fromJson(Map<String, dynamic> json) {
@@ -107,6 +112,8 @@ class CameraDeviceInfo {
       hardwareLevel:       json['hardwareLevel'] as String? ?? 'full',
       physicalDevices:     physical,
       formats:             fmts,
+      focalLength:         (json['focalLength'] as num? ?? 3.5).toDouble(),
+      aperture:            (json['aperture'] as num? ?? 1.8).toDouble(),
     );
   }
 

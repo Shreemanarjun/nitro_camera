@@ -1,67 +1,106 @@
 import 'package:flutter/material.dart';
+import 'package:signals/signals_flutter.dart';
+import '../camera_state.dart';
 
 class FilterSelector extends StatelessWidget {
-  final Map<String, String> filters;
-  final String currentFilterName;
-  final Function(String) onFilterSelected;
+  final Map<String, String>? filters;
+  final String? currentFilterName;
+  final Function(String)? onFilterSelected;
 
   const FilterSelector({
     super.key,
-    required this.filters,
-    required this.currentFilterName,
-    required this.onFilterSelected,
+    this.filters,
+    this.currentFilterName,
+    this.onFilterSelected,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 100,
-      margin: const EdgeInsets.only(bottom: 20),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: filters.length,
-        itemBuilder: (context, index) {
-          final entry = filters.entries.elementAt(index);
-          final isSelected = entry.key == currentFilterName;
-          return GestureDetector(
-            onTap: () => onFilterSelected(entry.key),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              width: 80,
-              margin: const EdgeInsets.only(right: 15),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.cyanAccent : Colors.white.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isSelected ? Colors.cyanAccent : Colors.white10),
-                boxShadow: isSelected ? [
-                  BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.3), blurRadius: 15, spreadRadius: -5)
-                ] : null,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    isSelected ? Icons.auto_awesome : Icons.palette_outlined,
-                    color: isSelected ? Colors.black : Colors.white70,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    entry.key,
-                    style: TextStyle(
-                      color: isSelected ? Colors.black : Colors.white70,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 10,
-                      letterSpacing: 1,
+    return Watch((context) {
+      final activeFilters = filters ?? CameraState.filters;
+      final activeCurrentName = currentFilterName ?? CameraState.currentFilterName.value;
+      final filterNames = activeFilters.keys.toList();
+
+      return Container(
+        height: 80,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          itemCount: filterNames.length,
+          itemBuilder: (context, index) {
+            final name = filterNames[index];
+            final isSelected = name == activeCurrentName;
+
+            return GestureDetector(
+              onTap: () {
+                if (onFilterSelected != null) {
+                  onFilterSelected!(name);
+                } else {
+                  CameraState.currentFilterName.value = name;
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? Colors.cyanAccent : Colors.white24,
+                          width: isSelected ? 2 : 1,
+                        ),
+                        gradient: _getFilterGradient(name),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: Colors.cyanAccent.withValues(alpha: 0.3),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                )
+                              ]
+                            : null,
+                      ),
+                      child: isSelected
+                          ? const Icon(Icons.check, color: Colors.cyanAccent, size: 16)
+                          : null,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 6),
+                    Text(
+                      name,
+                      style: TextStyle(
+                        color: isSelected ? Colors.cyanAccent : Colors.white60,
+                        fontSize: 8,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
-      ),
-    );
+            );
+          },
+        ),
+      );
+    });
+  }
+
+  LinearGradient _getFilterGradient(String name) {
+    switch (name) {
+      case 'INVERT':
+        return const LinearGradient(colors: [Colors.black, Colors.white]);
+      case 'GRAYSCALE':
+        return const LinearGradient(colors: [Colors.grey, Colors.blueGrey]);
+      case 'SEPIA':
+        return const LinearGradient(colors: [Color(0xFF704214), Color(0xFFC0A080)]);
+      case 'VIGNETTE':
+        return const LinearGradient(colors: [Colors.black, Colors.transparent], begin: Alignment.center, end: Alignment.bottomRight);
+      default:
+        return LinearGradient(colors: [Colors.cyanAccent.withValues(alpha: 0.2), Colors.cyanAccent.withValues(alpha: 0.6)]);
+    }
   }
 }

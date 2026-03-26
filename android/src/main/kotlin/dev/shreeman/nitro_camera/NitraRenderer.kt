@@ -63,8 +63,13 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     fun setup(surface: Surface) {
         outputSurface = surface
-        initEGL()
-        initGL()
+        try {
+            initEGL()
+            initGL()
+        } catch (e: Exception) {
+            Log.e("NitroCamera", "NitraRenderer.setup Critical Error: ${e.message}")
+            release()
+        }
     }
 
     private fun initEGL() {
@@ -83,11 +88,20 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
         val attribList = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
         eglContext = EGL14.eglCreateContext(eglDisplay, configs[0], EGL14.EGL_NO_CONTEXT, attribList, 0)
+        if (eglContext == EGL14.EGL_NO_CONTEXT) throw RuntimeException("eglCreateContext failed")
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
+        
+        // Safety: Attempt to create surface. If it fails, the native window might be busy.
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, configs[0], outputSurface, surfaceAttribs, 0)
+        if (eglSurface == EGL14.EGL_NO_SURFACE) {
+            val err = EGL14.eglGetError()
+            throw RuntimeException("eglCreateWindowSurface failed: 0x${Integer.toHexString(err)}")
+        }
 
-        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+            throw RuntimeException("eglMakeCurrent failed")
+        }
     }
 
     private fun initGL() {
@@ -109,7 +123,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         }
         inputSurface = Surface(inputSurfaceTexture)
         
-        // IMPORTANT: Release context from this thread so the rendering thread can pick it up later in drawFrame()
+        // IMPORTANT: Unbind EGL from this setup thread. 
+        // Rendering should only happen on drawFrame thread.
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
     }
 

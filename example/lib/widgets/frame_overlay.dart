@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
@@ -18,30 +19,35 @@ class FrameOverlay extends StatefulWidget {
 class _FrameOverlayState extends State<FrameOverlay> {
   ui.Image? _image;
   final _fpsCounter = ValueNotifier<double>(0);
+  final _frameCount = ValueNotifier<int>(0);
   final List<DateTime> _frames = [];
   StreamSubscription? _sub;
   String? _lastResult;
   Timer? _resultClearTimer;
-  bool _forceNextFrame = false;
-  bool _isManualScanning = false;
 
   @override
   void initState() {
     super.initState();
-    debugPrint("FrameOverlay initialized. isProcessing: ${widget.isProcessing}");
     _sub = NitroCamera.instance.frameStream.listen((frame) {
-      debugPrint("Frame received in Dart! textureId=${frame.textureId}");
       if (!mounted || !widget.isProcessing) return;
-      _updateFps();
+      
+      // SAMPLE THE STREAM: only analyze every 10th frame to avoid CPU saturation
+      if (_frameCount.value % 10 != 0) {
+        _frameCount.value++;
+        return;
+      }
+
+      _updateStats();
       _analyzeAndProcess(frame);
     });
   }
 
-  void _updateFps() {
+  void _updateStats() {
     final now = DateTime.now();
     _frames.add(now);
     _frames.removeWhere((f) => now.difference(f).inSeconds > 1);
     _fpsCounter.value = _frames.length.toDouble();
+    _frameCount.value++;
   }
 
   bool _isAnalyzing = false;
@@ -50,34 +56,30 @@ class _FrameOverlayState extends State<FrameOverlay> {
     if (_isAnalyzing) return;
     _isAnalyzing = true;
 
-    final shouldForce = _forceNextFrame;
-    if (shouldForce) _forceNextFrame = false;
-
     try {
-      if (shouldForce) {
-        debugPrint("MANUAL ANALYSIS TRIGGERED: Waiting for next frame...");
-        setState(() => _isManualScanning = true);
-      }
       final result = await compute(_analyzeInBackground, {
         'frame': frame,
-        'force': shouldForce,
       });
-      if (shouldForce && mounted) {
-        debugPrint("MANUAL ANALYSIS FINISHED. Result: $result");
-        setState(() => _isManualScanning = false);
-      }
+
       if (result != null && mounted) {
+        if (_lastResult == null) {
+          HapticFeedback.vibrate();
+          HapticFeedback.selectionClick();
+        }
         setState(() {
           _lastResult = result;
           _resultClearTimer?.cancel();
-          _resultClearTimer = Timer(const Duration(seconds: 3), () {
+          _resultClearTimer = Timer(const Duration(seconds: 2), () {
             if (mounted) setState(() => _lastResult = null);
           });
         });
+      } else if (mounted && _lastResult != null) {
+        // If NOTHING found in frame, clear the result immediately to allow "rescanning" 
+        // as soon as the camera moves away from the previous QR.
+        setState(() => _lastResult = null);
       }
 
-      // 2. Process for Display (still on UI thread for ui.Image)
-      if (mounted) {
+      if (mounted && kDebugMode) {
         await _updateDisplay(frame);
       }
     } finally {
@@ -88,18 +90,10 @@ class _FrameOverlayState extends State<FrameOverlay> {
   static Future<String?> _analyzeInBackground(dynamic input) async {
     try {
       final frame = input['frame'] as CameraFrame;
-      final force = input['force'] as bool;
-      if (force) debugPrint("Applying high-precision scanner hints...");
-
-      // 1. Create LuminanceSource
       final ls = _NitroLuminanceSource(frame.pixels, frame.width, frame.height);
-
-      // 2. Decode
       final bitmap = zxing.BinaryBitmap(zxing.HybridBinarizer(ls));
       final reader = zxing.QRCodeReader();
-      
       final result = reader.decode(bitmap);
-      
       return result.text;
     } catch (_) {
       return null;
@@ -111,8 +105,6 @@ class _FrameOverlayState extends State<FrameOverlay> {
     final width = frame.width;
     final height = frame.height;
 
-    // Note: ui.decodeImageFromPixels expects RGBA.
-    // If you use YUV (PixelFormat.yuv), you'd need a different shader or conversion here.
     final completer = Completer<ui.Image>();
     ui.decodeImageFromPixels(
       bytes,
@@ -138,6 +130,8 @@ class _FrameOverlayState extends State<FrameOverlay> {
     _sub?.cancel();
     _image?.dispose();
     _fpsCounter.dispose();
+    _frameCount.dispose();
+    _resultClearTimer?.cancel();
     super.dispose();
   }
 
@@ -148,133 +142,60 @@ class _FrameOverlayState extends State<FrameOverlay> {
     return IgnorePointer(
       child: Stack(
         children: [
+          // 1. Stats Dashboard (Top Left)
+          Positioned(
+            left: 20,
+            top: 100,
+            child: _AnimatedStatsCard(
+              fpsCounter: _fpsCounter,
+              frameCount: _frameCount,
+              lastResult: _lastResult,
+            ),
+          ),
+
+          // 2. Corner Debug View (Small Preview)
           if (_image != null)
             Positioned(
               right: 20,
-              top: 100,
-              width: 120,
-              height: 160,
+              top: 80,
               child: Container(
+                width: 90,
+                height: 120,
                 decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.cyanAccent.withValues(alpha: 0.1),
+                      blurRadius: 10,
+                    )
+                  ],
                   border: Border.all(
-                    color: Colors.cyanAccent.withValues(alpha: 0.5),
-                    width: 2,
+                    color: Colors.white.withValues(alpha: 0.1),
+                    width: 1,
                   ),
-                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(16),
                   child: RawImage(image: _image, fit: BoxFit.cover),
                 ),
               ),
             ),
-          Positioned(
-            right: 20,
-            top: 270,
-            child: ValueListenableBuilder<double>(
-              valueListenable: _fpsCounter,
-              builder: (ctx, fps, _) => Text(
-                "PROCESSOR: ${fps.toInt()} FPS",
-                style: const TextStyle(
-                  color: Colors.cyanAccent,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1,
-                ),
-              ),
-            ),
-          ),
-          // 3. Manual Analyze Button
-          Positioned(
-            left: 20,
-            top: 100,
-            child: FloatingActionButton.extended(
-              onPressed: _isManualScanning ? null : () => setState(() => _forceNextFrame = true),
-              backgroundColor: _isManualScanning ? Colors.grey : Colors.cyanAccent.withValues(alpha: 0.9),
-              icon: _isManualScanning 
-                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                : const Icon(Icons.flash_on, color: Colors.black),
-              label: Text(
-                _isManualScanning ? "SCANNING..." : "ANALYZE", 
-                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10)
-              ),
-            ),
-          ),
-          // 4. Centered QR Viewfinder
+
+          // 3. QR Viewfinder (Premium Design)
           Center(
-            child: Container(
-              width: 250,
-              height: 250,
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: _lastResult != null ? Colors.greenAccent : Colors.white24,
-                  width: 1,
-                ),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Stack(
-                children: [
-                  // Corner Brackets
-                  Positioned(top: 0, left: 0, child: _ViewfinderCorner(quadrant: 0, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
-                  Positioned(top: 0, right: 0, child: _ViewfinderCorner(quadrant: 1, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
-                  Positioned(bottom: 0, left: 0, child: _ViewfinderCorner(quadrant: 2, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
-                  Positioned(bottom: 0, right: 0, child: _ViewfinderCorner(quadrant: 3, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
-                  
-                  // Scanning Line (if processing)
-                  if (widget.isProcessing)
-                    const _ScanningLine(),
-                ],
-              ),
+            child: _PremiumViewfinder(
+              isScanning: widget.isProcessing,
+              hasResult: _lastResult != null,
             ),
           ),
+
+          // 4. Detected Result (Floating Glass Card)
           if (_lastResult != null)
-            Positioned(
-              left: 40,
-              right: 40,
-              top: 180, // High enough to clear the control panel
-              child: AnimatedOpacity(
-                opacity: 1.0,
-                duration: const Duration(milliseconds: 300),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.cyanAccent.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(25),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 15,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.qr_code_2, size: 40, color: Colors.black),
-                      const SizedBox(height: 10),
-                      const Text(
-                        "DETECTED DATA",
-                        style: TextStyle(
-                          color: Colors.black54,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        _lastResult!,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 200),
+                child: _QRResultCard(result: _lastResult!),
               ),
             ),
         ],
@@ -283,138 +204,363 @@ class _FrameOverlayState extends State<FrameOverlay> {
   }
 }
 
-/// Helper class to bridge Nitro pixels to ZXing LuminanceSource
-class _NitroLuminanceSource extends zxing.LuminanceSource {
-  final Uint8List pixels;
-  _NitroLuminanceSource(this.pixels, int width, int height)
-    : super(width, height);
+class _AnimatedStatsCard extends StatelessWidget {
+  final ValueNotifier<double> fpsCounter;
+  final ValueNotifier<int> frameCount;
+  final String? lastResult;
 
-  @override
-  Uint8List get matrix => pixels;
-
-  @override
-  Uint8List getRow(int y, Uint8List? row) {
-    if (y < 0 || y >= height) throw Exception("Index out of bounds");
-    final start = y * width;
-    final res = row ?? Uint8List(width);
-    res.setRange(0, width, pixels, start);
-    return res;
-  }
-
-  @override
-  bool get isCropSupported => false;
-}
-
-class _ViewfinderCorner extends StatelessWidget {
-  final int quadrant;
-  final Color color;
-  const _ViewfinderCorner({required this.quadrant, required this.color});
+  const _AnimatedStatsCard({
+    required this.fpsCounter,
+    required this.frameCount,
+    this.lastResult,
+  });
 
   @override
   Widget build(BuildContext context) {
-    const double size = 30;
-    const double thickness = 4;
-    
-    return Container(
-      width: size,
-      height: size,
-      child: CustomPaint(
-        painter: _CornerPainter(quadrant: quadrant, color: color, thickness: thickness),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _StatItem(
+                icon: Icons.bolt,
+                label: "STREAM",
+                value: ValueListenableBuilder<double>(
+                  valueListenable: fpsCounter,
+                  builder: (ctx, v, _) => Text("${v.toInt()} FPS", style: _valStyle),
+                ),
+                color: Colors.cyanAccent,
+              ),
+              const SizedBox(height: 12),
+              _StatItem(
+                icon: Icons.numbers,
+                label: "FRAMES",
+                value: ValueListenableBuilder<int>(
+                  valueListenable: frameCount,
+                  builder: (ctx, v, _) => Text(v.toString(), style: _valStyle),
+                ),
+                color: Colors.white70,
+              ),
+              const SizedBox(height: 12),
+              _StatItem(
+                icon: Icons.qr_code_scanner,
+                label: "SCANNER",
+                value: Text(lastResult != null ? "FOUND" : "SCANNING", style: _valStyle.copyWith(
+                  color: lastResult != null ? Colors.greenAccent : Colors.white38,
+                )),
+                color: lastResult != null ? Colors.greenAccent : Colors.white24,
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  static const _valStyle = TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, fontFamily: 'monospace');
+}
+
+class _StatItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Widget value;
+  final Color color;
+  const _StatItem({required this.icon, required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 14),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+            value,
+          ],
+        ),
+      ],
     );
   }
 }
 
-class _CornerPainter extends CustomPainter {
-  final int quadrant;
-  final Color color;
-  final double thickness;
-  _CornerPainter({required this.quadrant, required this.color, required this.thickness});
+class _PremiumViewfinder extends StatelessWidget {
+  final bool isScanning;
+  final bool hasResult;
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = thickness
-      ..style = PaintingStyle.stroke;
-
-    final path = Path();
-    if (quadrant == 0) { // Top Left
-      path.moveTo(0, size.height);
-      path.lineTo(0, 0);
-      path.lineTo(size.width, 0);
-    } else if (quadrant == 1) { // Top Right
-      path.moveTo(size.width - size.width, 0);
-      path.lineTo(size.width, 0);
-      path.lineTo(size.width, size.height);
-    } else if (quadrant == 2) { // Bottom Left
-      path.moveTo(0, size.height - size.height);
-      path.lineTo(0, size.height);
-      path.lineTo(size.width, size.height);
-    } else { // Bottom Right
-      path.moveTo(size.width, size.height - size.height);
-      path.lineTo(size.width, size.height);
-      path.lineTo(size.width - size.width, size.height);
-    }
-    
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
-}
-
-class _ScanningLine extends StatefulWidget {
-  const _ScanningLine();
-  @override
-  State<_ScanningLine> createState() => _ScanningLineState();
-}
-
-class _ScanningLineState extends State<_ScanningLine> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  const _PremiumViewfinder({required this.isScanning, required this.hasResult});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Positioned(
-          top: 250 * _controller.value,
-          left: 10,
-          right: 10,
+    final color = hasResult ? Colors.greenAccent : Colors.cyanAccent;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.9, end: 1.0),
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.elasticOut,
+      builder: (context, scale, child) {
+        return Transform.scale(
+          scale: scale,
           child: Container(
-            height: 2,
+            width: 280,
+            height: 280,
             decoration: BoxDecoration(
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.cyanAccent.withValues(alpha: 0.5),
-                  blurRadius: 10,
-                  spreadRadius: 2,
-                ),
-              ],
-              gradient: LinearGradient(
-                colors: [
-                  Colors.cyanAccent.withValues(alpha: 0),
-                  Colors.cyanAccent,
-                  Colors.cyanAccent.withValues(alpha: 0),
+              borderRadius: BorderRadius.circular(48),
+              border: Border.all(color: color.withValues(alpha: 0.1), width: 2),
+              boxShadow: isScanning ? [
+                 BoxShadow(
+                   color: color.withValues(alpha: 0.05),
+                   blurRadius: 40,
+                   spreadRadius: 10,
+                 )
+              ] : null,
+            ),
+            child: Stack(
+              children: [
+                ...List.generate(4, (i) => Positioned(
+                  top: i < 2 ? -2 : null,
+                  bottom: i >= 2 ? -2 : null,
+                  left: i % 2 == 0 ? -2 : null,
+                  right: i % 2 != 0 ? -2 : null,
+                  child: _Corner(index: i, color: color),
+                )),
+                if (isScanning && !hasResult) const _ScanningBeam(),
+                if (hasResult)
+                  Center(
+                    child: _PulseCircle(color: Colors.greenAccent),
+                  ),
+                if (hasResult) ...[
+                  const _SuccessFlash(),
+                  const Center(child: Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 60)),
                 ],
-              ),
+              ],
             ),
           ),
         );
       },
     );
   }
+}
+
+class _Corner extends StatelessWidget {
+  final int index;
+  final Color color;
+  const _Corner({required this.index, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 45,
+      height: 45,
+      decoration: BoxDecoration(
+        border: Border(
+          top: index < 2 ? BorderSide(color: color, width: 5) : BorderSide.none,
+          bottom: index >= 2 ? BorderSide(color: color, width: 5) : BorderSide.none,
+          left: index % 2 == 0 ? BorderSide(color: color, width: 5) : BorderSide.none,
+          right: index % 2 != 0 ? BorderSide(color: color, width: 5) : BorderSide.none,
+        ),
+        borderRadius: BorderRadius.only(
+          topLeft: index == 0 ? const Radius.circular(22) : Radius.zero,
+          topRight: index == 1 ? const Radius.circular(22) : Radius.zero,
+          bottomLeft: index == 2 ? const Radius.circular(22) : Radius.zero,
+          bottomRight: index == 3 ? const Radius.circular(22) : Radius.zero,
+        ),
+      ),
+    );
+  }
+}
+
+class _PulseCircle extends StatelessWidget {
+  final Color color;
+  const _PulseCircle({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.5, end: 1.2),
+      duration: const Duration(milliseconds: 800),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, _) => Container(
+        width: 200 * value,
+        height: 200 * value,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: color.withValues(alpha: (1.0 - value).clamp(0, 1)),
+            width: 3,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScanningBeam extends StatefulWidget {
+  const _ScanningBeam();
+  @override
+  State<_ScanningBeam> createState() => _ScanningBeamState();
+}
+
+class _ScanningBeamState extends State<_ScanningBeam> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 2500))..repeat(reverse: true);
+  }
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) => Positioned(
+        top: 260 * Curves.easeInOut.transform(_ctrl.value),
+        left: 30,
+        right: 30,
+        child: Container(
+          height: 3,
+          decoration: BoxDecoration(
+            boxShadow: [
+              BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.6), blurRadius: 20, spreadRadius: 2)
+            ],
+            gradient: LinearGradient(colors: [
+              Colors.cyanAccent.withValues(alpha: 0),
+              Colors.cyanAccent,
+              Colors.cyanAccent.withValues(alpha: 0),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SuccessFlash extends StatelessWidget {
+  const _SuccessFlash();
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      builder: (context, value, _) => Container(
+        decoration: BoxDecoration(
+          color: Colors.greenAccent.withValues(alpha: (1.0 - value) * 0.2),
+          borderRadius: BorderRadius.circular(48),
+        ),
+      ),
+    );
+  }
+}
+
+class _QRResultCard extends StatelessWidget {
+  final String result;
+  const _QRResultCard({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeOutQuart,
+      builder: (context, value, child) => Transform.translate(
+        offset: Offset(0, 40 * (1 - value)),
+        child: Opacity(opacity: value.clamp(0, 1), child: child),
+      ),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 40),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3), width: 2),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.greenAccent, size: 28),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "SCAN SUCCESS",
+                          style: TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          result,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                       // Placeholder for action like open URL or copy
+                    },
+                    icon: const Icon(Icons.copy_rounded, color: Colors.white38, size: 20),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NitroLuminanceSource extends zxing.LuminanceSource {
+  final Uint8List pixels;
+  _NitroLuminanceSource(this.pixels, int width, int height) : super(width, height);
+  @override
+  Uint8List get matrix => pixels;
+  @override
+  Uint8List getRow(int y, Uint8List? row) {
+    if (y < 0 || y >= height) throw Exception("Bounds error");
+    final start = y * width;
+    final res = row ?? Uint8List(width);
+    res.setRange(0, width, pixels, start);
+    return res;
+  }
+  @override
+  bool get isCropSupported => false;
 }
