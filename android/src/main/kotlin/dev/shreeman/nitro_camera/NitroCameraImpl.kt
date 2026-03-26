@@ -6,10 +6,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
+import android.util.Range
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.view.TextureRegistry
@@ -25,6 +27,8 @@ import nitro.nitro_camera_module.CameraFrame
 import nitro.nitro_camera_module.HybridNitroCameraSpec
 import nitro.nitro_camera_module.PhotoResult
 import nitro.nitro_camera_module.RecordingResult
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Camera2 implementation of [HybridNitroCameraSpec].
@@ -101,6 +105,15 @@ class NitroCameraImpl(
     }
 
     // ---- Device enumeration -------------------------------------------------
+
+    override suspend fun getAvailableCameraDevicesJson(): String {
+        val ids = cameraManager.cameraIdList
+        val arr = JSONArray()
+        for (id in ids) {
+            try { arr.put(buildCameraDeviceJson(id)) } catch (_: Exception) {}
+        }
+        return arr.toString()
+    }
 
     override suspend fun getDeviceCount(): Long = cameraManager.cameraIdList.size.toLong()
 
@@ -245,6 +258,10 @@ class NitroCameraImpl(
     override suspend fun stopVideoRecording(textureId: Long): RecordingResult =
         session(textureId)?.stopVideoRecording() ?: RecordingResult("", 0L, 0L)
 
+    override suspend fun pauseRecording(textureId: Long)  { session(textureId)?.pauseVideoRecording() }
+    override suspend fun resumeRecording(textureId: Long) { session(textureId)?.resumeVideoRecording() }
+    override suspend fun cancelRecording(textureId: Long) { session(textureId)?.cancelVideoRecording() }
+
     // ---- Frame processing ---------------------------------------------------
 
     override suspend fun enableFrameProcessing(textureId: Long, enabled: Long) {
@@ -258,6 +275,120 @@ class NitroCameraImpl(
     // ---- Helpers ------------------------------------------------------------
 
     private fun session(textureId: Long) = synchronized(sessionsLock) { sessions[textureId] }
+
+    // ---- Camera device info helpers -----------------------------------------
+
+    private fun buildCameraDeviceJson(cameraId: String): JSONObject {
+        val chars = cameraManager.getCameraCharacteristics(cameraId)
+
+        val position = when (chars.get(CameraCharacteristics.LENS_FACING)) {
+            CameraCharacteristics.LENS_FACING_FRONT -> 0
+            CameraCharacteristics.LENS_FACING_BACK  -> 1
+            else                                     -> 2
+        }
+        val orientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val maxZoom     = (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
+        val hasFlash    = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+
+        val map      = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)?.sortedByDescending { it.width * it.height }
+        val maxPhotoW = jpegSizes?.firstOrNull()?.width ?: 1920
+        val maxPhotoH = jpegSizes?.firstOrNull()?.height ?: 1080
+
+        val focal    = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        val lensType = if (focal == null || focal.isEmpty()) 0
+        else when {
+            focal[0] < 2.3f -> 2  // ultra-wide
+            focal[0] > 5.0f -> 3  // telephoto
+            else             -> 1  // wide-angle
+        }
+
+        val lensName = when (lensType) { 2 -> "Ultra Wide" 3 -> "Telephoto" else -> "Wide" }
+        val name     = if (position == 0) "Front Camera" else "$lensName Camera"
+
+        val evRange  = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+        val evStep   = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 1.0
+        val minEv    = if (evRange != null && evStep != 0.0) evRange.lower * evStep else -4.0
+        val maxEv    = if (evRange != null && evStep != 0.0) evRange.upper * evStep else  4.0
+
+        val minFocusDist = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        // Camera2 focus distance is in diopters (1/m). Convert to cm: 100/diopters. 0 = infinity.
+        val minFocusCm   = if (minFocusDist > 0f) (100.0 / minFocusDist) else 0.0
+
+        val capabilities = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+        val supportsRaw  = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)
+        val supportsDepth = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT)
+
+        val hwLevel = when (chars.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
+            CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY  -> "legacy"
+            CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "limited"
+            CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL    -> "full"
+            else                                                          -> "limited"
+        }
+
+        val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val minISO   = isoRange?.lower?.toDouble() ?: 25.0
+        val maxISO   = isoRange?.upper?.toDouble() ?: 3200.0
+
+        val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+
+        // Formats: one entry per unique video size (YUV_420_888), annotated with best FPS range
+        val formatsArr = JSONArray()
+        val videoSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
+            ?.sortedByDescending { it.width * it.height } ?: emptyList()
+
+        for (size in videoSizes) {
+            // Best FPS range for this size
+            val bestFps = fpsRanges.maxByOrNull { it.upper } ?: Range(1, 30)
+            val fmt = JSONObject()
+            fmt.put("photoWidth",  maxPhotoW)
+            fmt.put("photoHeight", maxPhotoH)
+            fmt.put("videoWidth",  size.width)
+            fmt.put("videoHeight", size.height)
+            fmt.put("minFps",      bestFps.lower.toDouble())
+            fmt.put("maxFps",      bestFps.upper.toDouble())
+            fmt.put("minISO",      minISO)
+            fmt.put("maxISO",      maxISO)
+            fmt.put("fieldOfView", focalLengthToFov(focal?.getOrNull(0), chars))
+            fmt.put("supportsVideoHdr",    false)
+            fmt.put("supportsPhotoHdr",    false)
+            fmt.put("supportsDepthCapture", supportsDepth)
+            fmt.put("autoFocusSystem", "phase-detection")
+            fmt.put("videoStabilizationModes", JSONArray(listOf("off")))
+            formatsArr.put(fmt)
+        }
+
+        return JSONObject().apply {
+            put("id",                  cameraId)
+            put("name",                name)
+            put("position",            position)
+            put("lensType",            lensType)
+            put("sensorOrientation",   orientation)
+            put("minZoom",             1.0)
+            put("maxZoom",             maxZoom)
+            put("neutralZoom",         1.0)
+            put("hasFlash",            hasFlash)
+            put("hasTorch",            hasFlash)
+            put("maxPhotoWidth",       maxPhotoW)
+            put("maxPhotoHeight",      maxPhotoH)
+            put("minExposure",         minEv)
+            put("maxExposure",         maxEv)
+            put("minFocusDistanceCm",  minFocusCm)
+            put("isMultiCam",          false)
+            put("supportsLowLightBoost", false)
+            put("supportsRawCapture",  supportsRaw)
+            put("supportsFocus",       true)
+            put("hardwareLevel",       hwLevel)
+            put("physicalDevices",     JSONArray(listOf(lensName.lowercase().replace(' ', '-') + "-camera")))
+            put("formats",             formatsArr)
+        }
+    }
+
+    private fun focalLengthToFov(focalMm: Float?, chars: CameraCharacteristics): Double {
+        if (focalMm == null || focalMm <= 0f) return 69.4
+        val sensorW = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)?.width ?: return 69.4
+        return Math.toDegrees(2.0 * Math.atan(sensorW / (2.0 * focalMm)))
+    }
 
     private fun buildCameraDevice(cameraId: String): CameraDevice {
         val chars = cameraManager.getCameraCharacteristics(cameraId)
@@ -276,7 +407,6 @@ class NitroCameraImpl(
         val maxW  = sizes?.firstOrNull()?.width?.toLong()  ?: 1920L
         val maxH  = sizes?.firstOrNull()?.height?.toLong() ?: 1080L
 
-        // Lens type heuristic from focal length
         val focal    = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
         val lensType = if (focal == null || focal.isEmpty()) {
             0L
@@ -289,8 +419,6 @@ class NitroCameraImpl(
             }
         }
 
-        // Best name: use lens type + position
-        val posName  = if (position == 0L) "Front" else if (position == 1L) "Back" else "External"
         val lensName = when (lensType) { 2L -> "Ultra Wide" 3L -> "Telephoto" else -> "Wide" }
         val name     = if (position == 0L) "Front Camera" else "$lensName Camera"
 

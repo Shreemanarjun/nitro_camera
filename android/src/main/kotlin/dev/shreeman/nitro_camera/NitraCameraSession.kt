@@ -375,14 +375,23 @@ class NitraCameraSession(
     }
 
     fun stopVideoRecording(): RecordingResult {
-        // Granular try-catch to handle firmware quirks like "Function not implemented (-38)"
         try { captureSession?.stopRepeating() } catch (e: Exception) { /* Silent */ }
         try { captureSession?.close() } catch (e: Exception) { /* Silent */ }
         captureSession = null
         val result = mediaManager.stopVideoRecording()
-        // Brief delay so the recorder finishes writing before we reconfigure
         if (!isClosed) cameraHandler.postDelayed({ if (!isClosed) startPreview() }, 150)
         return result
+    }
+
+    fun pauseVideoRecording()  { mediaManager.pauseVideoRecording() }
+    fun resumeVideoRecording() { mediaManager.resumeVideoRecording() }
+
+    fun cancelVideoRecording() {
+        val outputPath = mediaManager.recordingOutputPath
+        stopVideoRecording()
+        if (outputPath.isNotEmpty()) {
+            try { java.io.File(outputPath).delete() } catch (_: Exception) {}
+        }
     }
 
     // ---- Shader / overlay (no-op stubs; full GL path can be added later) ----

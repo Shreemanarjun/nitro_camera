@@ -71,7 +71,7 @@ class TapToFocusDetector extends StatelessWidget {
         final local = box.globalToLocal(details.globalPosition);
         final x = (local.dx / box.size.width).clamp(0.0, 1.0);
         final y = (local.dy / box.size.height).clamp(0.0, 1.0);
-        controller.setFocusPoint(x, y);
+        controller.focus(x, y);
       },
       child: child,
     );

@@ -51,6 +51,18 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     // MARK: - Device enumeration
 
+    public func getAvailableCameraDevicesJson() async throws -> String {
+        let devices = discoverySession().devices
+        let arr = devices.compactMap { device -> [String: Any]? in
+            return deviceInfoDict(for: device)
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: arr, options: []),
+              let json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return json
+    }
+
     public func getDeviceCount() async throws -> Int64 {
         Int64(discoverySession().devices.count)
     }
@@ -185,16 +197,26 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     // MARK: - Video recording
 
     public func startVideoRecording(textureId: Int64, outputPath: String) async throws {
-        // AVCaptureMovieFileOutput approach
         guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        _ = s // video recording via session will be started here; simplified for now
+        try await s.startVideoRecording(to: outputPath)
     }
 
     public func stopVideoRecording(textureId: Int64) async throws -> RecordingResult {
         guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        _ = s
-        // Return placeholder — full MediaRecorder integration omitted for brevity
-        return RecordingResult(path: "", durationMs: 0, fileSize: 0)
+        return try await s.stopVideoRecording()
+    }
+
+    public func pauseRecording(textureId: Int64) async throws {
+        session(for: textureId)?.pauseVideoRecording()
+    }
+
+    public func resumeRecording(textureId: Int64) async throws {
+        session(for: textureId)?.resumeVideoRecording()
+    }
+
+    public func cancelRecording(textureId: Int64) async throws {
+        guard let s = session(for: textureId) else { return }
+        try await s.cancelVideoRecording()
     }
 
     // MARK: - Frame processing
@@ -221,6 +243,83 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             mediaType: .video,
             position: .unspecified
         )
+    }
+
+    private func deviceInfoDict(for device: AVCaptureDevice) -> [String: Any] {
+        let position: Int = device.position == .front ? 0 : (device.position == .back ? 1 : 2)
+        let lensType: Int
+        switch device.deviceType {
+        case .builtInUltraWideCamera: lensType = 2
+        case .builtInTelephotoCamera: lensType = 3
+        default:                      lensType = 1
+        }
+
+        var maxW = 0, maxH = 0
+        for fmt in device.formats {
+            let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            if Int(dim.width) > maxW { maxW = Int(dim.width); maxH = Int(dim.height) }
+        }
+
+        let formats: [[String: Any]] = device.formats.compactMap { fmt -> [String: Any]? in
+            let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            guard dim.width > 0 && dim.height > 0 else { return nil }
+            let fpsRanges = fmt.videoSupportedFrameRateRanges
+            let minFps = fpsRanges.map { $0.minFrameRate }.min() ?? 1.0
+            let maxFps = fpsRanges.map { $0.maxFrameRate }.max() ?? 30.0
+            var afSystem = "none"
+            if #available(iOS 13.0, *) {
+                switch fmt.autoFocusSystem {
+                case .phaseDetection:    afSystem = "phase-detection"
+                case .contrastDetection: afSystem = "contrast-detection"
+                default: break
+                }
+            }
+            return [
+                "photoWidth":           maxW,
+                "photoHeight":          maxH,
+                "videoWidth":           Int(dim.width),
+                "videoHeight":          Int(dim.height),
+                "minFps":               minFps,
+                "maxFps":               maxFps,
+                "minISO":               device.activeFormat.minISO,
+                "maxISO":               device.activeFormat.maxISO,
+                "fieldOfView":          fmt.videoFieldOfView,
+                "supportsVideoHdr":     fmt.isVideoHDRSupported,
+                "supportsPhotoHdr":     false,
+                "supportsDepthCapture": fmt.supportedDepthDataFormats.count > 0,
+                "autoFocusSystem":      afSystem,
+                "videoStabilizationModes": ["off", "standard"],
+            ]
+        }
+
+        let minEv = Double(device.minExposureTargetBias)
+        let maxEv = Double(device.maxExposureTargetBias)
+        let minFocusDist = device.lensPosition > 0 ? Double(device.lensPosition) : 0.0
+
+        return [
+            "id":                   device.uniqueID,
+            "name":                 device.localizedName,
+            "position":             position,
+            "lensType":             lensType,
+            "sensorOrientation":    90,
+            "minZoom":              Double(device.minAvailableVideoZoomFactor),
+            "maxZoom":              Double(device.maxAvailableVideoZoomFactor),
+            "neutralZoom":          1.0,
+            "hasFlash":             device.hasFlash,
+            "hasTorch":             device.hasTorch,
+            "maxPhotoWidth":        maxW,
+            "maxPhotoHeight":       maxH,
+            "minExposure":          minEv,
+            "maxExposure":          maxEv,
+            "minFocusDistanceCm":   minFocusDist,
+            "isMultiCam":           false,
+            "supportsLowLightBoost": false,
+            "supportsRawCapture":   false,
+            "supportsFocus":        device.isFocusPointOfInterestSupported,
+            "hardwareLevel":        "full",
+            "physicalDevices":      [device.deviceType.rawValue],
+            "formats":              formats,
+        ]
     }
 
     private func deviceInfo(for device: AVCaptureDevice) -> CameraDevice {

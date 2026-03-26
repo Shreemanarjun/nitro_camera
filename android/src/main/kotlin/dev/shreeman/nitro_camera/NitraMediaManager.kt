@@ -44,7 +44,8 @@ class NitraMediaManager(
     // Video recording state
     private var mediaRecorder: MediaRecorder? = null
     private var recordingStartMs = 0L
-    private var recordingOutputPath = ""
+    var recordingOutputPath = ""
+        private set
     var isRecording = false
         private set
 
@@ -126,6 +127,22 @@ class NitraMediaManager(
 
     fun startVideoRecorder() {
         mediaRecorder?.start()
+    }
+
+    fun pauseVideoRecording() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try { mediaRecorder?.pause() } catch (e: Exception) {
+                Log.w("NitroCamera", "pauseVideoRecording: ${e.message}")
+            }
+        }
+    }
+
+    fun resumeVideoRecording() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try { mediaRecorder?.resume() } catch (e: Exception) {
+                Log.w("NitroCamera", "resumeVideoRecording: ${e.message}")
+            }
+        }
     }
 
     fun stopVideoRecording(): RecordingResult {

@@ -51,7 +51,7 @@ enum PermissionStatus {
 // ---- Structs ----
 
 /// Describes a physical camera device available on the hardware.
-@HybridStruct(packed: true)
+@hybridRecord
 class CameraDevice {
   final String id;
   final String name;
@@ -108,7 +108,7 @@ class CameraFrame {
 }
 
 /// Result returned after a photo is captured.
-@HybridStruct(packed: true)
+@hybridRecord
 class PhotoResult {
   final String path;      // absolute file path
   final int width;
@@ -124,7 +124,7 @@ class PhotoResult {
 }
 
 /// Result returned after a video recording is stopped.
-@HybridStruct(packed: true)
+@hybridRecord
 class RecordingResult {
   final String path;      // absolute file path
   final int durationMs;
@@ -169,11 +169,17 @@ abstract class NitroCamera extends HybridObject {
 
   // ---- Device enumeration ----
 
-  /// Returns the number of physical camera devices.
+  /// Returns a JSON-encoded array of all available camera devices, including
+  /// their supported formats. Parse with [CameraDeviceInfo.listFromJson].
+  ///
+  /// Prefer using the high-level [CameraController.getAvailableCameraDevices]
+  /// which parses and returns typed [CameraDeviceInfo] objects.
+  @nitroAsync
+  Future<String> getAvailableCameraDevicesJson();
+
+  // Legacy low-level device accessors (kept for ABI compatibility).
   @nitroAsync
   Future<int> getDeviceCount();
-
-  /// Returns info about the camera at [index].
   @nitroAsync
   Future<CameraDevice> getDevice(int index);
 
@@ -261,6 +267,18 @@ abstract class NitroCamera extends HybridObject {
   /// Stops the current recording and finalises the file.
   @nitroAsync
   Future<RecordingResult> stopVideoRecording(int textureId);
+
+  /// Pauses an active video recording without finalising the file.
+  @nitroAsync
+  Future<void> pauseRecording(int textureId);
+
+  /// Resumes a paused video recording.
+  @nitroAsync
+  Future<void> resumeRecording(int textureId);
+
+  /// Cancels the current recording and deletes the temporary file.
+  @nitroAsync
+  Future<void> cancelRecording(int textureId);
 
   // ---- Frame processing ----
   //

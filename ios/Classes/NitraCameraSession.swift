@@ -3,7 +3,7 @@ import CoreVideo
 import Flutter
 
 /// Manages one AVCaptureSession + Flutter texture for a single open camera.
-public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
+public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate {
 
     // MARK: - Public state
     public let textureId: Int64
@@ -14,6 +14,9 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     private var videoOutput  = AVCaptureVideoDataOutput()
     private var photoOutput  = AVCapturePhotoOutput()
     private var movieOutput: AVCaptureMovieFileOutput?
+    private var movieStartTime: Date?
+    private var movieOutputPath: String = ""
+    private var movieContinuation: CheckedContinuation<RecordingResult, Error>?
     private weak var textureRegistry: FlutterTextureRegistry?
 
     private let sessionQueue = DispatchQueue(label: "dev.shreeman.nitro_camera.session", qos: .userInteractive)
@@ -264,6 +267,71 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         } catch {
             cont.resume(throwing: error)
         }
+    }
+
+    // MARK: - Video recording
+
+    func startVideoRecording(to path: String) async throws {
+        let output = AVCaptureMovieFileOutput()
+        guard session.canAddOutput(output) else { throw NitraCameraError.configurationFailed }
+        session.beginConfiguration()
+        session.addOutput(output)
+        session.commitConfiguration()
+        movieOutput = output
+        movieOutputPath = path
+        movieStartTime = Date()
+        let url = URL(fileURLWithPath: path)
+        output.startRecording(to: url, recordingDelegate: self)
+    }
+
+    func stopVideoRecording() async throws -> RecordingResult {
+        return try await withCheckedThrowingContinuation { continuation in
+            self.movieContinuation = continuation
+            movieOutput?.stopRecording()
+        }
+    }
+
+    func pauseVideoRecording() {
+        if #available(iOS 18.0, *) {
+            movieOutput?.pauseRecording()
+        }
+    }
+
+    func resumeVideoRecording() {
+        if #available(iOS 18.0, *) {
+            movieOutput?.resumeRecording()
+        }
+    }
+
+    func cancelVideoRecording() async throws {
+        movieContinuation = nil
+        movieOutput?.stopRecording()
+        let path = movieOutputPath
+        movieOutput = nil
+        movieOutputPath = ""
+        if !path.isEmpty {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
+    // MARK: - AVCaptureFileOutputRecordingDelegate
+
+    public func fileOutput(_ output: AVCaptureFileOutput,
+                           didFinishRecordingTo outputFileURL: URL,
+                           from connections: [AVCaptureConnection],
+                           error: Error?) {
+        guard let cont = movieContinuation else { return }
+        movieContinuation = nil
+        session.beginConfiguration()
+        if let mo = movieOutput { session.removeOutput(mo) }
+        session.commitConfiguration()
+        movieOutput = nil
+
+        if let error = error { cont.resume(throwing: error); return }
+
+        let duration = Int64((Date().timeIntervalSince(movieStartTime ?? Date())) * 1000)
+        let size = (try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)[.size] as? Int64) ?? 0
+        cont.resume(returning: RecordingResult(path: outputFileURL.path, durationMs: duration, fileSize: size))
     }
 
     // MARK: - Helpers
