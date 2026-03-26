@@ -48,6 +48,8 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
   };
 
   bool _isProcessingFrames = false;
+  int _samplingRate = 1;
+  int _pixelFormat = 1; // 1 = BGRA
   int _cameraPermission = 0; // 0: unknown, 1: granted, 2: denied
 
   @override
@@ -192,7 +194,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("SAVED: ${result.path}"), backgroundColor: Colors.cyanAccent.withValues(alpha: 0.8)));
                   },
-                  onToggleRecording: () async {
+                   onToggleRecording: () async {
                     final tid = _activeTextureId;
                     if (tid == null) return;
                     if (_isRecording) {
@@ -206,6 +208,22 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                       await NitroCamera.instance.startVideoRecording(tid, path);
                       setState(() => _isRecording = true);
                     }
+                  },
+                  samplingRate: _samplingRate,
+                  pixelFormat: _pixelFormat,
+                  onSamplingRateChanged: (val) async {
+                    final tid = _activeTextureId;
+                    if (tid != null) {
+                      await NitroCamera.instance.setSamplingRate(tid, val);
+                    }
+                    setState(() => _samplingRate = val);
+                  },
+                  onPixelFormatChanged: (val) async {
+                    final tid = _activeTextureId;
+                    if (tid != null) {
+                      await NitroCamera.instance.setFrameFormat(tid, val);
+                    }
+                    setState(() => _pixelFormat = val);
                   },
                 ),
                 const SizedBox(height: 20),

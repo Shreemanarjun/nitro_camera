@@ -324,6 +324,7 @@ public protocol HybridNitroCameraProtocol: AnyObject {
     func cancelRecording(textureId: Int64) async throws -> Void
     func enableFrameProcessing(textureId: Int64, enabled: Int64) async throws -> Void
     func setFrameFormat(textureId: Int64, format: Int64) async throws -> Void
+    func setSamplingRate(textureId: Int64, samplingRate: Int64) async throws -> Void
     func setFilterShader(textureId: Int64, shaderSource: String) async throws -> Void
     func updateOverlay(textureId: Int64, overlayData: String) async throws -> Void
     var frameStream: AnyPublisher<CameraFrame, Never> { get }
@@ -656,6 +657,17 @@ public func _call_setFrameFormat(_ textureId: Int64, _ format: Int64) -> Void {
     let sema = DispatchSemaphore(value: 0)
     Task.detached {
         try? await impl.setFrameFormat(textureId: textureId, format: format)
+        sema.signal()
+    }
+    sema.wait()
+}
+
+@_cdecl("_call_setSamplingRate")
+public func _call_setSamplingRate(_ textureId: Int64, _ samplingRate: Int64) -> Void {
+    guard let impl = NitroCameraRegistry.impl else { return }
+    let sema = DispatchSemaphore(value: 0)
+    Task.detached {
+        try? await impl.setSamplingRate(textureId: textureId, samplingRate: samplingRate)
         sema.signal()
     }
     sema.wait()

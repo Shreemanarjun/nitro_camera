@@ -82,6 +82,9 @@ class NitraCameraSession(
     // CPU frame path
     var frameProcessingEnabled = false
     var onFrame: ((CameraFrame) -> Unit)? = null
+    private var pixelFormat: Long = 1 // 1: RGBA (rendered by Flutter typically), 0: YUV
+    private var samplingRate: Long = 1
+    private var frameCounter: Long = 0
     private val frameReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 2)
 
     private val characteristics: CameraCharacteristics by lazy {
@@ -396,7 +399,14 @@ class NitraCameraSession(
 
     // ---- Shader / overlay (no-op stubs; full GL path can be added later) ----
 
-    fun setFrameFormat(format: Long) { /* placeholder */ }
+    fun setFrameFormat(format: Long) { 
+        this.pixelFormat = format
+    }
+    
+    fun setSamplingRate(rate: Long) {
+        this.samplingRate = if (rate < 1) 1 else rate
+    }
+
     fun setFilterShader(shader: String) {
         cameraHandler.post {
             renderer.updateShader(shader)
@@ -408,12 +418,22 @@ class NitraCameraSession(
     private fun emitFrame(image: android.media.Image) {
         val cb = onFrame ?: return
         try {
-            val plane = image.planes[0]
+            // 1. Smart Backpressure (Frame Skipping)
+            frameCounter++
+            if (frameCounter % samplingRate != 0L) return
+
+            // 2. Optimized Pixel Formats
+            // For QR (YUV), we only care about Plane 0 (Y / Luma)
+            val plane = if (pixelFormat == 0L) image.planes[0] else image.planes[0] // Note: our ImageReader is currently YUV only
             val src = plane.buffer
+            
+            // To provide RGBA to Flutter via frameStream, we'd normally need a YUV -> RGBA conversion here.
+            // But if the user selects YUV, we just send the Y binary data.
             val size = src.remaining().toLong()
             val copy = ByteBuffer.allocateDirect(src.remaining())
             copy.put(src)
             copy.rewind()
+            
             cb(CameraFrame(copy, size, image.width.toLong(), image.height.toLong(),
                 System.currentTimeMillis(), 0L, textureId))
         } catch (e: Exception) {

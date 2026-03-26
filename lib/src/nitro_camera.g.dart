@@ -219,6 +219,7 @@ class _NitroCameraImpl extends NitroCamera {
   late final void Function(int) _cancelRecordingPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_cancel_recording');
   late final void Function(int, int) _enableFrameProcessingPtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_enable_frame_processing');
   late final void Function(int, int) _setFrameFormatPtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_frame_format');
+  late final void Function(int, int) _setSamplingRatePtr = _dylib.lookupFunction<Void Function(Int64, Int64), void Function(int, int)>('nitro_camera_set_sampling_rate');
   late final void Function(int, Pointer<Utf8>) _setFilterShaderPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_set_filter_shader');
   late final void Function(int, Pointer<Utf8>) _updateOverlayPtr = _dylib.lookupFunction<Void Function(Int64, Pointer<Utf8>), void Function(int, Pointer<Utf8>)>('nitro_camera_update_overlay');
   late final void Function(int) _registerFrameStreamPtr = _dylib.lookupFunction<Void Function(Int64), void Function(int)>('nitro_camera_register_frame_stream_stream');
@@ -457,6 +458,14 @@ class _NitroCameraImpl extends NitroCamera {
   Future<void> setFrameFormat(int textureId, int format) async {
     checkDisposed();
     final res = await NitroRuntime.callAsync<void>(_setFrameFormatPtr, [textureId, format]);
+    NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
+    return res;
+  }
+
+  @override
+  Future<void> setSamplingRate(int textureId, int samplingRate) async {
+    checkDisposed();
+    final res = await NitroRuntime.callAsync<void>(_setSamplingRatePtr, [textureId, samplingRate]);
     NitroRuntime.checkError(_dylib, getErrorName: 'nitro_camera_get_error', clearErrorName: 'nitro_camera_clear_error');
     return res;
   }

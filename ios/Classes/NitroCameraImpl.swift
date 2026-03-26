@@ -225,6 +225,22 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         session(for: textureId)?.frameProcessingEnabled = (enabled != 0)
     }
 
+    public func setFrameFormat(textureId: Int64, format: Int64) async throws {
+        session(for: textureId)?.setFrameFormat(format)
+    }
+
+    public func setSamplingRate(textureId: Int64, samplingRate: Int64) async throws {
+        session(for: textureId)?.setSamplingRate(samplingRate)
+    }
+
+    public func setFilterShader(textureId: Int64, shaderSource: String) async throws {
+        // Implementation stub
+    }
+
+    public func updateOverlay(textureId: Int64, overlayData: String) async throws {
+        // Implementation stub
+    }
+
     // MARK: - Helpers
 
     private func session(for textureId: Int64) -> NitraCameraSession? {

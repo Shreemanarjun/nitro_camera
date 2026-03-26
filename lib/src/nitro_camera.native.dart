@@ -296,6 +296,11 @@ abstract class NitroCamera extends HybridObject {
   @nitroAsync
   Future<void> setFrameFormat(int textureId, int format);
 
+  /// Configures how many frames to skip before delivering to [frameStream].
+  /// [samplingRate]: 1 = every frame, 2 = every 2nd frame, etc.
+  @nitroAsync
+  Future<void> setSamplingRate(int textureId, int samplingRate);
+
   /// Updates the GPU-accelerated filter shader on the camera preview.
   /// Pass a valid GLSL Fragment Shader source. 
   /// The shader should expect:

@@ -29,6 +29,11 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     // Frame processing (CPU path → Nitro stream)
     var frameProcessingEnabled = false
     var onFrame: ((CameraFrame) -> Void)?
+    
+    // Modernized properties for per-frame analysis
+    var samplingRate: Int64 = 1
+    var pixelFormat: Int64 = 1 // 0: YUV/Luma, 1: BGRA
+    private var frameCounter: Int64 = 0
 
     // Photo capture continuations
     private var photoContinuation: CheckedContinuation<PhotoResult, Error>?
@@ -139,15 +144,27 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
-        guard let baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-        let w    = Int64(CVPixelBufferGetWidth(pixelBuffer))
-        let h    = Int64(CVPixelBufferGetHeight(pixelBuffer))
-        let size = Int64(CVPixelBufferGetDataSize(pixelBuffer))
         let ts   = Int64(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000)
+
+        // 1. Smart Backpressure (Frame Skipping)
+        frameCounter += 1
+        if frameCounter % samplingRate != 0 { return }
+
+        // 2. Optimized Pixel Formats
+        // If YUV (0), we usually only care about Plane 0 (Luma/Y) for CV
+        let isYUV = (pixelFormat == 0)
+        let planeIndex = isYUV ? 0 : 0 // For BGRA it's 0. For BiPlanar YUV it's 0 for Luma.
+        
+        let w    = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex))
+        let h    = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex))
+        let size = Int64(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex) * Int(h))
+        let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex)
+        
+        guard let addr = baseAddr else { return }
 
         // Copy pixels so Dart can safely hold the buffer
         let copy = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(size))
-        memcpy(copy, baseAddr, Int(size))
+        memcpy(copy, addr, Int(size))
 
         let frame = CameraFrame(
             pixels: copy,
@@ -229,6 +246,21 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             device.isVideoHDREnabled = enabled
         }
         device.unlockForConfiguration()
+    }
+
+    func setFrameFormat(_ format: Int64) {
+        self.pixelFormat = format
+        
+        session.beginConfiguration()
+        let type = (format == 0) ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_32BGRA
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: type
+        ]
+        session.commitConfiguration()
+    }
+
+    func setSamplingRate(_ rate: Int64) {
+        self.samplingRate = max(1, rate)
     }
 
     // MARK: - Photo capture

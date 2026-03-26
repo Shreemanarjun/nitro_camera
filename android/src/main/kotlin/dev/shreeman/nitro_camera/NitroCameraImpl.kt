@@ -269,6 +269,7 @@ class NitroCameraImpl(
     }
 
     override suspend fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
+    override suspend fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
     override suspend fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
     override suspend fun updateOverlay(textureId: Long, overlayData: String)      { /* reserved */ }
 

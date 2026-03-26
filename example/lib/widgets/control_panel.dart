@@ -18,6 +18,10 @@ class ControlPanel extends StatelessWidget {
   final VoidCallback onTakePhoto;
   final VoidCallback onToggleRecording;
   final bool isRecording;
+  final int samplingRate;
+  final int pixelFormat;
+  final ValueChanged<int> onSamplingRateChanged;
+  final ValueChanged<int> onPixelFormatChanged;
 
   const ControlPanel({
     super.key,
@@ -34,12 +38,17 @@ class ControlPanel extends StatelessWidget {
     required this.onTakePhoto,
     required this.onToggleRecording,
     required this.isRecording,
+    required this.samplingRate,
+    required this.pixelFormat,
+    required this.onSamplingRateChanged,
+    required this.onPixelFormatChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final isRunning = status == CameraStatus.running;
-    final isChanging = status == CameraStatus.opening || status == CameraStatus.closing;
+    final isChanging =
+        status == CameraStatus.opening || status == CameraStatus.closing;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(35),
@@ -62,17 +71,27 @@ class ControlPanel extends StatelessWidget {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: devices.map((d) {
-                    final group = d.position == 1 ? "BACK" : (d.position == 2 ? "FRONT" : "EXT");
+                    final group = d.position == 1
+                        ? "BACK"
+                        : (d.position == 2 ? "FRONT" : "EXT");
                     final isSelected = selectedDevice?.id == d.id;
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
-                        label: Text("$group: ${d.name}", 
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isSelected ? Colors.black : Colors.white)),
+                        label: Text(
+                          "$group: ${d.name}",
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? Colors.black : Colors.white,
+                          ),
+                        ),
                         selected: isSelected,
-                        onSelected: isChanging ? null : (_) => onSelectDevice(d),
+                        onSelected: isChanging
+                            ? null
+                            : (_) => onSelectDevice(d),
                         selectedColor: Colors.cyanAccent,
-                        backgroundColor: Colors.white10,
+                        backgroundColor: Colors.black,
                       ),
                     );
                   }).toList(),
@@ -138,6 +157,66 @@ class ControlPanel extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
+
+              // 2b. Sampling & Format
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionTitle(title: 'SAMPLING RATE'),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            _ChoiceBtn(
+                              label: '1',
+                              isSelected: samplingRate == 1,
+                              onTap: () => onSamplingRateChanged(1),
+                            ),
+                            _ChoiceBtn(
+                              label: '2',
+                              isSelected: samplingRate == 2,
+                              onTap: () => onSamplingRateChanged(2),
+                            ),
+                            _ChoiceBtn(
+                              label: '3',
+                              isSelected: samplingRate == 3,
+                              onTap: () => onSamplingRateChanged(3),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionTitle(title: 'PIXEL FORMAT'),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            _ChoiceBtn(
+                              label: 'YUV',
+                              isSelected: pixelFormat == 0,
+                              onTap: () => onPixelFormatChanged(0),
+                            ),
+                            _ChoiceBtn(
+                              label: 'BGRA',
+                              isSelected: pixelFormat == 1,
+                              onTap: () => onPixelFormatChanged(1),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 25),
 
               // 3. Action Bar
@@ -152,7 +231,9 @@ class ControlPanel extends StatelessWidget {
                     const SizedBox(width: 15),
                     _ControlCircleButton(
                       onTap: onToggleRecording,
-                      icon: isRecording ? Icons.stop_rounded : Icons.videocam_rounded,
+                      icon: isRecording
+                          ? Icons.stop_rounded
+                          : Icons.videocam_rounded,
                       color: isRecording ? Colors.redAccent : Colors.white,
                       isPulse: isRecording,
                     ),
@@ -161,7 +242,15 @@ class ControlPanel extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('STREAM', style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+                      Text(
+                        'STREAM',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
                       Switch(
                         value: isProcessing,
                         onChanged: isRunning ? onToggleProcessing : null,
@@ -185,7 +274,12 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     title,
-    style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+    style: TextStyle(
+      color: Colors.white.withValues(alpha: 0.3),
+      fontSize: 9,
+      fontWeight: FontWeight.w900,
+      letterSpacing: 1.5,
+    ),
   );
 }
 
@@ -193,7 +287,11 @@ class _ChoiceBtn extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
-  const _ChoiceBtn({required this.label, required this.isSelected, required this.onTap});
+  const _ChoiceBtn({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +300,9 @@ class _ChoiceBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.cyanAccent : Colors.white.withValues(alpha: 0.05),
+          color: isSelected
+              ? Colors.cyanAccent
+              : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Text(
@@ -224,7 +324,12 @@ class _ControlCircleButton extends StatelessWidget {
   final Color color;
   final bool isPulse;
 
-  const _ControlCircleButton({required this.onTap, required this.icon, required this.color, this.isPulse = false});
+  const _ControlCircleButton({
+    required this.onTap,
+    required this.icon,
+    required this.color,
+    this.isPulse = false,
+  });
 
   @override
   Widget build(BuildContext context) {
