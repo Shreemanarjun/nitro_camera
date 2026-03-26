@@ -200,44 +200,80 @@ class _FrameOverlayState extends State<FrameOverlay> {
               ),
             ),
           ),
+          // 4. Centered QR Viewfinder
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: _lastResult != null ? Colors.greenAccent : Colors.white24,
+                  width: 1,
+                ),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Stack(
+                children: [
+                  // Corner Brackets
+                  Positioned(top: 0, left: 0, child: _ViewfinderCorner(quadrant: 0, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
+                  Positioned(top: 0, right: 0, child: _ViewfinderCorner(quadrant: 1, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
+                  Positioned(bottom: 0, left: 0, child: _ViewfinderCorner(quadrant: 2, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
+                  Positioned(bottom: 0, right: 0, child: _ViewfinderCorner(quadrant: 3, color: _lastResult != null ? Colors.greenAccent : Colors.cyanAccent)),
+                  
+                  // Scanning Line (if processing)
+                  if (widget.isProcessing)
+                    const _ScanningLine(),
+                ],
+              ),
+            ),
+          ),
           if (_lastResult != null)
             Positioned(
-              left: 20,
-              right: 20,
-              bottom: 100,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 15,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.cyanAccent.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.cyanAccent.withValues(alpha: 0.3),
-                      blurRadius: 20,
-                      spreadRadius: 5,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.qr_code_scanner, color: Colors.black),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: Text(
+              left: 40,
+              right: 40,
+              top: 180, // High enough to clear the control panel
+              child: AnimatedOpacity(
+                opacity: 1.0,
+                duration: const Duration(milliseconds: 300),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(25),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.qr_code_2, size: 40, color: Colors.black),
+                      const SizedBox(height: 10),
+                      const Text(
+                        "DETECTED DATA",
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
                         _lastResult!,
                         style: const TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 18,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -267,4 +303,118 @@ class _NitroLuminanceSource extends zxing.LuminanceSource {
 
   @override
   bool get isCropSupported => false;
+}
+
+class _ViewfinderCorner extends StatelessWidget {
+  final int quadrant;
+  final Color color;
+  const _ViewfinderCorner({required this.quadrant, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    const double size = 30;
+    const double thickness = 4;
+    
+    return Container(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _CornerPainter(quadrant: quadrant, color: color, thickness: thickness),
+      ),
+    );
+  }
+}
+
+class _CornerPainter extends CustomPainter {
+  final int quadrant;
+  final Color color;
+  final double thickness;
+  _CornerPainter({required this.quadrant, required this.color, required this.thickness});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = thickness
+      ..style = PaintingStyle.stroke;
+
+    final path = Path();
+    if (quadrant == 0) { // Top Left
+      path.moveTo(0, size.height);
+      path.lineTo(0, 0);
+      path.lineTo(size.width, 0);
+    } else if (quadrant == 1) { // Top Right
+      path.moveTo(size.width - size.width, 0);
+      path.lineTo(size.width, 0);
+      path.lineTo(size.width, size.height);
+    } else if (quadrant == 2) { // Bottom Left
+      path.moveTo(0, size.height - size.height);
+      path.lineTo(0, size.height);
+      path.lineTo(size.width, size.height);
+    } else { // Bottom Right
+      path.moveTo(size.width, size.height - size.height);
+      path.lineTo(size.width, size.height);
+      path.lineTo(size.width - size.width, size.height);
+    }
+    
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class _ScanningLine extends StatefulWidget {
+  const _ScanningLine();
+  @override
+  State<_ScanningLine> createState() => _ScanningLineState();
+}
+
+class _ScanningLineState extends State<_ScanningLine> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Positioned(
+          top: 250 * _controller.value,
+          left: 10,
+          right: 10,
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.cyanAccent.withValues(alpha: 0.5),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
+              gradient: LinearGradient(
+                colors: [
+                  Colors.cyanAccent.withValues(alpha: 0),
+                  Colors.cyanAccent,
+                  Colors.cyanAccent.withValues(alpha: 0),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
