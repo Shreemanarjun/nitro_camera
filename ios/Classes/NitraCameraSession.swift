@@ -1,3 +1,4 @@
+import Foundation
 import AVFoundation
 import CoreVideo
 import Flutter
@@ -29,7 +30,7 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     // Frame processing (CPU path → Nitro stream)
     var frameProcessingEnabled = false
     var onFrame: ((CameraFrame) -> Void)?
-    
+
     // Modernized properties for per-frame analysis
     var samplingRate: Int64 = 1
     var pixelFormat: Int64 = 1 // 0: YUV/Luma, 1: BGRA
@@ -154,12 +155,12 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         // If YUV (0), we usually only care about Plane 0 (Luma/Y) for CV
         let isYUV = (pixelFormat == 0)
         let planeIndex = isYUV ? 0 : 0 // For BGRA it's 0. For BiPlanar YUV it's 0 for Luma.
-        
+
         let w    = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex))
         let h    = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex))
         let size = Int64(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex) * Int(h))
         let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex)
-        
+
         guard let addr = baseAddr else { return }
 
         // Copy pixels so Dart can safely hold the buffer
@@ -232,7 +233,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             device.whiteBalanceMode = .continuousAutoWhiteBalance
         } else {
             guard device.isWhiteBalanceModeSupported(.locked) else { return }
-            let temp = AVCaptureDevice.WhiteBalanceTemperatureAndTint(temperature: Float(temperature), tint: 0)
+            let currentGains = device.deviceWhiteBalanceGains
+            var temp = device.temperatureAndTintValues(for: currentGains)
+            temp.temperature = Float(temperature)
+            temp.tint = 0.0
             let gains = device.deviceWhiteBalanceGains(for: temp)
             device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
         }
@@ -250,7 +254,7 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     func setFrameFormat(_ format: Int64) {
         self.pixelFormat = format
-        
+
         session.beginConfiguration()
         let type = (format == 0) ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_32BGRA
         videoOutput.videoSettings = [

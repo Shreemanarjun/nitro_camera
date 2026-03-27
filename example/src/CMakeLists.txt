@@ -4,6 +4,7 @@ project(nitro_camera_example_library VERSION 0.0.1 LANGUAGES C CXX)
 set(NITRO_NATIVE "/Users/shreemanarjunsahu/.puro/shared/pub_cache/hosted/pub.dev/nitro-0.2.2/src/native")
 
 add_library(nitro_camera_example SHARED
+  "${CMAKE_CURRENT_SOURCE_DIR}/../lib/src/generated/cpp/nitro_camera_example.bridge.g.cpp"
   "nitro_camera_example.cpp"
   "dart_api_dl.c"
 )

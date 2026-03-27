@@ -34,9 +34,16 @@ class NitroCameraImpl(
         return false
     }
 
-    override suspend fun reset() = coroutineScope {
-        sessions.values.map { async { it.close() } }.awaitAll()
+    override suspend fun reset() {
+        coroutineScope {
+            closeAll()
+        }
+    }
+
+    suspend fun closeAll() = coroutineScope {
+        val activeSessions = sessions.values.toList()
         sessions.clear()
+        activeSessions.map { async { it.close() } }.awaitAll()
     }
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager

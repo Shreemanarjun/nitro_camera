@@ -15,7 +15,7 @@ import 'package:nitro/nitro.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  NitroConfig.instance.enable(slowCallThresholdMs: 16);
+  NitroConfig.instance.enable(slowCallThresholdMs: 200);
   NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
 
   // Pre-warm camera initialization in background while Flutter starts
@@ -347,9 +347,11 @@ class _FlashOverlayState extends State<_FlashOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _ctrl,
-      child: Container(color: Colors.white),
+    return IgnorePointer(
+      child: FadeTransition(
+        opacity: _ctrl,
+        child: Container(color: Colors.white),
+      ),
     );
   }
 }
@@ -497,17 +499,23 @@ class _FocusIndicatorState extends State<_FocusIndicator>
     return Positioned(
       left: widget.offset.dx - 35,
       top: widget.offset.dy - 35,
-      child: FadeTransition(
-        opacity: ReverseAnimation(_ctrl),
-        child: Container(
-          width: 70,
-          height: 70,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white, width: 1.5),
-            color: Colors.white.withValues(alpha: 0.1),
-          ),
-          child: const Center(
-            child: Icon(Icons.center_focus_weak, color: Colors.white, size: 20),
+      child: IgnorePointer(
+        child: FadeTransition(
+          opacity: ReverseAnimation(_ctrl),
+          child: Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 1.5),
+              color: Colors.white.withValues(alpha: 0.1),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.center_focus_weak,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
           ),
         ),
       ),

@@ -3,9 +3,7 @@ package dev.shreeman.nitro_camera
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import nitro.nitro_camera_module.NitroCameraJniBridge
 
 class NitroCameraPlugin : FlutterPlugin, ActivityAware {
@@ -25,10 +23,12 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
         NitroCameraJniBridge.register(nitroImpl)
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        GlobalScope.launch { impl?.reset() }
+        val target = impl
         impl = null
+        if (target != null) {
+            runBlocking { target.reset() }
+        }
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {

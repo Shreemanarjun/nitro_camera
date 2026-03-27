@@ -37,7 +37,7 @@ class FilterSelector extends StatelessWidget {
                 if (onFilterSelected != null) {
                   onFilterSelected!(name);
                 } else {
-                  CameraState.currentFilterName.value = name;
+                  CameraState.setFilter(name);
                 }
               },
               child: Padding(

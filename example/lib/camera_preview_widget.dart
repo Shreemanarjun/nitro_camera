@@ -109,11 +109,8 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
       // 1. Close old camera with timeout
       if (oldId != null) {
         try {
-          await NitroCamera.instance.closeCamera(oldId).timeout(
-            const Duration(seconds: 2),
-            onTimeout: () => throw TimeoutException("Hardware close timeout"),
-          );
-          await Future.delayed(const Duration(milliseconds: 200));
+          await NitroCamera.instance.closeCamera(oldId);
+          // Wait removed: rely on immediate hardware close + Nitro/Kotlin serial lock.
         } catch (e) {
           debugPrint("Safe close error: $e");
         }

@@ -13,7 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.util.Log
 import android.view.Surface
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.*
 import nitro.nitro_camera_module.*
 import java.io.File
 import java.io.FileOutputStream
@@ -51,9 +51,12 @@ class NitraMediaManager(
     var isRecording = false
         private set
 
+
     suspend fun takePhotoWithRequest(
         session: CameraCaptureSession,
         request: CaptureRequest,
+        renderer: NitraRenderer,
+        shader: String? = null,
         onComplete: (() -> Unit)? = null
     ): PhotoResult = suspendCancellableCoroutine { cont ->
         Log.d("NitroCamera", "NitraMediaManager: capturing photo with request...")
@@ -62,41 +65,60 @@ class NitraMediaManager(
                 if (cont.isActive) cont.resumeWith(Result.failure(Exception("No image acquired")))
                 return@setOnImageAvailableListener
             }
-            try {
-                val buffer: ByteBuffer = image.planes[0].buffer
-                val bytes = ByteArray(buffer.remaining())
-                buffer.get(bytes)
-                val imgWidth = image.width.toLong()
-                val imgHeight = image.height.toLong()
-                image.close()
-                val tmp = File(context.cacheDir, "cap_${System.currentTimeMillis()}.jpg")
-                FileOutputStream(tmp).use { it.write(bytes) }
-                if (cont.isActive) {
-                    cont.resumeWith(Result.success(PhotoResult(
-                        path     = tmp.absolutePath,
-                        width    = imgWidth,
-                        height   = imgHeight,
-                        fileSize = bytes.size.toLong()
-                    )))
+            
+            // 1. Extract buffer and close Image IMMEDIATELY to free up hardware memory
+            val buffer: ByteBuffer = image.planes[0].buffer
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            val imgWidth = image.width.toLong()
+            val imgHeight = image.height.toLong()
+            image.close()
+            
+            // 2. Offload HEAVY IO to a background thread to keep cameraHandler responsive
+            // 2. Offload HEAVY IO and signal resumption
+            val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            scope.launch {
+                try {
+                    // RESUME preview as soon as pixels are acquired
+                    onComplete?.invoke()
+
+                    // Apply filter if specified
+                    val filteredBytes = if (!shader.isNullOrEmpty()) {
+                        renderer.applyFilterToStill(bytes, shader)
+                    } else {
+                        bytes
+                    }
+
+                    val tmp = File(context.cacheDir, "cap_${System.currentTimeMillis()}.jpg")
+                    FileOutputStream(tmp).use { it.write(filteredBytes) }
+                    
+                    if (cont.isActive) {
+                        cont.resumeWith(Result.success(PhotoResult(
+                            path     = tmp.absolutePath,
+                            width    = imgWidth,
+                            height   = imgHeight,
+                            fileSize = filteredBytes.size.toLong()
+                        )))
+                    }
+                } catch (e: Exception) {
+                    onComplete?.invoke()
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
                 }
-            } catch (e: Exception) {
-                image.close()
-                if (cont.isActive) cont.resumeWith(Result.failure(e))
-            } finally {
-                reader.setOnImageAvailableListener(null, null)
             }
         }, cameraHandler)
 
+        // The capture request callback is now only used for logging/error tracking.
+        // Resumption is now signaled by the ImageAvailableListener below.
         try {
             session.capture(request, object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                    onComplete?.invoke()
-                }
-                override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
-                    onComplete?.invoke()
+                override fun onCaptureFailed(session: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
+                    Log.e("NitroCamera", "Capture failed: ${f.reason}")
+                    onComplete?.invoke() // Fail-safe resumption
+                    if (cont.isActive) cont.resumeWith(Result.failure(Exception("Capture failed")))
                 }
             }, cameraHandler)
         } catch (e: Exception) {
+            onComplete?.invoke()
             if (cont.isActive) cont.resumeWith(Result.failure(e))
         }
     }

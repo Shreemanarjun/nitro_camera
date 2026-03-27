@@ -1,7 +1,9 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 
-import 'package:signals/signals_flutter.dart';
+import 'package:signals_flutter/signals_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 enum CameraStatus { closed, opening, closing, running, error }
@@ -19,14 +21,14 @@ class CameraState {
   static final currentZoom = signal(1.0);
   static final focusIndicatorTrigger = signal<Offset?>(null);
 
-
   static final width = signal(1280);
   static final height = signal(720);
   static final fps = signal(60);
 
   static final mode = signal('PHOTO'); // PHOTO, VIDEO, SCANNER
   static final lastCapturedPath = signal<String?>(null);
-  static final isLastCapturedVideo = signal(false);
+  static final isLastCapturedVideo = ValueNotifier<bool>(false);
+  static final isCapturing = ValueNotifier<bool>(false);
 
   static final currentFilterName = signal('NORMAL');
 
@@ -56,16 +58,18 @@ class CameraState {
     try {
       if (loading.value && devices.value.isNotEmpty) return;
       loading.value = true;
-      
+
       final perm = await NitroCamera.instance.getCameraPermissionStatus();
       cameraPermission.value = perm;
-      
+
       if (perm == 1) {
         final loaded = await NitroCamera.instance.getAvailableCameraDevices();
         devices.value = List.from(loaded);
-        
+
         // 2. Early warming: Pick the primary back camera (usually first tele/wide)
-        final backCam = loaded.where((d) => d.position == 1).firstOrNull ?? loaded.firstOrNull;
+        final backCam =
+            loaded.where((d) => d.position == 1).firstOrNull ??
+            loaded.firstOrNull;
         if (backCam != null && currentDevice.value == null) {
           await selectDevice(backCam);
         }
@@ -144,16 +148,25 @@ class CameraState {
     }
   }
 
+  static double _lastSentZoom = -1.0;
+  static DateTime _lastZoomTime = DateTime.fromMillisecondsSinceEpoch(0);
+
   static Future<void> setZoom(double z) async {
     final dev = currentDevice.value;
     if (dev == null) return;
-    
-    // Clamp to hardware limits
+
     final clamped = z.clamp(dev.minZoom, dev.maxZoom);
     currentZoom.value = clamped;
-    
+
     final tid = activeTextureId.value;
-    if (tid != null) {
+    if (tid == null) return;
+
+    // THROTTLE: Only send to native if change > 0.5% or 16ms passed since last call
+    final diff = (clamped - _lastSentZoom).abs() / clamped;
+    final now = DateTime.now();
+    if (diff > 0.005 || now.difference(_lastZoomTime).inMilliseconds > 16) {
+      _lastSentZoom = clamped;
+      _lastZoomTime = now;
       await NitroCamera.instance.setZoom(tid, clamped);
     }
   }
@@ -165,21 +178,40 @@ class CameraState {
     }
   }
 
+  static Future<void> setFilter(String name) async {
+    currentFilterName.value = name;
+    final tid = activeTextureId.value;
+    if (tid != null) {
+      final source = filters[name] ?? '';
+      await NitroCamera.instance.setFilterShader(tid, source);
+    }
+  }
 
   static Future<void> takePhoto() async {
+    if (isCapturing.value) return;
+
     final tid = activeTextureId.value;
     if (tid == null) return;
+
     try {
-      // Immediate visual/haptic feedback to eliminate perceived lag
+      isCapturing.value = true;
       photoTrigger.value++;
-      
-      // Fire and forget path for the actual IO/Native capture if we don't need immediate result
-      // But we need the path, so we await. Let's make sure we don't block the UI logic.
-      final result = await NitroCamera.instance.takePhoto(tid);
+      HapticFeedback.mediumImpact();
+
+      final result = await NitroCamera.instance
+          .takePhoto(tid)
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw TimeoutException("Hardware capture timeout"),
+          );
+
       lastCapturedPath.value = result.path;
       isLastCapturedVideo.value = false;
+      HapticFeedback.lightImpact();
     } catch (e) {
       debugPrint("Photo failed: $e");
+    } finally {
+      isCapturing.value = false;
     }
   }
 

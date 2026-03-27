@@ -113,6 +113,7 @@ class NitraCameraSession(
     private var frameCounter: Long = 0
     private val frameReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 2)
     private var directBuffer: ByteBuffer? = null
+    private var lastRawShader: String = ""
 
     val mediaManager = NitraMediaManager(
         context, cameraDevice, characteristics, cameraHandler, width, height, enableAudio
@@ -159,10 +160,20 @@ class NitraCameraSession(
         }
 
         frameReader.setOnImageAvailableListener({ reader ->
-            if (isClosed || !frameProcessingEnabled) return@setOnImageAvailableListener
+            if (isClosed) return@setOnImageAvailableListener
+            
+            // ALWAYS acquire and close the image to free the buffer pool,
+            // even if processing is currently disabled.
             val image = try { reader.acquireLatestImage() } catch (_: Exception) { null }
                 ?: return@setOnImageAvailableListener
-            try { emitFrame(image) } finally { image.close() }
+
+            try { 
+                if (frameProcessingEnabled) {
+                    emitFrame(image)
+                }
+            } finally {
+                image.close()
+            }
         }, cameraHandler)
     }
 
@@ -225,14 +236,25 @@ class NitraCameraSession(
             builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
         }
 
-        val rect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-        if (rect != null) {
-            val maxZ = (characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
-            val clamped = zoomValue.coerceIn(1.0, maxZ).toFloat()
-            val cx = rect.width() / 2; val cy = rect.height() / 2
-            val dx = (rect.width() / (2 * clamped)).toInt()
-            val dy = (rect.height() / (2 * clamped)).toInt()
-            builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(cx - dx, cy - dy, cx + dx, cy + dy))
+        val zoomSet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            if (zoomRange != null) {
+                val clamped = zoomValue.toFloat().coerceIn(zoomRange.lower, zoomRange.upper)
+                builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clamped)
+                true
+            } else false
+        } else false
+
+        if (!zoomSet) {
+            val rect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            if (rect != null) {
+                val maxZ = (characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
+                val clamped = zoomValue.coerceIn(1.0, maxZ).toFloat()
+                val cx = rect.width() / 2; val cy = rect.height() / 2
+                val dx = (rect.width() / (2 * clamped)).toInt()
+                val dy = (rect.height() / (2 * clamped)).toInt()
+                builder.set(CaptureRequest.SCALER_CROP_REGION, android.graphics.Rect(cx - dx, cy - dy, cx + dx, cy + dy))
+            }
         }
 
         val range = characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
@@ -248,31 +270,53 @@ class NitraCameraSession(
     suspend fun close() {
         if (isClosed) return
         isClosed = true
-        kotlinx.coroutines.delay(100)
+        
+        // 1. DETACH from Flutter immediately on Main thread to prevent new frames from scheduling
+        withContext(Dispatchers.Main) {
+            try {
+               val producer = (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)
+               producer?.setCallback(null)
+               // Note: We don't release yet, just detach the listener
+            } catch (_: Exception) {}
+        }
+
+        // 2. CLEAR CALLBACKS to stop internal frame delivery
+        try {
+            renderer.inputSurfaceTexture?.setOnFrameAvailableListener(null)
+            previewSurface?.let { if (it.isValid) it.release() }
+            previewSurface = null
+        } catch (_: Exception) {}
+
+        // 3. Tear down hardware synchronously to stop the stream
         try { captureSession?.stopRepeating() } catch (_: Exception) {}
         try { captureSession?.close() } catch (_: Exception) {}
         captureSession = null
         try { cameraDevice.close() } catch (_: Exception) {}
-        try { renderer.inputSurfaceTexture?.release() } catch (_: Exception) {}
         try { frameReader.close() } catch (_: Exception) {}
         mediaManager.release()
 
         val releaseLatch = java.util.concurrent.CountDownLatch(1)
         if (glHandler.looper.thread.isAlive) {
             glHandler.postAtFrontOfQueue {
-                try { renderer.release() } finally {
+                try { 
+                    renderer.release() 
+                } catch (_: Exception) {
+                } finally {
                     glThread.quitSafely()
                     releaseLatch.countDown()
                 }
             }
-            try { releaseLatch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+            try { releaseLatch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
         } else {
             releaseLatch.countDown()
         }
 
         withContext(Dispatchers.Main) {
             surfaceEntry?.release()
-            (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
+            try {
+               val producer = (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)
+               producer?.release()
+            } catch (_: Exception) {}
         }
         cameraThread.quitSafely()
     }
@@ -347,21 +391,39 @@ class NitraCameraSession(
 
     fun setFrameFormat(format: Long)     { pixelFormat = format }
     fun setSamplingRate(rate: Long)     { samplingRate = rate }
-    fun setFilterShader(source: String) { renderer.updateShader(source) }
+    fun setFilterShader(shader: String) {
+        lastRawShader = shader
+        glHandler.post {
+            renderer.updateShader(shader)
+        }
+    }
+
+
 
     suspend fun takePhoto(): PhotoResult {
         val session = captureSession ?: throw Exception("No active session")
+        
+        // 1. Explicitly stop repeating request to prepare for Still Capture
+        try { session.stopRepeating() } catch (_: Exception) {}
+
         val builder = cameraDevice.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
         builder.addTarget(mediaManager.photoReader.surface)
-
+        
+        // Sync hardware state to high-res request
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         applySessionSettings(builder)
 
         // JPEG orientation
         val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
-
-        return mediaManager.takePhotoWithRequest(session, builder.build()) {
-            // Resume repeating request after capture completes
+        
+        return mediaManager.takePhotoWithRequest(
+            session = session, 
+            request = builder.build(), 
+            renderer = renderer, 
+            shader = lastRawShader ?: "",
+        ) {
+            // 2. Resume repeating request after capture completes (now thread-safe and non-blocking)
             cameraHandler.post { triggerUpdate() }
         }
     }
@@ -372,8 +434,14 @@ class NitraCameraSession(
             if (isClosed) return@post
             try {
                 val recSurface = mediaManager.prepareVideoRecorder(outputPath)
+                
+                // CRITICAL: We do NOT add recSurface to Camera2 targets.
+                // We add it to our GPU Renderer instead!
+                glHandler.post { renderer.setRecordingSurface(recSurface) }
+
                 val pSurface = previewSurface ?: return@post
-                val surfaces = mutableListOf(pSurface, recSurface, mediaManager.photoReader.surface)
+                val surfaces = mutableListOf(pSurface, mediaManager.photoReader.surface)
+                
                 cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         if (isClosed) { session.close(); return }
@@ -381,7 +449,7 @@ class NitraCameraSession(
                         try {
                             val builder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_RECORD)
                             builder.addTarget(pSurface)
-                            builder.addTarget(recSurface)
+                            // builder.addTarget(recSurface) // Bypassed: Renderer handles this
                             applySessionSettings(builder)
                             session.setRepeatingRequest(builder.build(), null, cameraHandler)
                             mediaManager.startVideoRecorder()
@@ -396,6 +464,9 @@ class NitraCameraSession(
     }
 
     fun stopVideoRecording(): RecordingResult {
+        // Stop renderer from pushing frames to recorder
+        glHandler.post { renderer.setRecordingSurface(null) }
+
         try { captureSession?.stopRepeating() } catch (e: Exception) { }
         try { captureSession?.close() } catch (e: Exception) { }
         captureSession = null

@@ -35,8 +35,9 @@ class TopBar extends StatelessWidget {
               // FLASH TOGGLE
               Watch((context) {
                 final current = CameraState.currentDevice.value;
-                if (current == null || current.hasFlash == 0)
+                if (current == null || current.hasFlash == 0) {
                   return const SizedBox.shrink();
+                }
 
                 final flash = CameraState.flashMode.value;
                 IconData icon;

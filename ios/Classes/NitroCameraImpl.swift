@@ -4,6 +4,7 @@ import Combine
 import Flutter
 
 /// Real AVFoundation implementation of HybridNitroCameraProtocol.
+@objc(NitroCameraImpl)
 public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     private weak var textureRegistry: FlutterTextureRegistry?
@@ -49,6 +50,32 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         }
     }
 
+    public func requestMicrophonePermission() async throws -> Int64 {
+        return await withCheckedContinuation { continuation in
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized:
+                continuation.resume(returning: 1)
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted ? 1 : 2)
+                }
+            case .denied:   continuation.resume(returning: 2)
+            case .restricted: continuation.resume(returning: 3)
+            @unknown default: continuation.resume(returning: 2)
+            }
+        }
+    }
+
+    public func getMicrophonePermissionStatus() async throws -> Int64 {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined: return 0
+        case .authorized:    return 1
+        case .denied:        return 2
+        case .restricted:    return 3
+        @unknown default:    return 2
+        }
+    }
+
     // MARK: - Device enumeration
 
     public func getAvailableCameraDevicesJson() async throws -> String {
@@ -61,6 +88,10 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             return "[]"
         }
         return json
+    }
+
+    public func getAvailableCameraDevices() async throws -> [CameraDevice] {
+        return discoverySession().devices.map { deviceInfo(for: $0) }
     }
 
     public func getDeviceCount() async throws -> Int64 {
@@ -237,8 +268,17 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         // Implementation stub
     }
 
-    public func updateOverlay(textureId: Int64, overlayData: [UInt8]) async throws {
+    public func updateOverlay(textureId: Int64, overlayData: Data) async throws {
         // Implementation stub
+    }
+
+    public func reset() async throws {
+        sessionsLock.lock()
+        for session in sessions.values {
+            session.close()
+        }
+        sessions.removeAll()
+        sessionsLock.unlock()
     }
 
     // MARK: - Helpers
@@ -357,14 +397,16 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             name: device.localizedName,
             position: position,
             lensType: lensType,
-            sensorOrientation: 90,
+            sensorOrientation: Int64(90),
             minZoom: Double(device.minAvailableVideoZoomFactor),
             maxZoom: Double(device.maxAvailableVideoZoomFactor),
             neutralZoom: 1.0,
-            hasFlash: device.hasFlash ? 1 : 0,
-            hasTorch: device.hasTorch ? 1 : 0,
+            hasFlash: device.hasFlash ? Int64(1) : Int64(0),
+            hasTorch: device.hasTorch ? Int64(1) : Int64(0),
             maxPhotoWidth: maxW,
-            maxPhotoHeight: maxH
+            maxPhotoHeight: maxH,
+            focalLength: 3.5, // placeholder
+            aperture: 1.8 // placeholder
         )
     }
 }

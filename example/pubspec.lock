@@ -407,18 +407,18 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: dabcc031dbcea82a1172fda572165ca95219f92890cf348a0ab8d77d7d443712
+      sha256: "2f70592b55ef7e7cf545f20114956957faa2273e168181dc5a7e2b56bea32f76"
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.2"
+    version: "0.2.3"
   nitro_annotations:
     dependency: transitive
     description:
       name: nitro_annotations
-      sha256: "73316c2e35f44ad597a2ffa1d75aa9c20b485ff589b6c511f1a49e22b313e131"
+      sha256: "963122d339b4bbb973bd1a49007f6e9069c25394d7ddebb4398123aa6854c9a2"
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.2"
+    version: "0.2.3"
   nitro_camera:
     dependency: "direct main"
     description:
@@ -430,10 +430,10 @@ packages:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: f2d73a366901827cedb72817a299a3fc055aff3a4dd19999c01f8dd48894f516
+      sha256: "231be70eb1707768f2d81dfecbb4e60af13136d44f9c23d17bcffcd95ea6c986"
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.2"
+    version: "0.2.3"
   objective_c:
     dependency: transitive
     description:
@@ -587,7 +587,7 @@ packages:
     source: hosted
     version: "6.2.1"
   signals_flutter:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: signals_flutter
       sha256: "7c83418f47e3538685217e583f0fbd17a29716fa1a9ce2247e2455786e8ea81a"

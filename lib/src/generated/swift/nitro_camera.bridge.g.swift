@@ -711,7 +711,7 @@ public func _call_setFilterShader(_ textureId: Int64, _ shaderSource: UnsafePoin
 
 @_cdecl("_call_updateOverlay")
 public func _call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafeMutablePointer<UInt8>?, _ overlayData_length: Int64) -> Void {
-    let overlayDataArr = overlayData.map { Array(UnsafeBufferPointer(start: $0, count: Int(overlayData_length))) } ?? []
+    let overlayDataArr = overlayData.map { Data(UnsafeBufferPointer(start: $0, count: Int(overlayData_length))) } ?? Data()
     guard let impl = NitroCameraRegistry.impl else { return }
     let sema = DispatchSemaphore(value: 0)
     Task.detached {
