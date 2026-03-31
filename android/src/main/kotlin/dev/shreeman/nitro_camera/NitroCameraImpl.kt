@@ -21,14 +21,41 @@ import kotlinx.coroutines.sync.withLock
 import nitro.nitro_camera_module.*
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.ConcurrentHashMap
 
 class NitroCameraImpl(
     private val context: Context,
     private val textureRegistry: TextureRegistry,
-) : HybridNitroCameraSpec {
+) : HybridNitroCameraSpec, DefaultLifecycleObserver {
 
     var activity: android.app.Activity? = null
+
+    override fun onStop(owner: LifecycleOwner) {
+        super.onStop(owner)
+        Log.d(TAG, "App stopped, pausing all camera sessions")
+        activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        sessions.values.forEach { it.onAppStop() }
+    }
+
+    override fun onResume(owner: LifecycleOwner) {
+        super.onResume(owner)
+        Log.d(TAG, "App resumed, resuming all camera sessions")
+        activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        sessions.values.forEach { session ->
+            scope.launch { session.onAppResume(cameraManager) }
+        }
+    }
+
+    override fun onDestroy(owner: LifecycleOwner) {
+        super.onDestroy(owner)
+        Log.d(TAG, "App destroyed, resetting camera implementation")
+        scope.launch { reset() }
+    }
+
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
 
     fun handlePermissionResult(requestCode: Int, grantResults: IntArray): Boolean {
         return false
@@ -135,8 +162,8 @@ class NitroCameraImpl(
         val availableIds = getIds()
         if (!availableIds.contains(deviceId)) {
             Log.e(TAG, "Unknown camera device $deviceId.")
-            withContext(Dispatchers.Main) { 
-               surfaceTextureEntry?.release() 
+            withContext(Dispatchers.Main) {
+               surfaceTextureEntry?.release()
                (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
             }
             return 0L
@@ -145,7 +172,7 @@ class NitroCameraImpl(
         try {
             val camera = suspendCancellableCoroutine { cont ->
                 cont.invokeOnCancellation {
-                    Handler(Looper.getMainLooper()).post { 
+                    Handler(Looper.getMainLooper()).post {
                        surfaceTextureEntry?.release()
                        (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
                     }
@@ -181,6 +208,7 @@ class NitroCameraImpl(
                 surfaceProducer = surfaceProducer,
                 cameraDevice = camera,
                 characteristics = getCharacteristics(deviceId),
+                deviceId     = deviceId,
                 width        = width.toInt(),
                 height       = height.toInt(),
                 requestedFps = fps.toInt(),
@@ -193,7 +221,7 @@ class NitroCameraImpl(
             return textureId
         } catch (e: Exception) {
             Log.e(TAG, "General openCamera failure: ${e.message}")
-            withContext(Dispatchers.Main) { 
+            withContext(Dispatchers.Main) {
                 surfaceTextureEntry?.release()
                 (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
             }
@@ -327,7 +355,7 @@ class NitroCameraImpl(
         val focalLength = focalArray?.firstOrNull() ?: 3.5f
         val apertures  = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
         val aperture   = apertures?.firstOrNull() ?: 1.8f
-        
+
         val lensType = when {
             focalLength < 2.3f -> 2L // ultra-wide
             focalLength > 6.0f -> 3L // telephoto

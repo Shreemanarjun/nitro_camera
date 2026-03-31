@@ -51,9 +51,8 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      CameraState.status.value = CameraStatus.closed;
-    } else if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed) {
+      // Re-fetch devices in case they changed (e.g. external camera plugged in)
       CameraState.init();
     }
   }
@@ -150,21 +149,13 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
               ),
             ),
 
-            // 2. Automated Processing Layer (QR etc)
-            Watch((context) {
-              if (CameraState.mode.value == 'SCANNER') {
-                return FrameOverlay(
-                  isProcessing: CameraState.isProcessingFrames.value,
-                );
-              }
-              return const SizedBox.shrink();
-            }),
+            // 2b. Zoom Indicator
 
             // 2b. Zoom Indicator
             Positioned(
               left: 0,
               right: 0,
-              top: MediaQuery.of(context).size.height * 0.6,
+              top: MediaQuery.of(context).size.height * 0.3,
               child: Watch((context) {
                 final zoom = CameraState.currentZoom.value;
                 if (zoom <= 1.02) return const SizedBox.shrink();
@@ -202,12 +193,50 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
             const TopBar(),
 
             // 4. Tactical Control Trays (Filters & Sensors)
+            // 4. Tactical Control Trays (Sensors)
             const Positioned(
-              bottom: 220,
+              bottom: 200,
               left: 0,
               right: 0,
-              child: Column(children: [FilterSelector(), _SensorTray()]),
+              child: _SensorTray(),
             ),
+
+            // 4b. Collapsible Filter Tray
+            Watch((context) {
+              final show = CameraState.showFilters.value;
+              return AnimatedPositioned(
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeOutQuart,
+                bottom: show ? 260 : 180,
+                left: 0,
+                right: 0,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 300),
+                  opacity: show ? 1.0 : 0.0,
+                  curve: Curves.easeIn,
+                  child: IgnorePointer(
+                    ignoring: !show,
+                    child: const FilterSelector(),
+                  ),
+                ),
+              );
+            }),
+
+            // 5. Automated Processing Layer (QR etc) - Moved here to be above tactical trays
+            Watch((context) {
+              final isScanner = CameraState.mode.value == 'SCANNER';
+              return AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                transitionBuilder: (child, anim) =>
+                    FadeTransition(opacity: anim, child: child),
+                child: isScanner
+                    ? FrameOverlay(
+                        key: const ValueKey('scanner'),
+                        isProcessing: CameraState.isProcessingFrames.value,
+                      )
+                    : const SizedBox.shrink(key: ValueKey('none')),
+              );
+            }),
 
             // 5. Bottom Tactical Main Controls
             const BottomControls(),
@@ -251,67 +280,83 @@ class _SensorTray extends StatelessWidget {
       final baselineFocal = baselineLens.focalLength;
 
       return Container(
-        height: 50,
+        height: 60,
         margin: const EdgeInsets.only(top: 10),
-        child: ListView(
-          scrollDirection: Axis.horizontal,
-          shrinkWrap: true,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          children: devices.map((d) {
-            final isSelected = currentDevice?.id == d.id;
+        child: Center(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisSize: MainAxisSize.min,
+              children: devices.map((d) {
+                final isSelected = currentDevice?.id == d.id;
 
-            String label;
-            if (d.position == 0) {
-              label = "SELF";
-            } else {
-              final relZoom = d.focalLength / baselineFocal;
-              // Snap to 1.0 for better display
-              label = relZoom > 0.9 && relZoom < 1.1
-                  ? "1.0"
-                  : relZoom.toStringAsFixed(1);
-              // If it's the exact same label, but different aperture, distinguish it
-              if (backCameras
-                      .where(
-                        (e) =>
-                            (e.focalLength / baselineFocal).toStringAsFixed(
-                              1,
-                            ) ==
-                            relZoom.toStringAsFixed(1),
-                      )
-                      .length >
-                  1) {
-                label = "$label\nf/${d.aperture.toStringAsFixed(1)}";
-              }
-            }
+                String label;
+                if (d.position == 0) {
+                  label = "SELF";
+                } else {
+                  final relZoom = d.focalLength / baselineFocal;
+                  label = relZoom > 0.9 && relZoom < 1.1
+                      ? "1.0"
+                      : relZoom.toStringAsFixed(1);
+                  if (backCameras
+                          .where(
+                            (e) =>
+                                (e.focalLength / baselineFocal).toStringAsFixed(
+                                  1,
+                                ) ==
+                                relZoom.toStringAsFixed(1),
+                          )
+                          .length >
+                      1) {
+                    label = "$label\nf/${d.aperture.toStringAsFixed(1)}";
+                  }
+                }
 
-            return GestureDetector(
-              onTap: () => CameraState.selectDevice(d),
-              child: Container(
-                width: 50,
-                height: 50,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.amberAccent : Colors.white10,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isSelected ? Colors.amberAccent : Colors.white24,
-                    width: 1,
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: isSelected ? Colors.black : Colors.white70,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
+                return GestureDetector(
+                  onTap: () => CameraState.selectDevice(d),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: isSelected ? 54 : 44,
+                    height: isSelected ? 54 : 44,
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.amberAccent : Colors.black45,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected ? Colors.white : Colors.white24,
+                        width: isSelected ? 2 : 1,
+                      ),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: Colors.amberAccent.withValues(
+                                  alpha: 0.4,
+                                ),
+                                blurRadius: 10,
+                                spreadRadius: 2,
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Center(
+                      child: Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: isSelected ? Colors.black : Colors.white70,
+                          fontSize: isSelected ? 11 : 9,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            );
-          }).toList(),
+                );
+              }).toList(),
+            ),
+          ),
         ),
       );
     });

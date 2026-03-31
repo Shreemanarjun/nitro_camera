@@ -142,6 +142,9 @@ class _FrameOverlayState extends State<FrameOverlay> {
     return IgnorePointer(
       child: Stack(
         children: [
+          // 0. Dimmed Background with Scanner Cutout
+          const Positioned.fill(child: _TacticalScannerOverlay()),
+
           // 1. Stats Dashboard (Top Left)
           Positioned(
             left: 20,
@@ -194,7 +197,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
             Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 200),
+                padding: const EdgeInsets.only(bottom: 280),
                 child: _QRResultCard(result: _lastResult!),
               ),
             ),
@@ -463,6 +466,43 @@ class _SuccessFlash extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TacticalScannerOverlay extends StatelessWidget {
+  const _TacticalScannerOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _ScannerHolePainter(),
+    );
+  }
+}
+
+class _ScannerHolePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTRB(0, 0, size.width, size.height);
+    final hole = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: 280,
+      height: 280,
+    );
+    final rhole = RRect.fromRectAndRadius(hole, const Radius.circular(48));
+
+    canvas.drawPath(
+      Path.combine(
+        PathOperation.difference,
+        Path()..addRect(rect),
+        Path()..addRRect(rhole),
+      ),
+      Paint()..color = Colors.black.withValues(alpha: 0.5),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _QRResultCard extends StatelessWidget {

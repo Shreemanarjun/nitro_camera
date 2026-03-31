@@ -4,6 +4,7 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import kotlinx.coroutines.*
+import androidx.lifecycle.LifecycleOwner
 import nitro.nitro_camera_module.NitroCameraJniBridge
 
 class NitroCameraPlugin : FlutterPlugin, ActivityAware {
@@ -33,20 +34,25 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         impl?.activity = binding.activity
+        (binding.activity as? LifecycleOwner)?.lifecycle?.addObserver(impl!!)
         binding.addRequestPermissionsResultListener { requestCode, _, grantResults ->
             impl?.handlePermissionResult(requestCode, grantResults) ?: false
         }
     }
 
     override fun onDetachedFromActivity() {
-        impl?.activity = null
+        val target = impl
+        if (target != null) {
+            (target.activity as? LifecycleOwner)?.lifecycle?.removeObserver(target)
+            target.activity = null
+        }
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        impl?.activity = binding.activity
+        onAttachedToActivity(binding)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        impl?.activity = null
+        onDetachedFromActivity()
     }
 }

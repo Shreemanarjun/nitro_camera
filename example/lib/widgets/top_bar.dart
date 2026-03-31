@@ -31,6 +31,46 @@ class TopBar extends StatelessWidget {
                 label: "$fps FPS",
                 onTap: () => CameraState.setFps(fps == 30 ? 60 : 30),
               ),
+              const SizedBox(width: 12),
+              // ASPECT RATIO TOGGLE
+              Watch((context) {
+                final ar = CameraState.selectedAspectRatio.value;
+                String label;
+                if (ar == null) {
+                  label = "FULL";
+                } else if ((ar - 1.0).abs() < 0.01) {
+                  label = "1:1";
+                } else if ((ar - 4 / 3).abs() < 0.01) {
+                  label = "4:3";
+                } else {
+                  label = "16:9";
+                }
+
+                return _TacticalUnit(
+                  label: label,
+                  onTap: () {
+                    if (ar == null) {
+                      CameraState.selectedAspectRatio.value = 16 / 9;
+                    } else if ((ar - 16 / 9).abs() < 0.01) {
+                      CameraState.selectedAspectRatio.value = 4 / 3;
+                    } else if ((ar - 4 / 3).abs() < 0.01) {
+                      CameraState.selectedAspectRatio.value = 1.0;
+                    } else {
+                      CameraState.selectedAspectRatio.value = null;
+                    }
+                  },
+                );
+              }),
+              const SizedBox(width: 12),
+              // FILTER TOGGLE
+              Watch((context) {
+                final show = CameraState.showFilters.value;
+                return _TacticalUnit(
+                  label: "FILTERS",
+                  onTap: () => CameraState.showFilters.value = !show,
+                  active: show,
+                );
+              }),
               const Spacer(),
               // FLASH TOGGLE
               Watch((context) {
@@ -84,7 +124,12 @@ class TopBar extends StatelessWidget {
 class _TacticalUnit extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
-  const _TacticalUnit({required this.label, required this.onTap});
+  final bool active;
+  const _TacticalUnit({
+    required this.label,
+    required this.onTap,
+    this.active = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -93,14 +138,18 @@ class _TacticalUnit extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.1),
+          color: active
+              ? Colors.cyanAccent
+              : Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(
+            color: active ? Colors.white : Colors.white.withValues(alpha: 0.05),
+          ),
         ),
         child: Text(
           label,
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: active ? Colors.black : Colors.white,
             fontSize: 10,
             fontWeight: FontWeight.w900,
             letterSpacing: 0.5,

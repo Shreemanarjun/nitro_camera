@@ -12,10 +12,16 @@ import java.nio.FloatBuffer
 /**
  * High-performance GPU-accelerated OpenGL Renderer for the Nitro Camera pipeline.
  * Implements a programmable video filter chain using GLSL Shaders.
- * 
+ *
  * Flow: Camera (OES Texture) -> OpenGL Shader -> Output Surface (Flutter Texture)
  */
 class NitraRenderer(private val width: Int, private val height: Int) {
+    private var sensorOrientation: Int = 90
+
+    fun setSensorOrientation(orientation: Int) {
+        this.sensorOrientation = orientation
+    }
+
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -37,8 +43,9 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             "attribute vec4 texCoord;\n" +
             "varying vec2 vTextureCoord;\n" +
             "uniform mat4 uSTMatrix;\n" +
+            "uniform mat4 uProjection;\n" +
             "void main() {\n" +
-            "    gl_Position = position;\n" +
+            "    gl_Position = uProjection * position;\n" +
             "    vTextureCoord = (uSTMatrix * texCoord).xy;\n" +
             "}\n"
 
@@ -95,7 +102,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         if (eglContext == EGL14.EGL_NO_CONTEXT) throw RuntimeException("eglCreateContext failed")
 
         val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
-        
+
         // Safety: Attempt to create surface. If it fails, the native window might be busy.
         eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, outputSurface, surfaceAttribs, 0)
         if (eglSurface == EGL14.EGL_NO_SURFACE) {
@@ -110,7 +117,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     private fun initGL() {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
-        
+
         setupProgram()
 
         val textures = IntArray(1)
@@ -126,17 +133,17 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             setDefaultBufferSize(width, height)
         }
         inputSurface = Surface(inputSurfaceTexture)
-        
-        // IMPORTANT: Unbind EGL from this setup thread. 
+
+        // IMPORTANT: Unbind EGL from this setup thread.
         // Rendering should only happen on drawFrame thread.
         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
     }
 
     private fun setupProgram() {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
-        
+
         program = createProgram(vertexShader, fragmentShader)
-        
+
         // Graceful Fallback: if custom shader fails, use passthrough
         if (program == 0 && fragmentShader != PASSTHROUGH_FS) {
             Log.w("NitroCamera", "NitraRenderer: Custom shader failed, falling back to passthrough")
@@ -151,11 +158,14 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         phLoc = GLES20.glGetAttribLocation(program, "position")
         thLoc = GLES20.glGetAttribLocation(program, "texCoord")
         mhLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
+        upLoc = GLES20.glGetUniformLocation(program, "uProjection")
     }
 
     private var phLoc: Int = -1
     private var thLoc: Int = -1
     private var mhLoc: Int = -1
+    private var upLoc: Int = -1
+    private var projectionMatrix = FloatArray(16)
 
     fun setRecordingSurface(surface: android.view.Surface?) {
         val display = eglDisplay
@@ -176,12 +186,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     fun updateShader(shader: String) {
         if (fragmentShader == shader) return
-        
+
         if (shader.isEmpty()) {
             fragmentShader = PASSTHROUGH_FS
         } else {
             // Build a compatibility wrapper for user shaders
-            fragmentShader = 
+            fragmentShader =
                 "#extension GL_OES_EGL_image_external : require\n" +
                 "precision mediump float;\n" +
                 "varying vec2 vTextureCoord;\n" +
@@ -194,7 +204,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 "\n" +
                 shader
         }
-        
+
         // Signal drawFrame to re-init the program
         if (program != 0) {
             program = 0
@@ -204,7 +214,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     fun drawFrame() {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
-        
+
         try {
             // 1. Core Logic (on eglSurface)
             renderToSurface(eglSurface)
@@ -220,16 +230,16 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     private fun renderToSurface(surface: EGLSurface) {
         if (surface == EGL14.EGL_NO_SURFACE) return
-        
+
         EGL14.eglMakeCurrent(eglDisplay, surface, surface, eglContext)
-        
+
         if (program == 0 || phLoc == -1) {
-            setupProgram() 
+            setupProgram()
             if (program == 0 || phLoc == -1) return
         }
 
         val st = inputSurfaceTexture ?: return
-        
+
         // Only update texture ONCE per frame (on the first surface)
         if (surface == eglSurface) {
             try {
@@ -240,15 +250,28 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             }
         }
 
-        GLES20.glViewport(0, 0, width, height)
+        // --- ASPECT RATIO & VIEWPORT CORRECTION ---
+        // Query the actual surface size to avoid "clamped" or stretched preview
+        val surfaceW = IntArray(1)
+        val surfaceH = IntArray(1)
+        EGL14.eglQuerySurface(eglDisplay, surface, EGL14.EGL_WIDTH, surfaceW, 0)
+        EGL14.eglQuerySurface(eglDisplay, surface, EGL14.EGL_HEIGHT, surfaceH, 0)
+        val sw = surfaceW[0]
+        val sh = surfaceH[0]
+
+        // --- ASPECT RATIO HANDLING (DELEGATED TO FLUTTER) ---
+        android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
+
+        GLES20.glViewport(0, 0, sw, sh)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        
+
         isFirstFrame = false
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
+        GLES20.glUniformMatrix4fv(upLoc, 1, false, projectionMatrix, 0)
         GLES20.glEnableVertexAttribArray(phLoc)
         GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
         GLES20.glEnableVertexAttribArray(thLoc)
@@ -270,7 +293,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     fun release() {
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
-            
+
             // Delete GL resources before destroying context
             if (program != 0) GLES20.glDeleteProgram(program)
             if (textureId != -1) {
@@ -294,12 +317,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         val vShader = loadShader(GLES20.GL_VERTEX_SHADER, vs)
         val fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fs)
         if (vShader == 0 || fShader == 0) return 0
-        
+
         val p = GLES20.glCreateProgram()
         GLES20.glAttachShader(p, vShader)
         GLES20.glAttachShader(p, fShader)
         GLES20.glLinkProgram(p)
-        
+
         val linkStatus = IntArray(1)
         GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, linkStatus, 0)
         if (linkStatus[0] != GLES20.GL_TRUE) {
@@ -355,7 +378,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             val dpy = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
             val ver = IntArray(2)
             EGL14.eglInitialize(dpy, ver, 0, ver, 1)
-            
+
             val confSpec = intArrayOf(
                 EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
                 EGL14.EGL_SURFACE_TYPE, EGL14.EGL_PBUFFER_BIT,
@@ -364,7 +387,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             )
             val configs = arrayOfNulls<EGLConfig>(1)
             EGL14.eglChooseConfig(dpy, confSpec, 0, configs, 0, 1, IntArray(1), 0)
-            
+
             val ctx = EGL14.eglCreateContext(dpy, configs[0], EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0)
             val surf = EGL14.eglCreatePbufferSurface(dpy, configs[0], intArrayOf(EGL14.EGL_WIDTH, w, EGL14.EGL_HEIGHT, h, EGL14.EGL_NONE), 0)
             EGL14.eglMakeCurrent(dpy, surf, surf, ctx)
@@ -382,17 +405,17 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
                 GLES20.glUseProgram(prg)
                 GLES20.glUniform1i(GLES20.glGetUniformLocation(prg, "sTextureStill"), 0)
-                
+
                 val vBuf = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(floatArrayOf(-1f,-1f, 1f,-1f, -1f,1f, 1f,1f)); position(0) }
                 val tBuf = ByteBuffer.allocateDirect(32).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(floatArrayOf(0f,0f, 1f,0f, 0f,1f, 1f,1f)); position(0) }
-                
+
                 val pLoc = GLES20.glGetAttribLocation(prg, "position")
                 val tcLoc = GLES20.glGetAttribLocation(prg, "texCoord")
                 GLES20.glEnableVertexAttribArray(pLoc); GLES20.glVertexAttribPointer(pLoc, 2, GLES20.GL_FLOAT, false, 8, vBuf)
                 GLES20.glEnableVertexAttribArray(tcLoc); GLES20.glVertexAttribPointer(tcLoc, 2, GLES20.GL_FLOAT, false, 8, tBuf)
-                
+
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-                
+
                 // Read back to bitmap
                 val outBuf = ByteBuffer.allocateDirect(w * h * 4)
                 GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, outBuf)

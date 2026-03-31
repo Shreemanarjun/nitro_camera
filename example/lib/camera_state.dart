@@ -21,8 +21,8 @@ class CameraState {
   static final currentZoom = signal(1.0);
   static final focusIndicatorTrigger = signal<Offset?>(null);
 
-  static final width = signal(1280);
-  static final height = signal(720);
+  static final width = signal(1920);
+  static final height = signal(1080);
   static final fps = signal(60);
 
   static final mode = signal('PHOTO'); // PHOTO, VIDEO, SCANNER
@@ -52,6 +52,8 @@ class CameraState {
   ); // 0: unknown, 1: granted, 2: denied
   static final photoTrigger = signal(0); // Inc to trigger flash
   static final controlMode = signal('FILTERS'); // FILTERS or SETTINGS
+  static final selectedAspectRatio = signal<double?>(null);
+  static final showFilters = signal(false);
 
   // Add Initialization logic
   static Future<void> init() async {
@@ -148,9 +150,6 @@ class CameraState {
     }
   }
 
-  static double _lastSentZoom = -1.0;
-  static DateTime _lastZoomTime = DateTime.fromMillisecondsSinceEpoch(0);
-
   static Future<void> setZoom(double z) async {
     final dev = currentDevice.value;
     if (dev == null) return;
@@ -161,14 +160,8 @@ class CameraState {
     final tid = activeTextureId.value;
     if (tid == null) return;
 
-    // THROTTLE: Only send to native if change > 0.5% or 16ms passed since last call
-    final diff = (clamped - _lastSentZoom).abs() / clamped;
-    final now = DateTime.now();
-    if (diff > 0.005 || now.difference(_lastZoomTime).inMilliseconds > 16) {
-      _lastSentZoom = clamped;
-      _lastZoomTime = now;
-      await NitroCamera.instance.setZoom(tid, clamped);
-    }
+    // Fast zoom: Send to native immediately for smooth experience
+    await NitroCamera.instance.setZoom(tid, clamped);
   }
 
   static Future<void> setFocusPoint(double x, double y) async {

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'dart:ui' as ui;
+import 'package:signals_flutter/signals_flutter.dart';
+import 'camera_state.dart';
 
 /// A high-performance, lifecycle-managed camera preview widget.
 /// Automatically handles opening and closing the camera session.
@@ -56,13 +58,12 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
     if (oldWidget.device.id != widget.device.id ||
         oldWidget.width != widget.width ||
         oldWidget.height != widget.height ||
-        oldWidget.fps != widget.fps || 
+        oldWidget.fps != widget.fps ||
         oldWidget.pixelFormat != widget.pixelFormat) {
       _restartCamera();
     }
     // Logic for zoom/filter removed: handled by CameraState directly to avoid duplicates.
   }
-
 
   @override
   void dispose() {
@@ -91,12 +92,14 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
   Future<void>? _nextTask;
 
   Future<void> _restartCamera() async {
-    _nextTask = (_nextTask ?? Future.value()).then((_) => _restartCameraInternal());
+    _nextTask = (_nextTask ?? Future.value()).then(
+      (_) => _restartCameraInternal(),
+    );
   }
 
   Future<void> _restartCameraInternal() async {
     if (!mounted) return;
-    
+
     final oldId = _textureId;
 
     setState(() {
@@ -117,16 +120,18 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
       }
 
       // 2. Open new session with timeout
-      final id = await NitroCamera.instance.openCamera(
-        widget.device.id,
-        widget.width,
-        widget.height,
-        widget.fps,
-        widget.enableAudio ? 1 : 0,
-      ).timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw TimeoutException("Hardware open timeout"),
-      );
+      final id = await NitroCamera.instance
+          .openCamera(
+            widget.device.id,
+            widget.width,
+            widget.height,
+            widget.fps,
+            widget.enableAudio ? 1 : 0,
+          )
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => throw TimeoutException("Hardware open timeout"),
+          );
 
       if (!mounted) {
         unawaited(NitroCamera.instance.closeCamera(id));
@@ -136,7 +141,9 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
       // 3. Fire-and-forget non-blocking hardware setup to return ASAP
       unawaited(NitroCamera.instance.setFrameFormat(id, widget.pixelFormat));
       if (widget.filterShader != null && widget.filterShader!.isNotEmpty) {
-        unawaited(NitroCamera.instance.setFilterShader(id, widget.filterShader!));
+        unawaited(
+          NitroCamera.instance.setFilterShader(id, widget.filterShader!),
+        );
       }
 
       // 4. Update UI immediately once the texture is ready
@@ -147,7 +154,6 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
       });
 
       widget.onStarted?.call(id);
-      
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -162,11 +168,10 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
   }
 
   Future<void> _openCameraInternal() async {
-     await _restartCamera();
+    await _restartCamera();
   }
 
   // Manual hardware setters removed: CameraState now manages these globally to avoid redundant FFI calls.
-
 
   @override
   Widget build(BuildContext context) {
@@ -179,14 +184,23 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
             children: [
               const Icon(Icons.error_outline, color: Colors.red, size: 48),
               const SizedBox(height: 16),
-              Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
               TextButton(
                 onPressed: () async {
-                  setState(() { _error = null; });
+                  setState(() {
+                    _error = null;
+                  });
                   await NitroCamera.instance.reset();
                   _startCamera();
-                }, 
-                child: const Text("RETRY", style: TextStyle(color: Colors.cyanAccent)),
+                },
+                child: const Text(
+                  "RETRY",
+                  style: TextStyle(color: Colors.cyanAccent),
+                ),
               ),
             ],
           ),
@@ -203,25 +217,58 @@ class _NitraCameraPreviewState extends State<NitraCameraPreview> {
               key: const ValueKey('loading'),
               color: Colors.black,
               child: const Center(
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.cyanAccent,
+                ),
               ),
             )
-          : Stack(
-              key: ValueKey(_textureId),
-              fit: StackFit.expand,
-              children: [
-                Texture(textureId: _textureId!),
-                
-                // Overlay blur if switching
-                if (_isSwitching)
-                  Positioned.fill(
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                      child: Container(color: Colors.black.withValues(alpha: 0.1)),
+          : Watch((context) {
+              final ar = CameraState.selectedAspectRatio.value;
+              return Stack(
+                key: ValueKey(_textureId),
+                fit: StackFit.expand,
+                children: [
+                  Center(
+                    child: AspectRatio(
+                      aspectRatio: ar ?? MediaQuery.of(context).size.aspectRatio,
+                      child: ClipRect(
+                        child: FittedBox(
+                          fit: BoxFit.cover,
+                          clipBehavior: Clip.hardEdge,
+                          child: SizedBox(
+                            width:
+                                (widget.device.sensorOrientation == 90 ||
+                                    widget.device.sensorOrientation == 270)
+                                ? widget.height.toDouble()
+                                : widget.width.toDouble(),
+                            height:
+                                (widget.device.sensorOrientation == 90 ||
+                                    widget.device.sensorOrientation == 270)
+                                ? widget.width.toDouble()
+                                : widget.height.toDouble(),
+                            child: Texture(
+                              textureId: _textureId!,
+                              filterQuality: FilterQuality.high,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-              ],
-            ),
+                  // Overlay blur if switching
+                  if (_isSwitching)
+                    Positioned.fill(
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.1),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            }),
     );
   }
 }

@@ -49,18 +49,33 @@ class BottomControls extends StatelessWidget {
                       child: Container(
                         alignment: Alignment.center,
                         padding: const EdgeInsets.symmetric(horizontal: 18),
-                        child: Text(
-                          m,
-                          style: TextStyle(
-                            color: isSelected
-                                ? Colors.amberAccent
-                                : Colors.white54,
-                            fontWeight: isSelected
-                                ? FontWeight.w900
-                                : FontWeight.normal,
-                            fontSize: 13,
-                            letterSpacing: 1.2,
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              m,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.amberAccent
+                                    : Colors.white54,
+                                fontWeight: isSelected
+                                    ? FontWeight.w900
+                                    : FontWeight.normal,
+                                fontSize: 13,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 300),
+                              width: isSelected ? 4 : 0,
+                              height: 4,
+                              decoration: const BoxDecoration(
+                                color: Colors.amberAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );

@@ -20,6 +20,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import nitro.nitro_camera_module.*
 import java.nio.ByteBuffer
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import android.hardware.camera2.CameraManager
 
 import android.hardware.camera2.CameraDevice as AndroidCameraDevice
 
@@ -32,8 +35,9 @@ class NitraCameraSession(
     val textureId: Long,
     private val surfaceEntry: TextureRegistry.SurfaceTextureEntry?,
     private val surfaceProducer: Any?, // TextureRegistry.SurfaceProducer
-    private val cameraDevice: AndroidCameraDevice,
+    private var cameraDevice: AndroidCameraDevice,
     private val characteristics: CameraCharacteristics,
+    private val deviceId: String,
     private val width: Int,
     private val height: Int,
     private val requestedFps: Int,
@@ -48,6 +52,7 @@ class NitraCameraSession(
     private val renderer = NitraRenderer(width, height)
 
     private var previewSurface: Surface? = null
+    private var currentRequestBuilder: CaptureRequest.Builder? = null
 
     // --- Persistent Camera State ---
     private var zoomValue: Double = 1.0
@@ -73,6 +78,7 @@ class NitraCameraSession(
                         Surface(st)
                     }
                 }
+                renderer.setSensorOrientation(characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90)
                 renderer.setup(inputSurface)
             } catch (e: Exception) {
                 Log.e("NitroCamera", "GL Setup Error: ${e.message}")
@@ -118,6 +124,51 @@ class NitraCameraSession(
     val mediaManager = NitraMediaManager(
         context, cameraDevice, characteristics, cameraHandler, width, height, enableAudio
     )
+
+    fun onAppStop() {
+        if (isClosed) return
+        try {
+            captureSession?.stopRepeating()
+            captureSession?.close()
+        } catch (_: Exception) {}
+        captureSession = null
+        try {
+            cameraDevice.close()
+        } catch (_: Exception) {}
+        Log.d("NitroCamera", "Session $textureId paused hardware")
+    }
+
+    suspend fun onAppResume(cameraManager: CameraManager) {
+        if (isClosed) return
+        if (captureSession != null) return // Already running
+
+        Log.d("NitroCamera", "Session $textureId resuming hardware for $deviceId")
+        try {
+            val newDevice = suspendCancellableCoroutine<AndroidCameraDevice> { cont ->
+                try {
+                    cameraManager.openCamera(deviceId, object : AndroidCameraDevice.StateCallback() {
+                        override fun onOpened(cam: AndroidCameraDevice) {
+                            if (cont.isActive) cont.resume(cam)
+                        }
+                        override fun onDisconnected(cam: AndroidCameraDevice) {
+                            cam.close()
+                            if (cont.isActive) cont.cancel()
+                        }
+                        override fun onError(cam: AndroidCameraDevice, error: Int) {
+                            cam.close()
+                            if (cont.isActive) cont.resumeWith(Result.failure(Exception("Camera resume error $error")))
+                        }
+                    }, cameraHandler)
+                } catch (e: Exception) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+            }
+            this.cameraDevice = newDevice
+            startPreview()
+        } catch (e: Exception) {
+            Log.e("NitroCamera", "Failed to resume session $textureId: ${e.message}")
+        }
+    }
 
     private fun bestFpsRange(): android.util.Range<Int>? {
         val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
@@ -196,6 +247,7 @@ class NitraCameraSession(
             if (frameProcessingEnabled) {
                 builder.addTarget(frameReader.surface)
             }
+            currentRequestBuilder = builder
             applySessionSettings(builder)
             session.setRepeatingRequest(builder.build(), null, cameraHandler)
         } catch (e: Exception) {
@@ -215,26 +267,45 @@ class NitraCameraSession(
         }
         builder.set(CaptureRequest.CONTROL_AF_MODE, af)
 
-        val availableAeModes = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
-        var ae = CaptureRequest.CONTROL_AE_MODE_ON
-
-        when (flashMode) {
-            1L -> if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
-                ae = CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH
-            }
-            2L -> if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
-                ae = CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH
-            }
-        }
-        builder.set(CaptureRequest.CONTROL_AE_MODE, ae)
-
+        // Handle Flash/Torch logic
         if (torchEnabled) {
             builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-        } else if (flashMode == 1L) {
-            builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         } else {
-            builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+            val availableAeModes = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
+            var ae = CaptureRequest.CONTROL_AE_MODE_ON
+            
+            when (flashMode) {
+                1L -> { // FLASH ON
+                    if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
+                        ae = CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF) // AE handles it
+                    } else {
+                        ae = CaptureRequest.CONTROL_AE_MODE_ON
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                    }
+                }
+                2L -> { // FLASH AUTO
+                    if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
+                        ae = CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF) // AE handles it
+                    }
+                }
+                else -> { // FLASH OFF
+                    ae = CaptureRequest.CONTROL_AE_MODE_ON
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    // Ensure we reset any pending precapture sequences that might hold the flash
+                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
+                }
+            }
+            builder.set(CaptureRequest.CONTROL_AE_MODE, ae)
         }
+        // Always reset trigger to idle in repeating request after cancel/start if we don't want it to keep firing
+        // However, setting it to NULL or not setting it is better for repeating requests.
+        // Actually, we should only set it in the capture(builder.build()) for one-shot.
+        // So I'll ensure it's IDLE here for the repeating preview.
+        builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
+
 
         val zoomSet = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
@@ -331,13 +402,10 @@ class NitraCameraSession(
         if (isClosed) return
         cameraHandler.post {
             val session = captureSession ?: return@post
+            val builder = currentRequestBuilder ?: return@post
             if (isClosed) return@post
             try {
-                val template = if (mediaManager.isRecording)
-                    AndroidCameraDevice.TEMPLATE_RECORD else AndroidCameraDevice.TEMPLATE_PREVIEW
-                val builder = cameraDevice.createCaptureRequest(template)
-                val pSurface = previewSurface ?: return@post
-                builder.addTarget(pSurface)
+                // Reuse cached builder to avoid expensive createCaptureRequest overhead
                 applySessionSettings(builder)
                 session.setRepeatingRequest(builder.build(), null, cameraHandler)
             } catch (e: Exception) { Log.w("NitroCamera", "Update failed: ${e.message}") }
@@ -410,12 +478,16 @@ class NitraCameraSession(
         builder.addTarget(mediaManager.photoReader.surface)
         
         // Sync hardware state to high-res request
-        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         applySessionSettings(builder)
-
+        
         // JPEG orientation
         val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
+
+        // For Manual Flash 'ON', some devices need an AE trigger to ensure it fires
+        if (flashMode == 1L) {
+             builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+        }
         
         return mediaManager.takePhotoWithRequest(
             session = session, 
