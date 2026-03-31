@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:ui' as ui;
-import '../camera_state.dart';
+import '../../state/camera_state.dart';
 
 class ControlPanel extends StatelessWidget {
   const ControlPanel({super.key});

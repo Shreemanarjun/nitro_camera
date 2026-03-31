@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
-import '../camera_state.dart';
+import '../../state/camera_state.dart';
 
 class FilterSelector extends StatelessWidget {
   final Map<String, String>? filters;

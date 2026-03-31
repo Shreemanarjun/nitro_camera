@@ -22,6 +22,11 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
         )
         impl = nitroImpl
         NitroCameraJniBridge.register(nitroImpl)
+
+        binding.platformViewRegistry.registerViewFactory(
+            "dev.shreeman.nitro_camera/platform_view",
+            NitraPlatformViewFactory(nitroImpl)
+        )
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {

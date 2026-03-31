@@ -4,22 +4,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:async';
-import 'camera_state.dart';
-import 'camera_preview_widget.dart';
-import 'widgets/camera_status_widgets.dart';
-import 'widgets/top_bar.dart';
-import 'widgets/bottom_controls.dart';
-import 'widgets/frame_overlay.dart';
-import 'widgets/filter_selector.dart';
 import 'package:nitro/nitro.dart';
+import 'features/camera/state/camera_state.dart';
+import 'features/camera/ui/widgets/camera_preview.dart';
+import 'features/camera/ui/widgets/camera_status_widgets.dart';
+import 'features/camera/ui/widgets/top_bar.dart';
+import 'features/camera/ui/widgets/bottom_controls.dart';
+import 'features/camera/ui/widgets/frame_overlay.dart';
+import 'features/camera/ui/widgets/filter_selector.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  NitroConfig.instance.enable(slowCallThresholdMs: 200);
+  NitroConfig.instance.enable(
+    slowCallThresholdMs: 200,
+    level: NitroLogLevel.verbose,
+  );
   NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
 
-  // Pre-warm camera initialization in background while Flutter starts
-  unawaited(CameraState.init());
+  // Pre-warm camera initialization in background after first frame draw
+  Future.delayed(Duration.zero, () => CameraState.init());
 
   runApp(
     const MaterialApp(debugShowCheckedModeBanner: false, home: CameraApp()),
@@ -74,6 +77,14 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Sync resolution with screen aspect to avoid stretching
+    final size = MediaQuery.of(context).size;
+    final pixelRatio = MediaQuery.of(context).devicePixelRatio;
+    CameraState.setResolution(
+      (size.width * pixelRatio).toInt(),
+      (size.height * pixelRatio).toInt(),
+    );
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Watch((context) {
@@ -101,8 +112,29 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                   final box = context.findRenderObject() as RenderBox?;
                   if (box == null) return;
                   final local = box.globalToLocal(details.globalPosition);
-                  final x = (local.dx / box.size.width).clamp(0.0, 1.0);
-                  final y = (local.dy / box.size.height).clamp(0.0, 1.0);
+
+                  // Correct focus coords if using aspect ratio
+                  final ar = CameraState.selectedAspectRatio.value;
+                  double x = local.dx / box.size.width;
+                  double y = local.dy / box.size.height;
+
+                  if (ar != null) {
+                    final screenAr = box.size.width / box.size.height;
+                    if (screenAr > ar) {
+                      // Width is larger (portrait bars on sides)
+                      final previewWidth = box.size.height * ar;
+                      final sideBar = (box.size.width - previewWidth) / 2;
+                      x = (local.dx - sideBar) / previewWidth;
+                    } else {
+                      // Height is larger (portrait bars top/bottom)
+                      final previewHeight = box.size.width / ar;
+                      final topBar = (box.size.height - previewHeight) / 2;
+                      y = (local.dy - topBar) / previewHeight;
+                    }
+                  }
+
+                  x = x.clamp(0.0, 1.0);
+                  y = y.clamp(0.0, 1.0);
                   CameraState.setFocusPoint(x, y);
                   CameraState.focusIndicatorTrigger.value = local;
                 },

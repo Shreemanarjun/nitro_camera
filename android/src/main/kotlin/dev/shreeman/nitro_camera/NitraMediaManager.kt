@@ -138,11 +138,19 @@ class NitraMediaManager(
         if (enableAudio) recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        if (enableAudio) recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-        recorder.setVideoSize(width, height)
+        
+        // Use a more compatible profile if possible, otherwise manual
+        // Fix: Ensure dimension are even (H264 requirement on many Android devices)
+        val safeWidth = if (width % 2 == 0) width else width - 1
+        val safeHeight = if (height % 2 == 0) height else height - 1
+        
+        recorder.setVideoSize(safeWidth, safeHeight)
+        recorder.setVideoEncodingBitRate(6_000_000) // 6Mbps is more than enough for high quality
         recorder.setVideoFrameRate(30)
-        recorder.setVideoEncodingBitRate(10_000_000)
+        
+        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+        if (enableAudio) recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+        
         recorder.setOutputFile(outputPath)
         recorder.prepare()
 

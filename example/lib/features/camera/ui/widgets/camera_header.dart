@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nitro_camera/nitro_camera.dart';
-import '../camera_state.dart';
+import '../../state/camera_state.dart';
 import 'dart:ui' as ui;
 
 class CameraHeader extends StatelessWidget {

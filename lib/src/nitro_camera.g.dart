@@ -336,11 +336,10 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<int> getCameraPermissionStatus() async {
+  int getCameraPermissionStatus() {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<int>(
-        _getCameraPermissionStatusPtr, [],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
+    final res = _getCameraPermissionStatusPtr();
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
     return res;
   }
 
@@ -354,11 +353,10 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<int> getMicrophonePermissionStatus() async {
+  int getMicrophonePermissionStatus() {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<int>(
-        _getMicrophonePermissionStatusPtr, [],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
+    final res = _getMicrophonePermissionStatusPtr();
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
     return res;
   }
 
@@ -372,38 +370,40 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<List<CameraDevice>> getAvailableCameraDevices() async {
+  List<CameraDevice> getAvailableCameraDevices() {
     checkDisposed();
-    final rawPtr = await NitroRuntime.callAsync<Pointer<Uint8>>(
-        _getAvailableCameraDevicesPtr, [],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
+    final res = _getAvailableCameraDevicesPtr();
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
+    final List<CameraDevice> decoded;
     try {
-      return RecordReader.decodeList(
-          rawPtr, (r) => CameraDeviceRecordExt.fromReader(r));
+      decoded = RecordReader.decodeList(
+          res as Pointer<Uint8>, (r) => CameraDeviceRecordExt.fromReader(r));
     } finally {
-      malloc.free(rawPtr);
+      malloc.free(res);
     }
+    return decoded;
   }
 
   @override
-  Future<int> getDeviceCount() async {
+  int getDeviceCount() {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<int>(_getDeviceCountPtr, [],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
+    final res = _getDeviceCountPtr();
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
     return res;
   }
 
   @override
-  Future<CameraDevice> getDevice(int index) async {
+  CameraDevice getDevice(int index) {
     checkDisposed();
-    final rawPtr = await NitroRuntime.callAsync<Pointer<Uint8>>(
-        _getDevicePtr, [index],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
+    final res = _getDevicePtr(index);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
+    final CameraDevice decoded;
     try {
-      return CameraDeviceRecordExt.fromNative(rawPtr);
+      decoded = CameraDeviceRecordExt.fromNative(res as Pointer<Uint8>);
     } finally {
-      malloc.free(rawPtr);
+      malloc.free(res);
     }
+    return decoded;
   }
 
   @override
@@ -438,92 +438,73 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<void> startPreview(int textureId) async {
+  void startPreview(int textureId) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _startPreviewPtr, [textureId],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _startPreviewPtr(textureId);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> stopPreview(int textureId) async {
+  void stopPreview(int textureId) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(_stopPreviewPtr, [textureId],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _stopPreviewPtr(textureId);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setZoom(int textureId, double zoom) async {
+  void setZoom(int textureId, double zoom) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setZoomPtr, [textureId, zoom],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setZoomPtr(textureId, zoom);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setFocusPoint(int textureId, double x, double y) async {
+  void setFocusPoint(int textureId, double x, double y) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setFocusPointPtr, [textureId, x, y],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setFocusPointPtr(textureId, x, y);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setAutoFocus(int textureId, int mode) async {
+  void setAutoFocus(int textureId, int mode) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setAutoFocusPtr, [textureId, mode],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setAutoFocusPtr(textureId, mode);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setExposure(int textureId, double value) async {
+  void setExposure(int textureId, double value) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setExposurePtr, [textureId, value],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setExposurePtr(textureId, value);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setFlash(int textureId, int mode) async {
+  void setFlash(int textureId, int mode) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setFlashPtr, [textureId, mode],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setFlashPtr(textureId, mode);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setTorch(int textureId, int enabled) async {
+  void setTorch(int textureId, int enabled) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setTorchPtr, [textureId, enabled],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setTorchPtr(textureId, enabled);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setWhiteBalance(int textureId, int temperature) async {
+  void setWhiteBalance(int textureId, int temperature) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setWhiteBalancePtr, [textureId, temperature],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setWhiteBalancePtr(textureId, temperature);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setHdr(int textureId, int enabled) async {
+  void setHdr(int textureId, int enabled) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setHdrPtr, [textureId, enabled],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setHdrPtr(textureId, enabled);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
@@ -567,93 +548,74 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<void> pauseRecording(int textureId) async {
+  void pauseRecording(int textureId) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _pauseRecordingPtr, [textureId],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _pauseRecordingPtr(textureId);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> resumeRecording(int textureId) async {
+  void resumeRecording(int textureId) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _resumeRecordingPtr, [textureId],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _resumeRecordingPtr(textureId);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> cancelRecording(int textureId) async {
+  void cancelRecording(int textureId) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _cancelRecordingPtr, [textureId],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _cancelRecordingPtr(textureId);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> enableFrameProcessing(int textureId, int enabled) async {
+  void enableFrameProcessing(int textureId, int enabled) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _enableFrameProcessingPtr, [textureId, enabled],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _enableFrameProcessingPtr(textureId, enabled);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setFrameFormat(int textureId, int format) async {
+  void setFrameFormat(int textureId, int format) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setFrameFormatPtr, [textureId, format],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setFrameFormatPtr(textureId, format);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setSamplingRate(int textureId, int samplingRate) async {
+  void setSamplingRate(int textureId, int samplingRate) {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(
-        _setSamplingRatePtr, [textureId, samplingRate],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _setSamplingRatePtr(textureId, samplingRate);
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override
-  Future<void> setFilterShader(int textureId, String shaderSource) async {
+  void setFilterShader(int textureId, String shaderSource) {
     checkDisposed();
-    final arena = Arena();
-    try {
-      final res = await NitroRuntime.callAsync<void>(_setFilterShaderPtr,
-          [textureId, shaderSource.toNativeUtf8(allocator: arena)],
-          getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-      return res;
-    } finally {
-      arena.releaseAll();
-    }
+    return withArena((arena) {
+      _setFilterShaderPtr(
+          textureId, shaderSource.toNativeUtf8(allocator: arena));
+      NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
+      return;
+    });
   }
 
   @override
-  Future<void> updateOverlay(int textureId, Uint8List overlayData) async {
+  void updateOverlay(int textureId, Uint8List overlayData) {
     checkDisposed();
-    final arena = Arena();
-    try {
-      final res = await NitroRuntime.callAsync<void>(_updateOverlayPtr,
-          [textureId, overlayData.toPointer(arena), overlayData.length],
-          getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-      return res;
-    } finally {
-      arena.releaseAll();
-    }
+    return withArena((arena) {
+      _updateOverlayPtr(
+          textureId, overlayData.toPointer(arena), overlayData.length);
+      NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
+      return;
+    });
   }
 
   @override
-  Future<void> reset() async {
+  void reset() {
     checkDisposed();
-    final res = await NitroRuntime.callAsync<void>(_resetPtr, [],
-        getError: _getErrorNativePtr, clearError: _clearErrorNativePtr);
-    return res;
+    _resetPtr();
+    NitroRuntime.checkError(_getErrorPtr, _clearErrorPtr);
   }
 
   @override

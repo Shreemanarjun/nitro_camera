@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:io';
-import '../camera_state.dart';
+import 'package:video_player/video_player.dart';
+import '../../state/camera_state.dart';
 
 class BottomControls extends StatelessWidget {
   const BottomControls({super.key});
@@ -24,7 +25,10 @@ class BottomControls extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.transparent, Colors.black.withValues(alpha: 0.6)],
+              colors: [
+                isRecording ? Colors.red.withValues(alpha: 0.1) : Colors.transparent,
+                Colors.black.withValues(alpha: 0.6)
+              ],
             ),
           ),
           child: Column(
@@ -82,6 +86,27 @@ class BottomControls extends StatelessWidget {
                   }).toList(),
                 ),
               ),
+              // RECORDING TIMER
+              if (isRecording)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Watch((context) {
+                    final duration = CameraState.recordingDuration.value;
+                    return Text(
+                      _formatDuration(duration),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    );
+                  }),
+                ),
               const SizedBox(height: 12),
 
               // MAIN CONTROLS
@@ -91,13 +116,7 @@ class BottomControls extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     GestureDetector(
-                      onTap: lastCapturedPath != null
-                          ? () => _showMediaFullscreen(
-                                context,
-                                lastCapturedPath,
-                                isLastCapturedVideo,
-                              )
-                          : null,
+                      onTap: () => _showGallery(context),
                       child: Container(
                         width: 50,
                         height: 50,
@@ -106,7 +125,11 @@ class BottomControls extends StatelessWidget {
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white24, width: 2),
                           image:
-                              lastCapturedPath != null && !isLastCapturedVideo
+                              lastCapturedPath != null &&
+                                  !isLastCapturedVideo &&
+                                  !lastCapturedPath.toLowerCase().endsWith(
+                                    ".mp4",
+                                  )
                               ? DecorationImage(
                                   image: FileImage(File(lastCapturedPath)),
                                   fit: BoxFit.cover,
@@ -145,7 +168,10 @@ class BottomControls extends StatelessWidget {
                         height: 82,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 4),
+                          border: Border.all(
+                            color: isRecording ? Colors.redAccent.withValues(alpha: 0.3) : Colors.white,
+                            width: 4,
+                          ),
                         ),
                         child: Center(
                           child: AnimatedContainer(
@@ -166,10 +192,12 @@ class BottomControls extends StatelessWidget {
                     ),
 
                     GestureDetector(
-                      onTap: isRunning ? () {
-                        HapticFeedback.lightImpact();
-                        CameraState.toggleCamera();
-                      } : null,
+                      onTap: isRunning
+                          ? () {
+                              HapticFeedback.lightImpact();
+                              CameraState.toggleCamera();
+                            }
+                          : null,
                       child: Container(
                         width: 50,
                         height: 50,
@@ -194,54 +222,167 @@ class BottomControls extends StatelessWidget {
     });
   }
 
-  void _showMediaFullscreen(BuildContext context, String path, bool isVideo) {
+  String _formatDuration(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return "$m:$s";
+  }
+
+  void _showGallery(BuildContext context) {
     showGeneralDialog(
       context: context,
       barrierColor: Colors.black,
-      pageBuilder: (ctx, _, _) => Scaffold(
+      pageBuilder: (ctx, _, _) => _GalleryView(),
+    );
+  }
+}
+
+class _GalleryView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Watch((context) {
+      final items = CameraState.capturedMedia.value.reversed.toList();
+
+      return Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            Center(
-              child: isVideo
-                  ? const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.video_library_rounded,
-                          color: Colors.white10,
-                          size: 80,
-                        ),
-                        SizedBox(height: 24),
-                        Text(
-                          "VIDEO PREVIEW",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          "Playback requires additional integration",
-                          style: TextStyle(color: Colors.white24, fontSize: 11),
-                        ),
-                      ],
-                    )
-                  : Hero(tag: 'media_preview', child: Image.file(File(path))),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: const Text(
+            "GALLERY",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
             ),
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: () => Navigator.pop(ctx),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
+        body: items.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.photo_library_rounded,
+                      color: Colors.white12,
+                      size: 60,
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      "NO MEDIA YET",
+                      style: TextStyle(color: Colors.white24, fontSize: 13),
+                    ),
+                  ],
+                ),
+              )
+            : GridView.builder(
+                padding: const EdgeInsets.all(2),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 2,
+                  mainAxisSpacing: 2,
+                ),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return GestureDetector(
+                    onTap: () => _openMedia(context, item),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        item.isVideo || item.path.toLowerCase().endsWith(".mp4")
+                            ? Container(
+                                color: Colors.white10,
+                                child: const Icon(
+                                  Icons.videocam,
+                                  color: Colors.white24,
+                                ),
+                              )
+                            : Image.file(File(item.path), fit: BoxFit.cover),
+                        if (item.isVideo)
+                          const Center(
+                            child: Icon(
+                              Icons.play_circle_outline,
+                              color: Colors.white70,
+                              size: 30,
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+      );
+    });
+  }
+
+  void _openMedia(BuildContext context, ({String path, bool isVideo}) item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => _FullscreenView(item: item)),
+    );
+  }
+}
+
+class _FullscreenView extends StatefulWidget {
+  final ({String path, bool isVideo}) item;
+  const _FullscreenView({required this.item});
+
+  @override
+  State<_FullscreenView> createState() => _FullscreenViewState();
+}
+
+class _FullscreenViewState extends State<_FullscreenView> {
+  VideoPlayerController? _vctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.item.isVideo) {
+      _vctrl = VideoPlayerController.file(File(widget.item.path))
+        ..initialize().then((_) => setState(() {}))
+        ..setLooping(true)
+        ..play();
+    }
+  }
+
+  @override
+  void dispose() {
+    _vctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Center(
+        child:
+            (widget.item.isVideo ||
+                widget.item.path.toLowerCase().endsWith(".mp4"))
+            ? (_vctrl != null && _vctrl!.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _vctrl!.value.aspectRatio,
+                      child: VideoPlayer(_vctrl!),
+                    )
+                  : const CircularProgressIndicator(color: Colors.cyanAccent))
+            : Image.file(File(widget.item.path)),
       ),
     );
   }

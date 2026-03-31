@@ -49,7 +49,23 @@ class NitraCameraSession(
     private val glThread = HandlerThread("NitraGLThread").apply { start() }
     private val glHandler = Handler(glThread.looper)
 
-    private val renderer = NitraRenderer(width, height)
+    private val resolvedSize: android.util.Size = run {
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?: throw IllegalStateException("No stream configuration map")
+        val sizes = map.getOutputSizes(SurfaceTexture::class.java)
+        
+        // Find size that matches requested aspect ratio best, or closest matching size
+        val targetAspect = width.toFloat() / height.toFloat()
+        
+        sizes.minByOrNull { s ->
+            val aspect = s.width.toFloat() / s.height.toFloat()
+            val aspectDiff = Math.abs(aspect - targetAspect)
+            val areaDiff = Math.abs(s.width * s.height - width * height)
+            aspectDiff * 1000000 + areaDiff
+        } ?: sizes[0]
+    }
+
+    private val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
 
     private var previewSurface: Surface? = null
     private var currentRequestBuilder: CaptureRequest.Builder? = null
@@ -79,6 +95,8 @@ class NitraCameraSession(
                     }
                 }
                 renderer.setSensorOrientation(characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90)
+                val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+                renderer.setIsFrontCamera(isFront)
                 renderer.setup(inputSurface)
             } catch (e: Exception) {
                 Log.e("NitroCamera", "GL Setup Error: ${e.message}")
@@ -188,6 +206,9 @@ class NitraCameraSession(
         // Ensure renderer surface is ready
         val pSurface = renderer.inputSurface ?: return
         previewSurface = pSurface
+        
+        // Sync buffer size
+        renderer.inputSurfaceTexture?.setDefaultBufferSize(resolvedSize.width, resolvedSize.height)
 
         val surfaces = mutableListOf(pSurface, mediaManager.photoReader.surface, frameReader.surface)
 
@@ -466,6 +487,18 @@ class NitraCameraSession(
         }
     }
 
+    fun attachPlatformSurface(surface: Surface?) {
+        glHandler.post {
+            renderer.setPlatformSurface(surface)
+        }
+    }
+
+    fun detachPlatformSurface() {
+        glHandler.post {
+            renderer.detachPlatformSurface()
+        }
+    }
+
 
 
     suspend fun takePhoto(): PhotoResult {
@@ -505,46 +538,35 @@ class NitraCameraSession(
         cameraHandler.post {
             if (isClosed) return@post
             try {
+                // 1. Prepare recorder and get its surface
                 val recSurface = mediaManager.prepareVideoRecorder(outputPath)
                 
-                // CRITICAL: We do NOT add recSurface to Camera2 targets.
-                // We add it to our GPU Renderer instead!
-                glHandler.post { renderer.setRecordingSurface(recSurface) }
+                // 2. Start the hardware recorder FIRST (important for some drivers)
+                mediaManager.startVideoRecorder()
 
-                val pSurface = previewSurface ?: return@post
-                val surfaces = mutableListOf(pSurface, mediaManager.photoReader.surface)
-                
-                cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: CameraCaptureSession) {
-                        if (isClosed) { session.close(); return }
-                        captureSession = session
-                        try {
-                            val builder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_RECORD)
-                            builder.addTarget(pSurface)
-                            // builder.addTarget(recSurface) // Bypassed: Renderer handles this
-                            applySessionSettings(builder)
-                            session.setRepeatingRequest(builder.build(), null, cameraHandler)
-                            mediaManager.startVideoRecorder()
-                        } catch (e: Exception) { Log.e("NitroCamera", "Record request failed: ${e.message}") }
-                    }
-                    override fun onConfigureFailed(session: CameraCaptureSession) {
-                        mediaManager.stopVideoRecording()
-                    }
-                }, cameraHandler)
-            } catch (e: Exception) { Log.e("NitroCamera", "startVideoRecording: ${e.message}") }
+                // 3. Enable the surface on the GL thread ONLY after the recorder is active
+                glHandler.post { 
+                    renderer.setRecordingSurface(recSurface)
+                }
+
+                Log.d("NitroCamera", "Video recording started on GPU pipeline")
+            } catch (e: Exception) { 
+                Log.e("NitroCamera", "startVideoRecording failed: ${e.message}") 
+            }
         }
     }
 
     fun stopVideoRecording(): RecordingResult {
-        // Stop renderer from pushing frames to recorder
-        glHandler.post { renderer.setRecordingSurface(null) }
+        // 1. Block until GL thread has finished the last frame and detached the surface
+        val latch = java.util.concurrent.CountDownLatch(1)
+        glHandler.post {
+            renderer.setRecordingSurface(null)
+            latch.countDown()
+        }
+        try { latch.await(200, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
 
-        try { captureSession?.stopRepeating() } catch (e: Exception) { }
-        try { captureSession?.close() } catch (e: Exception) { }
-        captureSession = null
-        val result = mediaManager.stopVideoRecording()
-        if (!isClosed) cameraHandler.postDelayed({ if (!isClosed) startPreview() }, 150)
-        return result
+        // 2. Now safe to stop the actual recorder
+        return mediaManager.stopVideoRecording()
     }
 
     fun pauseVideoRecording()  { mediaManager.pauseVideoRecording() }

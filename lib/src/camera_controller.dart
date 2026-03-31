@@ -41,13 +41,13 @@ class CameraController extends ChangeNotifier {
   bool _isActive = false;
 
   /// Set [isActive] programmatically — starts or stops the preview stream.
-  Future<void> setActive(bool active) async {
+  void setActive(bool active) {
     _requireInitialized();
     if (active == _isActive) return;
     if (active) {
-      await NitroCamera.instance.startPreview(_textureId!);
+      NitroCamera.instance.startPreview(_textureId!);
     } else {
-      await NitroCamera.instance.stopPreview(_textureId!);
+      NitroCamera.instance.stopPreview(_textureId!);
     }
     _isActive = active;
     notifyListeners();
@@ -62,12 +62,24 @@ class CameraController extends ChangeNotifier {
   // ---- State ----
 
   int? _textureId;
+  int _width = 1280;
+  int _height = 720;
+  int _sensorOrientation = 90;
 
   /// The Flutter texture ID. Pass this to `Texture(textureId: controller.textureId!)`.
   int? get textureId => _textureId;
 
   /// True once [initialize] has completed successfully.
   bool get isInitialized => _textureId != null;
+
+  /// The width of the camera resolution.
+  int get width => _width;
+
+  /// The height of the camera resolution.
+  int get height => _height;
+
+  /// The physical orientation of the camera sensor (90/270 for portrait).
+  int get sensorOrientation => _sensorOrientation;
 
   bool _isDisposed   = false;
   bool _isRecording  = false;
@@ -113,13 +125,30 @@ class CameraController extends ChangeNotifier {
   /// Opens the camera and registers the Flutter texture.
   Future<void> initialize() async {
     final fmt = format ?? device.formats.firstOrNull;
-    final w   = fmt?.videoWidth  ?? 1280;
-    final h   = fmt?.videoHeight ?? 720;
+    final w = fmt?.videoWidth ?? 1280;
+    final h = fmt?.videoHeight ?? 720;
     final fps = fmt?.maxFps.toInt() ?? 30;
 
     _textureId = await NitroCamera.instance.openCamera(
-      device.id, w, h, fps, audio ? 1 : 0,
+      device.id,
+      w,
+      h,
+      fps,
+      audio ? 1 : 0,
     );
+    _width = w;
+    _height = h;
+    _sensorOrientation = device.sensorOrientation;
+    _isActive = true;
+    notifyListeners();
+  }
+
+  /// Internal use only: Initialise the controller with an already-opened texture ID.
+  void initializeWithTexture(int id, int width, int height, int sensorOrientation) {
+    _textureId = id;
+    _width = width;
+    _height = height;
+    _sensorOrientation = sensorOrientation;
     _isActive = true;
     notifyListeners();
   }
@@ -128,83 +157,85 @@ class CameraController extends ChangeNotifier {
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
-    if (_textureId != null) {
-      await NitroCamera.instance.closeCamera(_textureId!);
+    final tid = _textureId;
+    if (tid != null) {
+      await NitroCamera.instance.closeCamera(tid);
+      _textureId = null;
     }
     super.dispose();
   }
 
   // ---- Preview control ----
 
-  Future<void> pausePreview() => setActive(false);
-  Future<void> resumePreview() => setActive(true);
+  void pausePreview() => setActive(false);
+  void resumePreview() => setActive(true);
 
   // ---- Camera controls (vision_camera naming) ----
 
   /// Zoom factor clamped to [device.minZoom] .. [device.maxZoom].
-  Future<void> setZoom(double zoom) async {
+  void setZoom(double zoom) {
     _requireInitialized();
     final clamped = zoom.clamp(device.minZoom, device.maxZoom);
-    await NitroCamera.instance.setZoom(_textureId!, clamped);
+    NitroCamera.instance.setZoom(_textureId!, clamped);
     _zoom = clamped;
     notifyListeners();
   }
 
   /// Focus at the normalised coordinates ([x], [y]) in range 0.0–1.0.
   /// Mirrors `camera.focus(point)` in vision_camera.
-  Future<void> focus(double x, double y) async {
+  void focus(double x, double y) {
     _requireInitialized();
-    await NitroCamera.instance.setFocusPoint(_textureId!, x, y);
+    NitroCamera.instance.setFocusPoint(_textureId!, x, y);
   }
 
   /// Sets the auto-focus mode.
-  Future<void> setAutoFocus(AutoFocusMode mode) async {
+  void setAutoFocus(AutoFocusMode mode) {
     _requireInitialized();
-    await NitroCamera.instance.setAutoFocus(_textureId!, mode.nativeValue);
+    NitroCamera.instance.setAutoFocus(_textureId!, mode.nativeValue);
   }
 
   /// Exposure bias in the range [device.minExposure] .. [device.maxExposure].
-  Future<void> setExposure(double value) async {
+  void setExposure(double value) {
     _requireInitialized();
-    await NitroCamera.instance.setExposure(_textureId!, value);
+    NitroCamera.instance.setExposure(_textureId!, value);
     _exposure = value;
     notifyListeners();
   }
 
   /// Flash mode for photo capture.
-  Future<void> setFlash(FlashMode mode) async {
+  void setFlash(FlashMode mode) {
     _requireInitialized();
-    await NitroCamera.instance.setFlash(_textureId!, mode.nativeValue);
+    NitroCamera.instance.setFlash(_textureId!, mode.nativeValue);
     _flash = mode;
     notifyListeners();
   }
 
   /// Continuous torch (flashlight) on/off.
-  Future<void> setTorch({required bool enabled}) async {
+  void setTorch({required bool enabled}) {
     _requireInitialized();
-    await NitroCamera.instance.setTorch(_textureId!, enabled ? 1 : 0);
+    NitroCamera.instance.setTorch(_textureId!, enabled ? 1 : 0);
     _torch = enabled;
     notifyListeners();
   }
 
   /// White balance colour temperature in Kelvin. Pass 0 to restore auto.
-  Future<void> setWhiteBalance(int kelvin) async {
+  void setWhiteBalance(int kelvin) {
     _requireInitialized();
-    await NitroCamera.instance.setWhiteBalance(_textureId!, kelvin);
+    NitroCamera.instance.setWhiteBalance(_textureId!, kelvin);
   }
 
   /// Enables or disables HDR mode.
-  Future<void> setHdr({required bool enabled}) async {
+  void setHdr({required bool enabled}) {
     _requireInitialized();
-    await NitroCamera.instance.setHdr(_textureId!, enabled ? 1 : 0);
+    NitroCamera.instance.setHdr(_textureId!, enabled ? 1 : 0);
   }
 
   // ---- Photo capture ----
 
   /// Captures a photo. Returns the file path and metadata.
-  Future<PhotoResult> takePhoto() {
+  Future<PhotoResult> takePhoto() async {
     _requireInitialized();
-    return NitroCamera.instance.takePhoto(_textureId!);
+    return await NitroCamera.instance.takePhoto(_textureId!);
   }
 
   // ---- Video recording (mirrors vision_camera) ----
@@ -220,19 +251,19 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Pauses an active recording without finalising the file.
-  Future<void> pauseRecording() async {
+  void pauseRecording() {
     _requireInitialized();
     if (!_isRecording || _isRecordingPaused) return;
-    await NitroCamera.instance.pauseRecording(_textureId!);
+    NitroCamera.instance.pauseRecording(_textureId!);
     _isRecordingPaused = true;
     notifyListeners();
   }
 
   /// Resumes a paused recording.
-  Future<void> resumeRecording() async {
+  void resumeRecording() {
     _requireInitialized();
     if (!_isRecording || !_isRecordingPaused) return;
-    await NitroCamera.instance.resumeRecording(_textureId!);
+    NitroCamera.instance.resumeRecording(_textureId!);
     _isRecordingPaused = false;
     notifyListeners();
   }
@@ -248,10 +279,10 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Cancels the recording and deletes the temporary file.
-  Future<void> cancelRecording() async {
+  void cancelRecording() {
     _requireInitialized();
     if (!_isRecording) return;
-    await NitroCamera.instance.cancelRecording(_textureId!);
+    NitroCamera.instance.cancelRecording(_textureId!);
     _isRecording = false;
     _isRecordingPaused = false;
     notifyListeners();
@@ -260,24 +291,24 @@ class CameraController extends ChangeNotifier {
   // ---- Frame processing ----
 
   /// Enables raw frame delivery via [frameStream].
-  Future<void> enableFrameProcessing() async {
+  void enableFrameProcessing() {
     _requireInitialized();
-    await NitroCamera.instance.enableFrameProcessing(_textureId!, 1);
+    NitroCamera.instance.enableFrameProcessing(_textureId!, 1);
   }
 
   /// Disables raw frame delivery.
-  Future<void> disableFrameProcessing() async {
+  void disableFrameProcessing() {
     _requireInitialized();
-    await NitroCamera.instance.enableFrameProcessing(_textureId!, 0);
+    NitroCamera.instance.enableFrameProcessing(_textureId!, 0);
   }
 
   /// Stream of raw camera frames (only active after [enableFrameProcessing]).
   Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream;
 
   /// Updates the GPU filter shader applied to the preview.
-  Future<void> setFilterShader(String glslSource) async {
+  void setFilterShader(String glslSource) {
     _requireInitialized();
-    await NitroCamera.instance.setFilterShader(_textureId!, glslSource);
+    NitroCamera.instance.setFilterShader(_textureId!, glslSource);
   }
 
   // ---- Internal ----

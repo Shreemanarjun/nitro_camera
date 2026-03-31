@@ -24,6 +24,7 @@ import org.json.JSONObject
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 
 class NitroCameraImpl(
     private val context: Context,
@@ -57,14 +58,25 @@ class NitroCameraImpl(
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
 
+    private var permissionContinuation: CancellableContinuation<Long>? = null
+    private val PERMISSION_REQUEST_CODE = 4001
+
     fun handlePermissionResult(requestCode: Int, grantResults: IntArray): Boolean {
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            permissionContinuation?.let { 
+                if (it.isActive) {
+                    it.resume(if (granted) 1L else 2L) { /* onCancellation */ }
+                }
+            }
+            permissionContinuation = null
+            return true
+        }
         return false
     }
 
-    override suspend fun reset() {
-        coroutineScope {
-            closeAll()
-        }
+    override fun reset() {
+        runBlocking { closeAll() }
     }
 
     suspend fun closeAll() = coroutineScope {
@@ -97,19 +109,35 @@ class NitroCameraImpl(
         return _charsCache.getOrPut(id) { cameraManager.getCameraCharacteristics(id) }
     }
 
-    override suspend fun getCameraPermissionStatus(): Long {
+    override fun getCameraPermissionStatus(): Long {
         return if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) 1L else 2L
     }
 
     override suspend fun requestCameraPermission(): Long {
-        return getCameraPermissionStatus()
+        if (getCameraPermissionStatus() == 1L) return 1L
+        val act = activity ?: return 0L
+        return suspendCancellableCoroutine { cont ->
+            permissionContinuation = cont
+            cont.invokeOnCancellation { permissionContinuation = null }
+            androidx.core.app.ActivityCompat.requestPermissions(
+                act,
+                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+                PERMISSION_REQUEST_CODE
+            )
+        }
     }
 
-    override suspend fun getMicrophonePermissionStatus(): Long = 1L
-    override suspend fun requestMicrophonePermission(): Long = 1L
+    override fun getMicrophonePermissionStatus(): Long {
+        return if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED) 1L else 2L
+    }
+    
+    override suspend fun requestMicrophonePermission(): Long {
+        return requestCameraPermission()
+    }
 
-    override suspend fun getDeviceCount(): Long = getIds().size.toLong()
+    override fun getDeviceCount(): Long = getIds().size.toLong()
 
     override suspend fun getAvailableCameraDevicesJson(): String {
         val arr = JSONArray()
@@ -119,11 +147,11 @@ class NitroCameraImpl(
         return arr.toString()
     }
 
-    override suspend fun getAvailableCameraDevices(): List<CameraDevice> {
+    override fun getAvailableCameraDevices(): List<CameraDevice> {
         return getIds().map { id -> buildCameraDevice(id, getCharacteristics(id)) }
     }
 
-    override suspend fun getDevice(index: Long): CameraDevice {
+    override fun getDevice(index: Long): CameraDevice {
         val ids = getIds()
         if (index < 0 || index >= ids.size) throw Exception("Camera index out of bounds")
         val id = ids[index.toInt()]
@@ -135,7 +163,8 @@ class NitroCameraImpl(
     @OptIn(ExperimentalCoroutinesApi::class)
     override suspend fun openCamera(
         deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long,
-    ): Long = hardwareLock.withLock {
+    ): Long {
+        return hardwareLock.withLock {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) throw SecurityException("Camera permission not granted")
 
@@ -218,7 +247,7 @@ class NitroCameraImpl(
             synchronized(sessionsLock) { sessions[textureId] = session }
 
             session.startPreview()
-            return textureId
+            return@withLock textureId
         } catch (e: Exception) {
             Log.e(TAG, "General openCamera failure: ${e.message}")
             withContext(Dispatchers.Main) {
@@ -228,23 +257,34 @@ class NitroCameraImpl(
             return 0L
         }
     }
+}
 
-    override suspend fun closeCamera(textureId: Long) = hardwareLock.withLock {
-        val s = synchronized(sessionsLock) { sessions.remove(textureId) } ?: return@withLock
-        withContext(Dispatchers.IO) { s.close() }
+    fun attachPlatformView(textureId: Long, surface: Surface) {
+        session(textureId)?.attachPlatformSurface(surface)
     }
 
-    override suspend fun startPreview(textureId: Long) { session(textureId)?.startPreview() }
-    override suspend fun stopPreview(textureId: Long)  { session(textureId)?.stopPreview() }
+    fun detachPlatformView(textureId: Long) {
+        session(textureId)?.detachPlatformSurface()
+    }
 
-    override suspend fun setZoom(textureId: Long, zoom: Double)                { session(textureId)?.setZoom(zoom) }
-    override suspend fun setFocusPoint(textureId: Long, x: Double, y: Double)  { session(textureId)?.setFocusPoint(x, y) }
-    override suspend fun setAutoFocus(textureId: Long, mode: Long)              { session(textureId)?.setAutoFocus(mode) }
-    override suspend fun setExposure(textureId: Long, value: Double)            { session(textureId)?.setExposure(value) }
-    override suspend fun setFlash(textureId: Long, mode: Long)                  { session(textureId)?.setFlash(mode) }
-    override suspend fun setTorch(textureId: Long, enabled: Long)               { session(textureId)?.setTorch(enabled != 0L) }
-    override suspend fun setWhiteBalance(textureId: Long, temperature: Long)    { session(textureId)?.setWhiteBalance(temperature) }
-    override suspend fun setHdr(textureId: Long, enabled: Long)                 { session(textureId)?.setHdr(enabled != 0L) }
+    override suspend fun closeCamera(textureId: Long) {
+        hardwareLock.withLock {
+            val s = synchronized(sessionsLock) { sessions.remove(textureId) } ?: return@withLock
+            withContext(Dispatchers.IO) { s.close() }
+        }
+    }
+
+    override fun startPreview(textureId: Long) { session(textureId)?.startPreview() }
+    override fun stopPreview(textureId: Long)  { session(textureId)?.stopPreview() }
+
+    override fun setZoom(textureId: Long, zoom: Double)                { session(textureId)?.setZoom(zoom) }
+    override fun setFocusPoint(textureId: Long, x: Double, y: Double)  { session(textureId)?.setFocusPoint(x, y) }
+    override fun setAutoFocus(textureId: Long, mode: Long)              { session(textureId)?.setAutoFocus(mode) }
+    override fun setExposure(textureId: Long, value: Double)            { session(textureId)?.setExposure(value) }
+    override fun setFlash(textureId: Long, mode: Long)                  { session(textureId)?.setFlash(mode) }
+    override fun setTorch(textureId: Long, enabled: Long)               { session(textureId)?.setTorch(enabled != 0L) }
+    override fun setWhiteBalance(textureId: Long, temperature: Long)    { session(textureId)?.setWhiteBalance(temperature) }
+    override fun setHdr(textureId: Long, enabled: Long)                 { session(textureId)?.setHdr(enabled != 0L) }
 
     override suspend fun takePhoto(textureId: Long): PhotoResult =
         session(textureId)?.takePhoto() ?: error("No session")
@@ -256,18 +296,18 @@ class NitroCameraImpl(
     override suspend fun stopVideoRecording(textureId: Long): RecordingResult =
         session(textureId)?.stopVideoRecording() ?: RecordingResult("", 0L, 0L)
 
-    override suspend fun pauseRecording(textureId: Long)  { session(textureId)?.pauseVideoRecording() }
-    override suspend fun resumeRecording(textureId: Long) { session(textureId)?.resumeVideoRecording() }
-    override suspend fun cancelRecording(textureId: Long) { session(textureId)?.cancelVideoRecording() }
+    override fun pauseRecording(textureId: Long)  { session(textureId)?.pauseVideoRecording() }
+    override fun resumeRecording(textureId: Long) { session(textureId)?.resumeVideoRecording() }
+    override fun cancelRecording(textureId: Long) { session(textureId)?.cancelVideoRecording() }
 
-    override suspend fun enableFrameProcessing(textureId: Long, enabled: Long) {
+    override fun enableFrameProcessing(textureId: Long, enabled: Long) {
         session(textureId)?.frameProcessingEnabled = (enabled != 0L)
     }
 
-    override suspend fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
-    override suspend fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
-    override suspend fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
-    override suspend fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer)      { /* reserved */ }
+    override fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
+    override fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
+    override fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
+    override fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer)      { /* reserved */ }
 
     private fun session(textureId: Long) = synchronized(sessionsLock) { sessions[textureId] }
 

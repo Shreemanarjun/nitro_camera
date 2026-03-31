@@ -9,8 +9,8 @@ import 'package:path_provider/path_provider.dart';
 enum CameraStatus { closed, opening, closing, running, error }
 
 class CameraState {
-  static final devices = signal<List<CameraDevice>>([]);
-  static final currentDevice = signal<CameraDevice?>(null);
+  static final devices = signal<List<CameraDeviceInfo>>([]);
+  static final currentDevice = signal<CameraDeviceInfo?>(null);
   static final loading = signal(true);
   static final errorMessage = signal<String?>(null);
 
@@ -27,45 +27,66 @@ class CameraState {
 
   static final mode = signal('PHOTO'); // PHOTO, VIDEO, SCANNER
   static final lastCapturedPath = signal<String?>(null);
-  static final isLastCapturedVideo = ValueNotifier<bool>(false);
-  static final isCapturing = ValueNotifier<bool>(false);
+  static final isLastCapturedVideo = signal<bool>(false);
+  static final isCapturing = signal<bool>(false);
+  static final recordingDuration = signal<int>(0); // in seconds
+  static Timer? _recordingTimer;
 
   static final currentFilterName = signal('NORMAL');
 
   static const Map<String, String> filters = {
     'NORMAL': '',
     'INVERT':
-        'void main() { fragColor = vec4(1.0 - inputColor.rgb, inputColor.a); }',
+        'void main() { vec4 c = inputColor; fragColor = vec4(1.0 - c.rgb, c.a); }',
     'GRAYSCALE':
-        'void main() { float luma = dot(inputColor.rgb, vec3(0.299, 0.587, 0.114)); fragColor = vec4(vec3(luma), inputColor.a); }',
+        'void main() { vec4 c = inputColor; float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114)); fragColor = vec4(vec3(luma), c.a); }',
     'SEPIA':
-        'void main() { vec3 res = vec3(dot(inputColor.rgb, vec3(0.393, 0.769, 0.189)), dot(inputColor.rgb, vec3(0.349, 0.686, 0.168)), dot(inputColor.rgb, vec3(0.272, 0.534, 0.131))); fragColor = vec4(res, inputColor.a); }',
+        'void main() { vec4 c = inputColor; vec3 res = vec3(dot(c.rgb, vec3(0.393, 0.769, 0.189)), dot(c.rgb, vec3(0.349, 0.686, 0.168)), dot(c.rgb, vec3(0.272, 0.534, 0.131))); fragColor = vec4(res, c.a); }',
     'VIGNETTE':
-        'void main() { float d = distance(uv, vec2(0.5)); float v = smoothstep(0.8, 0.3, d); fragColor = vec4(inputColor.rgb * v, inputColor.a); }',
+        'void main() { vec4 c = inputColor; float d = distance(uv, vec2(0.5)); float v = smoothstep(0.8, 0.3, d); fragColor = vec4(c.rgb * v, c.a); }',
+    'CYBERPUNK':
+        'void main() { vec4 c = inputColor; float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114)); vec3 pink = vec3(1.0, 0.0, 1.0); vec3 blue = vec3(0.0, 1.0, 1.0); fragColor = vec4(mix(blue, pink, luma), c.a); }',
   };
 
   static final isProcessingFrames = signal(false);
   static final samplingRate = signal(1);
   static final pixelFormat = signal(1); // 1 = BGRA
-  static final cameraPermission = signal(
-    0,
-  ); // 0: unknown, 1: granted, 2: denied
+  // 0: unknown, 1: granted, 2: denied
+  static final cameraPermission = signal(0);
   static final photoTrigger = signal(0); // Inc to trigger flash
   static final controlMode = signal('FILTERS'); // FILTERS or SETTINGS
   static final selectedAspectRatio = signal<double?>(null);
   static final showFilters = signal(false);
 
+  static final previewMode = signal<PreviewMode>(PreviewMode.texture);
+
+  static Future<void> setPreviewMode(PreviewMode m) async {
+    previewMode.value = m;
+    // Reset shader to current filter to clear any transient 'SCANLINE' from native memory
+    final tid = activeTextureId.value;
+    if (tid != null) {
+      final source = filters[currentFilterName.value] ?? '';
+      NitroCamera.instance.setFilterShader(tid, source);
+    }
+  }
+
+  // New: List of all captured media items
+  static final capturedMedia = signal<List<({String path, bool isVideo})>>([]);
+
   // Add Initialization logic
   static Future<void> init() async {
+    // Explicitly yield to event loop so we don't block the UI thread during hardware query
+    await Future.microtask(() {});
+
     try {
       if (loading.value && devices.value.isNotEmpty) return;
       loading.value = true;
 
-      final perm = await NitroCamera.instance.getCameraPermissionStatus();
+      final perm = NitroCamera.instance.getCameraPermissionStatus();
       cameraPermission.value = perm;
 
       if (perm == 1) {
-        final loaded = await NitroCamera.instance.getAvailableCameraDevices();
+        final loaded = await CameraController.getAvailableCameraDevices();
         devices.value = List.from(loaded);
 
         // 2. Early warming: Pick the primary back camera (usually first tele/wide)
@@ -85,11 +106,13 @@ class CameraState {
 
   static Future<void> grantPermission() async {
     final status = await NitroCamera.instance.requestCameraPermission();
+    await NitroCamera.instance
+        .requestMicrophonePermission(); // Ensure audio for video
     cameraPermission.value = status;
-    if (status == 1) await init();
+    if (status == 1) init();
   }
 
-  static Future<void> selectDevice(CameraDevice d) async {
+  static Future<void> selectDevice(CameraDeviceInfo d) async {
     if (currentDevice.value?.id == d.id) return;
     currentDevice.value = d;
     currentZoom.value = d.neutralZoom; // Reset zoom to neutral for the lens
@@ -102,16 +125,16 @@ class CameraState {
     isProcessingFrames.value = (m == 'SCANNER');
 
     if (activeTextureId.value != null) {
-      await NitroCamera.instance.enableFrameProcessing(
+      NitroCamera.instance.enableFrameProcessing(
         activeTextureId.value!,
         (m == 'SCANNER') ? 1 : 0,
       );
     }
   }
 
-  static Future<void> toggleProcessing(bool val) async {
+  static void toggleProcessing(bool val) {
     if (activeTextureId.value != null) {
-      await NitroCamera.instance.enableFrameProcessing(
+      NitroCamera.instance.enableFrameProcessing(
         activeTextureId.value!,
         val ? 1 : 0,
       );
@@ -119,64 +142,62 @@ class CameraState {
     isProcessingFrames.value = val;
   }
 
-  static Future<void> setResolution(int w, int h) async {
+  static void setResolution(int w, int h) {
+    // Only update if change is significant to avoid redundant restarts
+    if ((width.value - w).abs() < 10 && (height.value - h).abs() < 10) return;
     width.value = w;
     height.value = h;
   }
 
-  static Future<void> setFps(int f) async {
+  static void setFps(int f) {
     fps.value = f;
   }
 
-  static Future<void> setPixelFormat(int format) async {
+  static void setPixelFormat(int format) {
     if (activeTextureId.value != null) {
-      await NitroCamera.instance.setFrameFormat(activeTextureId.value!, format);
+      NitroCamera.instance.setFrameFormat(activeTextureId.value!, format);
     }
     pixelFormat.value = format;
   }
 
-  static Future<void> setSamplingRate(int rate) async {
+  static void setSamplingRate(int rate) {
     if (activeTextureId.value != null) {
-      await NitroCamera.instance.setSamplingRate(activeTextureId.value!, rate);
+      NitroCamera.instance.setSamplingRate(activeTextureId.value!, rate);
     }
     samplingRate.value = rate;
   }
 
-  static Future<void> setFlash(FlashMode m) async {
+  static void setFlash(FlashMode m) {
     flashMode.value = m;
     final tid = activeTextureId.value;
     if (tid != null) {
-      await NitroCamera.instance.setFlash(tid, m.index);
+      NitroCamera.instance.setFlash(tid, m.index);
     }
   }
 
-  static Future<void> setZoom(double z) async {
+  static void setZoom(double z) {
     final dev = currentDevice.value;
     if (dev == null) return;
-
     final clamped = z.clamp(dev.minZoom, dev.maxZoom);
     currentZoom.value = clamped;
-
     final tid = activeTextureId.value;
     if (tid == null) return;
-
-    // Fast zoom: Send to native immediately for smooth experience
-    await NitroCamera.instance.setZoom(tid, clamped);
+    NitroCamera.instance.setZoom(tid, clamped);
   }
 
-  static Future<void> setFocusPoint(double x, double y) async {
+  static void setFocusPoint(double x, double y) {
     final tid = activeTextureId.value;
     if (tid != null) {
-      await NitroCamera.instance.setFocusPoint(tid, x, y);
+      NitroCamera.instance.setFocusPoint(tid, x, y);
     }
   }
 
-  static Future<void> setFilter(String name) async {
+  static void setFilter(String name) {
     currentFilterName.value = name;
     final tid = activeTextureId.value;
     if (tid != null) {
       final source = filters[name] ?? '';
-      await NitroCamera.instance.setFilterShader(tid, source);
+      NitroCamera.instance.setFilterShader(tid, source);
     }
   }
 
@@ -191,15 +212,19 @@ class CameraState {
       photoTrigger.value++;
       HapticFeedback.mediumImpact();
 
-      final result = await NitroCamera.instance
-          .takePhoto(tid)
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw TimeoutException("Hardware capture timeout"),
-          );
+      final result = await NitroCamera.instance.takePhoto(tid);
 
-      lastCapturedPath.value = result.path;
-      isLastCapturedVideo.value = false;
+      batch(() {
+        lastCapturedPath.value = result.path;
+        isLastCapturedVideo.value = false;
+
+        // Add to gallery
+        capturedMedia.value = [
+          ...capturedMedia.value,
+          (path: result.path, isVideo: false),
+        ];
+      });
+
       HapticFeedback.lightImpact();
     } catch (e) {
       debugPrint("Photo failed: $e");
@@ -215,11 +240,25 @@ class CameraState {
     if (isRecording.value) {
       try {
         final result = await NitroCamera.instance.stopVideoRecording(tid);
-        isRecording.value = false;
-        lastCapturedPath.value = result.path;
-        isLastCapturedVideo.value = true;
+        _recordingTimer?.cancel();
+        _recordingTimer = null;
+
+        batch(() {
+          isRecording.value = false;
+          recordingDuration.value = 0;
+          lastCapturedPath.value = result.path;
+          isLastCapturedVideo.value = true;
+
+          // Add to gallery
+          capturedMedia.value = [
+            ...capturedMedia.value,
+            (path: result.path, isVideo: true),
+          ];
+        });
       } catch (e) {
         isRecording.value = false;
+        _recordingTimer?.cancel();
+        _recordingTimer = null;
         debugPrint("Stop video failed: $e");
       }
     } else {
@@ -228,14 +267,19 @@ class CameraState {
         final path =
             "${tempDir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4";
         await NitroCamera.instance.startVideoRecording(tid, path);
+
         isRecording.value = true;
+        recordingDuration.value = 0;
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          recordingDuration.value++;
+        });
       } catch (e) {
         debugPrint("Start video failed: $e");
       }
     }
   }
 
-  static Future<void> toggleCamera() async {
+  static void toggleCamera() {
     if (devices.value.length < 2) return;
     final currentIndex = devices.value.indexWhere(
       (d) => d.id == currentDevice.value?.id,

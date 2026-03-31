@@ -17,14 +17,20 @@ import java.nio.FloatBuffer
  */
 class NitraRenderer(private val width: Int, private val height: Int) {
     private var sensorOrientation: Int = 90
+    private var isFrontCamera: Boolean = false
 
     fun setSensorOrientation(orientation: Int) {
         this.sensorOrientation = orientation
     }
 
+    fun setIsFrontCamera(isFront: Boolean) {
+        this.isFrontCamera = isFront
+    }
+
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var platformEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var recorderEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var eglConfig: EGLConfig? = null
 
@@ -32,6 +38,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var textureId: Int = -1
     var inputSurfaceTexture: SurfaceTexture? = null
     var inputSurface: Surface? = null
+    private var platformSurface: Surface? = null
     private var outputSurface: Surface? = null
 
     private var vertexBuffer: FloatBuffer
@@ -51,7 +58,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
     private val PASSTHROUGH_FS =
         "#extension GL_OES_EGL_image_external : require\n" +
-        "precision mediump float;\n" +
+        "precision highp float;\n" +
         "varying vec2 vTextureCoord;\n" +
         "uniform samplerExternalOES sTexture;\n" +
         "void main() {\n" +
@@ -90,7 +97,9 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         val configSpec = intArrayOf(
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
             EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
-            EGL14.EGL_ALPHA_SIZE, 8, EGL14.EGL_NONE
+            EGL14.EGL_ALPHA_SIZE, 8, 
+            EGLExt.EGL_RECORDABLE_ANDROID, 1,
+            EGL14.EGL_NONE
         )
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
@@ -167,6 +176,38 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var upLoc: Int = -1
     private var projectionMatrix = FloatArray(16)
 
+    fun setPlatformSurface(surface: Surface?) {
+        this.platformSurface = surface
+        val display = eglDisplay
+        val config = eglConfig
+        if (display == EGL14.EGL_NO_DISPLAY || config == null) return
+
+        if (platformEglSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(display, platformEglSurface)
+            platformEglSurface = EGL14.EGL_NO_SURFACE
+        }
+
+        if (surface != null && surface.isValid) {
+            platformEglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
+        }
+    }
+
+    /**
+     * Detaches the platform surface immediately.
+     * This must be called when the native View is destroyed to avoid rendering into an abandoned buffer.
+     */
+    fun detachPlatformSurface() {
+        val display = eglDisplay
+        if (display == EGL14.EGL_NO_DISPLAY) return
+        
+        if (platformEglSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(display, platformEglSurface)
+            platformEglSurface = EGL14.EGL_NO_SURFACE
+            platformSurface = null
+            Log.d("NitroCamera", "NitraRenderer: Platform surface detached.")
+        }
+    }
+
     fun setRecordingSurface(surface: android.view.Surface?) {
         val display = eglDisplay
         val config = eglConfig
@@ -181,6 +222,10 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
         if (surface != null && surface.isValid) {
             recorderEglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
+            if (recorderEglSurface == EGL14.EGL_NO_SURFACE) {
+                val err = EGL14.eglGetError()
+                Log.e("NitroCamera", "NitraRenderer: Failed to create recorder EGL surface: 0x${Integer.toHexString(err)}")
+            }
         }
     }
 
@@ -193,7 +238,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             // Build a compatibility wrapper for user shaders
             fragmentShader =
                 "#extension GL_OES_EGL_image_external : require\n" +
-                "precision mediump float;\n" +
+                "precision highp float;\n" +
                 "varying vec2 vTextureCoord;\n" +
                 "uniform samplerExternalOES sTexture;\n" +
                 "\n" +
@@ -201,7 +246,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 "#define fragColor gl_FragColor\n" +
                 "#define uv vTextureCoord\n" +
                 "#define inputColor (texture2D(sTexture, vTextureCoord))\n" +
-                "\n" +
+                "uniform float time;\n" +
                 shader
         }
 
@@ -216,11 +261,22 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
 
         try {
-            // 1. Core Logic (on eglSurface)
+            // 1. Core Logic (on eglSurface - Flutter Texture)
             renderToSurface(eglSurface)
 
-            // 2. Branched Logic (on recorderEglSurface)
+            // 2. Extra Logic (on platformEglSurface - AndroidView)
+            val pSurface = platformSurface
+            if (platformEglSurface != EGL14.EGL_NO_SURFACE && pSurface != null && pSurface.isValid) {
+                GLES20.glFlush()
+                renderToSurface(platformEglSurface)
+            } else if (platformEglSurface != EGL14.EGL_NO_SURFACE && (pSurface == null || !pSurface.isValid)) {
+                detachPlatformSurface()
+            }
+
+            // 3. Branched Logic (on recorderEglSurface)
             if (recorderEglSurface != EGL14.EGL_NO_SURFACE) {
+                // IMPORTANT: Flush pipeline before switching surfaces on some Adreno drivers
+                GLES20.glFlush()
                 renderToSurface(recorderEglSurface)
             }
         } catch (e: Exception) {
@@ -250,21 +306,48 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             }
         }
 
-        // --- ASPECT RATIO & VIEWPORT CORRECTION ---
-        // Query the actual surface size to avoid "clamped" or stretched preview
+        // --- ASPECT RATIO & VIEWPORT CORRECTION (CENTER CROP) ---
         val surfaceW = IntArray(1)
         val surfaceH = IntArray(1)
         EGL14.eglQuerySurface(eglDisplay, surface, EGL14.EGL_WIDTH, surfaceW, 0)
         EGL14.eglQuerySurface(eglDisplay, surface, EGL14.EGL_HEIGHT, surfaceH, 0)
-        val sw = surfaceW[0]
-        val sh = surfaceH[0]
+        val sw = surfaceW[0].toFloat()
+        val sh = surfaceH[0].toFloat()
 
-        // --- ASPECT RATIO HANDLING (DELEGATED TO FLUTTER) ---
-        android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
-
-        GLES20.glViewport(0, 0, sw, sh)
+        GLES20.glViewport(0, 0, sw.toInt(), sh.toInt())
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+        // --- CENTER CROP PROJECTION ---
+        // We calculate a projection matrix that crops the input buffer to fill the output surface
+        // without stretching, providing a "Center Crop" effect directly on the GPU.
+        android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
+
+        val isRotated = sensorOrientation == 90 || sensorOrientation == 270
+        val inputW = if (isRotated) height.toFloat() else width.toFloat()
+        val inputH = if (isRotated) width.toFloat() else height.toFloat()
+
+        val inputAspect = inputW / inputH
+        val outputAspect = sw / sh
+
+        var scaleX = 1.0f
+        var scaleY = 1.0f
+
+        if (inputAspect > outputAspect) {
+            // Input is wider than output - crop horizontal edges
+            scaleX = inputAspect / outputAspect
+        } else {
+            // Input is taller than output - crop vertical edges
+            scaleY = outputAspect / inputAspect
+        }
+
+        android.opengl.Matrix.scaleM(projectionMatrix, 0, scaleX, scaleY, 1f)
+
+        // --- MIRRORING FOR FRONT CAMERA ---
+        if (isFrontCamera) {
+            // Mirror along the X axis
+            android.opengl.Matrix.scaleM(projectionMatrix, 0, -1f, 1f, 1f)
+        }
 
         isFirstFrame = false
         GLES20.glUseProgram(program)
@@ -272,6 +355,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
         GLES20.glUniformMatrix4fv(upLoc, 1, false, projectionMatrix, 0)
+        
+        val timeLoc = GLES20.glGetUniformLocation(program, "time")
+        if (timeLoc != -1) {
+            GLES20.glUniform1f(timeLoc, (System.currentTimeMillis() % 1000000) / 1000f)
+        }
+
         GLES20.glEnableVertexAttribArray(phLoc)
         GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
         GLES20.glEnableVertexAttribArray(thLoc)
@@ -285,7 +374,17 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         }
 
         if (!EGL14.eglSwapBuffers(eglDisplay, surface)) {
-            Log.w("NitroCamera", "eglSwapBuffers failed for surface $surface")
+            val err = EGL14.eglGetError()
+            if (err == EGL14.EGL_BAD_SURFACE || err == 0x300D) {
+                Log.w("NitroCamera", "NitraRenderer: Platform surface became bad, detaching.")
+                if (surface == platformEglSurface) {
+                    detachPlatformSurface()
+                } else if (surface == recorderEglSurface) {
+                    setRecordingSurface(null)
+                }
+            } else {
+                Log.w("NitroCamera", "eglSwapBuffers failed: 0x${Integer.toHexString(err)}")
+            }
         }
     }
 
@@ -359,7 +458,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                                     .replace("#extension GL_OES_EGL_image_external : require", "")
 
             val fullStillFS = """
-                precision mediump float;
+                precision highp float;
                 varying vec2 vTextureCoord;
                 uniform sampler2D sTextureStill;
                 #define fragColor gl_FragColor

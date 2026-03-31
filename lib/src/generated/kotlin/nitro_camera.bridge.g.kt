@@ -217,37 +217,37 @@ data class RecordingResult(val path: String, val durationMs: Long, val fileSize:
  */
 interface HybridNitroCameraSpec {
     suspend fun requestCameraPermission(): Long
-    suspend fun getCameraPermissionStatus(): Long
+    fun getCameraPermissionStatus(): Long
     suspend fun requestMicrophonePermission(): Long
-    suspend fun getMicrophonePermissionStatus(): Long
+    fun getMicrophonePermissionStatus(): Long
     suspend fun getAvailableCameraDevicesJson(): String
-    suspend fun getAvailableCameraDevices(): List<CameraDevice>
-    suspend fun getDeviceCount(): Long
-    suspend fun getDevice(index: Long): CameraDevice
+    fun getAvailableCameraDevices(): List<CameraDevice>
+    fun getDeviceCount(): Long
+    fun getDevice(index: Long): CameraDevice
     suspend fun openCamera(deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long
     suspend fun closeCamera(textureId: Long): Unit
-    suspend fun startPreview(textureId: Long): Unit
-    suspend fun stopPreview(textureId: Long): Unit
-    suspend fun setZoom(textureId: Long, zoom: Double): Unit
-    suspend fun setFocusPoint(textureId: Long, x: Double, y: Double): Unit
-    suspend fun setAutoFocus(textureId: Long, mode: Long): Unit
-    suspend fun setExposure(textureId: Long, value: Double): Unit
-    suspend fun setFlash(textureId: Long, mode: Long): Unit
-    suspend fun setTorch(textureId: Long, enabled: Long): Unit
-    suspend fun setWhiteBalance(textureId: Long, temperature: Long): Unit
-    suspend fun setHdr(textureId: Long, enabled: Long): Unit
+    fun startPreview(textureId: Long): Unit
+    fun stopPreview(textureId: Long): Unit
+    fun setZoom(textureId: Long, zoom: Double): Unit
+    fun setFocusPoint(textureId: Long, x: Double, y: Double): Unit
+    fun setAutoFocus(textureId: Long, mode: Long): Unit
+    fun setExposure(textureId: Long, value: Double): Unit
+    fun setFlash(textureId: Long, mode: Long): Unit
+    fun setTorch(textureId: Long, enabled: Long): Unit
+    fun setWhiteBalance(textureId: Long, temperature: Long): Unit
+    fun setHdr(textureId: Long, enabled: Long): Unit
     suspend fun takePhoto(textureId: Long): PhotoResult
     suspend fun startVideoRecording(textureId: Long, outputPath: String): Unit
     suspend fun stopVideoRecording(textureId: Long): RecordingResult
-    suspend fun pauseRecording(textureId: Long): Unit
-    suspend fun resumeRecording(textureId: Long): Unit
-    suspend fun cancelRecording(textureId: Long): Unit
-    suspend fun enableFrameProcessing(textureId: Long, enabled: Long): Unit
-    suspend fun setFrameFormat(textureId: Long, format: Long): Unit
-    suspend fun setSamplingRate(textureId: Long, samplingRate: Long): Unit
-    suspend fun setFilterShader(textureId: Long, shaderSource: String): Unit
-    suspend fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer): Unit
-    suspend fun reset(): Unit
+    fun pauseRecording(textureId: Long): Unit
+    fun resumeRecording(textureId: Long): Unit
+    fun cancelRecording(textureId: Long): Unit
+    fun enableFrameProcessing(textureId: Long, enabled: Long): Unit
+    fun setFrameFormat(textureId: Long, format: Long): Unit
+    fun setSamplingRate(textureId: Long, samplingRate: Long): Unit
+    fun setFilterShader(textureId: Long, shaderSource: String): Unit
+    fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer): Unit
+    fun reset(): Unit
     val frameStream: Flow<CameraFrame>
 }
 
@@ -271,9 +271,7 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun getCameraPermissionStatus_call(): Long {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.getCameraPermissionStatus() }
-        }).get()
+        return impl.getCameraPermissionStatus()
     }
     @JvmStatic fun requestMicrophonePermission_call(): Long {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
@@ -283,9 +281,7 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun getMicrophonePermissionStatus_call(): Long {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.getMicrophonePermissionStatus() }
-        }).get()
+        return impl.getMicrophonePermissionStatus()
     }
     @JvmStatic fun getAvailableCameraDevicesJson_call(): String {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
@@ -295,7 +291,7 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun getAvailableCameraDevices_call(): ByteArray {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.getAvailableCameraDevices() } }).get()
+        val result = impl.getAvailableCameraDevices()
         val out = java.io.ByteArrayOutputStream(result.size * 168 + 8)
         val buf = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         val countBuf = java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -309,13 +305,11 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun getDeviceCount_call(): Long {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.getDeviceCount() }
-        }).get()
+        return impl.getDeviceCount()
     }
     @JvmStatic fun getDevice_call(index: Long): ByteArray {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.getDevice(index) } }).get()
+        val result = impl.getDevice(index)
         return result.encode()
     }
     @JvmStatic fun openCamera_call(deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long {
@@ -332,63 +326,43 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun startPreview_call(textureId: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.startPreview(textureId) }
-        }).get()
+        impl.startPreview(textureId)
     }
     @JvmStatic fun stopPreview_call(textureId: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.stopPreview(textureId) }
-        }).get()
+        impl.stopPreview(textureId)
     }
     @JvmStatic fun setZoom_call(textureId: Long, zoom: Double): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setZoom(textureId, zoom) }
-        }).get()
+        impl.setZoom(textureId, zoom)
     }
     @JvmStatic fun setFocusPoint_call(textureId: Long, x: Double, y: Double): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setFocusPoint(textureId, x, y) }
-        }).get()
+        impl.setFocusPoint(textureId, x, y)
     }
     @JvmStatic fun setAutoFocus_call(textureId: Long, mode: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setAutoFocus(textureId, mode) }
-        }).get()
+        impl.setAutoFocus(textureId, mode)
     }
     @JvmStatic fun setExposure_call(textureId: Long, value: Double): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setExposure(textureId, value) }
-        }).get()
+        impl.setExposure(textureId, value)
     }
     @JvmStatic fun setFlash_call(textureId: Long, mode: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setFlash(textureId, mode) }
-        }).get()
+        impl.setFlash(textureId, mode)
     }
     @JvmStatic fun setTorch_call(textureId: Long, enabled: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setTorch(textureId, enabled) }
-        }).get()
+        impl.setTorch(textureId, enabled)
     }
     @JvmStatic fun setWhiteBalance_call(textureId: Long, temperature: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setWhiteBalance(textureId, temperature) }
-        }).get()
+        impl.setWhiteBalance(textureId, temperature)
     }
     @JvmStatic fun setHdr_call(textureId: Long, enabled: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setHdr(textureId, enabled) }
-        }).get()
+        impl.setHdr(textureId, enabled)
     }
     @JvmStatic fun takePhoto_call(textureId: Long): ByteArray {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
@@ -408,57 +382,39 @@ object NitroCameraJniBridge {
     }
     @JvmStatic fun pauseRecording_call(textureId: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.pauseRecording(textureId) }
-        }).get()
+        impl.pauseRecording(textureId)
     }
     @JvmStatic fun resumeRecording_call(textureId: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.resumeRecording(textureId) }
-        }).get()
+        impl.resumeRecording(textureId)
     }
     @JvmStatic fun cancelRecording_call(textureId: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.cancelRecording(textureId) }
-        }).get()
+        impl.cancelRecording(textureId)
     }
     @JvmStatic fun enableFrameProcessing_call(textureId: Long, enabled: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.enableFrameProcessing(textureId, enabled) }
-        }).get()
+        impl.enableFrameProcessing(textureId, enabled)
     }
     @JvmStatic fun setFrameFormat_call(textureId: Long, format: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setFrameFormat(textureId, format) }
-        }).get()
+        impl.setFrameFormat(textureId, format)
     }
     @JvmStatic fun setSamplingRate_call(textureId: Long, samplingRate: Long): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setSamplingRate(textureId, samplingRate) }
-        }).get()
+        impl.setSamplingRate(textureId, samplingRate)
     }
     @JvmStatic fun setFilterShader_call(textureId: Long, shaderSource: String): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.setFilterShader(textureId, shaderSource) }
-        }).get()
+        impl.setFilterShader(textureId, shaderSource)
     }
     @JvmStatic fun updateOverlay_call(textureId: Long, overlayData: java.nio.ByteBuffer): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.updateOverlay(textureId, overlayData) }
-        }).get()
+        impl.updateOverlay(textureId, overlayData)
     }
     @JvmStatic fun reset_call(): Unit {
         val impl = implementation ?: throw IllegalStateException("NitroCamera not registered")
-        return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.reset() }
-        }).get()
+        impl.reset()
     }
     private val _streamJobs = java.util.concurrent.ConcurrentHashMap<Pair<String, Long>, kotlinx.coroutines.Job>()
 
