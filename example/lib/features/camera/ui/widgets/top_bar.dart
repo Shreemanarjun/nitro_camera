@@ -83,15 +83,20 @@ class TopBar extends StatelessWidget {
                         final mode = CameraState.previewMode.value;
                         String label;
                         switch (mode) {
-                          case PreviewMode.texture: label = "TEXTURE";
-                          case PreviewMode.platformView: label = "PV";
-                          case PreviewMode.impeller: label = "IMPELLER";
+                          case PreviewMode.texture:
+                            label = "TEXTURE";
+                          case PreviewMode.platformView:
+                            label = "PV";
+                          case PreviewMode.impeller:
+                            label = "IMPELLER";
                         }
                         return _TacticalUnit(
                           label: label,
                           active: mode != PreviewMode.texture,
                           onTap: () {
-                            final next = PreviewMode.values[(mode.index + 1) % PreviewMode.values.length];
+                            final next =
+                                PreviewMode.values[(mode.index + 1) %
+                                    PreviewMode.values.length];
                             CameraState.setPreviewMode(next);
                           },
                         );
@@ -104,7 +109,7 @@ class TopBar extends StatelessWidget {
               // FLASH TOGGLE
               Watch((context) {
                 final current = CameraState.currentDevice.value;
-                if (current == null || current.hasFlash == 0) {
+                if (current == null || current.hasFlash) {
                   return const SizedBox.shrink();
                 }
 

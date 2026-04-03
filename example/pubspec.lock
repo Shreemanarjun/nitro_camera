@@ -428,10 +428,10 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: "206866ef424a2771d124c853277bb4ac4a43dcae6ae3b692d50e519e60bfb947"
+      sha256: "53c9d31c56514570ddb7ce3a0aa535ebd65b8f0718cf3a6e6468185a6c3a3ef2"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.0"
+    version: "0.3.1"
   nitro_annotations:
     dependency: transitive
     description:
@@ -451,10 +451,10 @@ packages:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: "9389e76d2b8db2d2cc16c0b565302c3d8f9d4498cade9ad0fb26b706a6b0800a"
+      sha256: "67ce67a92844e749c439476ae44daf8771c4b39f7664ad18ac7ce2f630872887"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.0"
+    version: "0.3.1"
   objective_c:
     dependency: transitive
     description:
