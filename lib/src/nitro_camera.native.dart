@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:nitro/nitro.dart';
 
 part 'nitro_camera.g.dart';
@@ -25,6 +23,43 @@ enum AutoFocusMode { off, continuous, locked }
 /// Camera permission status.
 @HybridEnum()
 enum PermissionStatus { notDetermined, granted, denied, restricted }
+
+/// Video stabilization mode applied to the capture pipeline.
+@HybridEnum()
+enum VideoStabilizationMode {
+  off,
+  standard,
+  cinematic,
+  cinematicExtended,
+  auto,
+}
+
+/// Photo capture speed-vs-quality tradeoff.
+@HybridEnum()
+enum QualityPrioritization { speed, balanced, quality }
+
+/// Kind of [CameraEvent] delivered on [NitroCamera.eventStream].
+@HybridEnum()
+enum CameraEventType {
+  started,
+  stopped,
+  error,
+  interruptionStarted,
+  interruptionEnded,
+  frameDropped,
+}
+
+/// Why the camera session was interrupted (mirrors AVFoundation reasons).
+@HybridEnum()
+enum InterruptionReason {
+  none,
+  videoDeviceNotAvailableInBackground,
+  audioDeviceInUseByAnotherClient,
+  videoDeviceInUseByAnotherClient,
+  videoDeviceNotAvailableWithMultipleForegroundApps,
+  videoDeviceNotAvailableDueToSystemPressure,
+  unknown,
+}
 
 // ---- Structs ----
 
@@ -77,6 +112,9 @@ class CameraFrame {
   final int timestamp; // ms since epoch
   final int orientation; // degrees: 0 / 90 / 180 / 270
   final int textureId; // identifies which camera session this frame belongs to
+  final int bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
+  final int pixelFormat; // 0 = YUV_420 (plane 0 = luma), 1 = BGRA_8888
+  final int isMirrored; // 0 / 1 (front camera)
 
   const CameraFrame({
     required this.pixels,
@@ -86,6 +124,9 @@ class CameraFrame {
     required this.timestamp,
     required this.orientation,
     required this.textureId,
+    this.bytesPerRow = 0,
+    this.pixelFormat = 1,
+    this.isMirrored = 0,
   });
 }
 
@@ -96,12 +137,18 @@ class PhotoResult {
   final int width;
   final int height;
   final int fileSize; // bytes
+  final int orientation; // degrees: 0 / 90 / 180 / 270
+  final int isMirrored; // 0 / 1 (front-camera captures)
+  final int timestamp; // ms since epoch
 
   const PhotoResult({
     required this.path,
     required this.width,
     required this.height,
     required this.fileSize,
+    this.orientation = 0,
+    this.isMirrored = 0,
+    this.timestamp = 0,
   });
 }
 
@@ -116,6 +163,105 @@ class RecordingResult {
     required this.path,
     required this.durationMs,
     required this.fileSize,
+  });
+}
+
+/// A bundle of live camera settings applied atomically to an already-open
+/// session via [NitroCamera.configure]. This is the FFI struct behind the
+/// declarative `CameraConfiguration` Dart API: numeric/boolean only, so it
+/// crosses the boundary by value at zero serialization cost. Device / format /
+/// fps / audio changes still go through [NitroCamera.openCamera] (a reopen).
+@HybridStruct()
+class CameraConfig {
+  final double zoom;
+  final double exposure; // EV bias
+  final int flash; // FlashMode index
+  final int torch; // 0 / 1
+  final double torchLevel; // 0.0 .. 1.0 (when torch on)
+  final int whiteBalanceKelvin; // 0 = auto
+  final int videoHdr; // 0 / 1
+  final int lowLightBoost; // 0 / 1
+  final int autoFocus; // AutoFocusMode index
+  final int videoStabilization; // VideoStabilizationMode index
+  final int active; // 0 = paused, 1 = running
+  final int enableFrameProcessing; // 0 / 1
+  final int pixelFormat; // 0 = YUV_420, 1 = BGRA
+  final int samplingRate; // deliver every Nth frame
+
+  const CameraConfig({
+    required this.zoom,
+    required this.exposure,
+    required this.flash,
+    required this.torch,
+    required this.torchLevel,
+    required this.whiteBalanceKelvin,
+    required this.videoHdr,
+    required this.lowLightBoost,
+    required this.autoFocus,
+    required this.videoStabilization,
+    required this.active,
+    required this.enableFrameProcessing,
+    required this.pixelFormat,
+    required this.samplingRate,
+  });
+}
+
+/// The configuration the native session actually applied — the read-back that
+/// mirrors vision-camera's `onSessionConfigSelected`. Returned by
+/// [NitroCamera.configure].
+@HybridStruct()
+class ResolvedConfig {
+  final int width;
+  final int height;
+  final int fps;
+  final int pixelFormat;
+  final int videoHdrEnabled; // 0 / 1
+  final int autoFocusSystem; // 0 = none, 1 = contrast, 2 = phase
+  final int active; // 0 / 1
+
+  const ResolvedConfig({
+    required this.width,
+    required this.height,
+    required this.fps,
+    required this.pixelFormat,
+    required this.videoHdrEnabled,
+    required this.autoFocusSystem,
+    required this.active,
+  });
+}
+
+/// Per-capture options for [NitroCamera.takePhotoWithOptions].
+@HybridStruct()
+class PhotoOptions {
+  final int flash; // FlashMode index
+  final int qualityPrioritization; // QualityPrioritization index
+  final int enableShutterSound; // 0 / 1
+  final int skipMetadata; // 0 / 1
+  final int enableAutoRedEyeReduction; // 0 / 1
+
+  const PhotoOptions({
+    required this.flash,
+    required this.qualityPrioritization,
+    required this.enableShutterSound,
+    required this.skipMetadata,
+    required this.enableAutoRedEyeReduction,
+  });
+}
+
+/// A lifecycle / error event emitted by a camera session on
+/// [NitroCamera.eventStream].
+@hybridRecord
+class CameraEvent {
+  final int type; // CameraEventType
+  final int textureId; // which session (0 if not session-specific)
+  final int reason; // InterruptionReason for interruption events; else 0
+  final String message; // human-readable detail for `error` events
+
+  const CameraEvent({
+    required this.type,
+    required this.textureId,
+    this.reason = 0,
+    this.message = '',
   });
 }
 
@@ -269,6 +415,53 @@ abstract class NitroCamera extends HybridObject {
   /// [overlayData] is a serialized binary Buffer of draw commands.
   void updateOverlay(int textureId, @zeroCopy Uint8List overlayData);
 
+  // ---- Declarative configuration & advanced controls ----
+  //
+  // These mirror vision-camera's configuration-driven session model: batch a set
+  // of live settings into a [CameraConfig], apply them atomically, and read back
+  // what was actually selected as a [ResolvedConfig].
+
+  /// Applies a batch of live settings to the open session [textureId] in one
+  /// pass and returns what was actually applied. The declarative analogue of the
+  /// individual setters above — does NOT reopen the session (device/format/fps
+  /// changes must go through [openCamera]).
+  @nitroAsync
+  Future<ResolvedConfig> configure(int textureId, CameraConfig config);
+
+  /// Returns the live session state (running, fps, resolution, pixelFormat) as a
+  /// JSON object. Useful for diagnostics and UI read-back.
+  String getSessionStateJson(int textureId);
+
+  /// Sets the video stabilization mode. Pass a [VideoStabilizationMode] value.
+  void setVideoStabilization(int textureId, int mode);
+
+  /// Enables or disables low-light boost (night mode). [enabled]: 1 = on.
+  void setLowLightBoost(int textureId, int enabled);
+
+  /// Sets the torch brightness in 0.0..1.0 (1.0 = max). Values > 0 imply torch on.
+  void setTorchLevel(int textureId, double level);
+
+  /// Locks or unlocks auto-exposure at its current value. [locked]: 1 = locked.
+  void lockExposure(int textureId, int locked);
+
+  /// Locks or unlocks focus at its current position. [locked]: 1 = locked.
+  void lockFocus(int textureId, int locked);
+
+  /// Locks or unlocks white balance at its current gains. [locked]: 1 = locked.
+  void lockWhiteBalance(int textureId, int locked);
+
+  /// Sets the target output orientation in degrees (0 / 90 / 180 / 270).
+  void setTargetOrientation(int textureId, int degrees);
+
+  /// Captures a photo using explicit [options] (flash, quality, shutter sound).
+  @nitroAsync
+  Future<PhotoResult> takePhotoWithOptions(int textureId, PhotoOptions options);
+
+  /// Captures the current preview frame as a fast JPEG snapshot (no full
+  /// still-capture round-trip).
+  @nitroAsync
+  Future<PhotoResult> takeSnapshot(int textureId);
+
   /// Resets the native camera metadata caches and releases overall hardware locks.
   /// Call this to recover from serious [CAMERA_ERROR] or when hardware
   /// configuration changes (e.g. plugging in a USB camera).
@@ -278,4 +471,10 @@ abstract class NitroCamera extends HybridObject {
   /// Only active for sessions where [enableFrameProcessing] was called with 1.
   @NitroStream(backpressure: Backpressure.dropLatest)
   Stream<CameraFrame> get frameStream;
+
+  /// Stream of session lifecycle / error / interruption events across all open
+  /// camera sessions. Buffered (oldest dropped) so events are never lost to a
+  /// briefly-slow listener.
+  @NitroStream(backpressure: Backpressure.bufferDrop)
+  Stream<CameraEvent> get eventStream;
 }

@@ -7,7 +7,10 @@ let package = Package(
     products: [
         .library(name: "nitro_camera", targets: ["nitro_camera"]),
     ],
-    targets: [
+    dependencies: [
+    .package(name: "FlutterFramework", path: "../FlutterFramework"),
+  ],
+  targets: [
         // C/C++ bridge — SPM requires Swift and C++ in separate targets.
         .target(
             name: "NitroCameraCpp",
@@ -26,7 +29,10 @@ let package = Package(
         // Swift implementation + generated bridge.
         .target(
             name: "nitro_camera",
-            dependencies: ["NitroCameraCpp"],
+            dependencies: [
+              "NitroCameraCpp",
+              .product(name: "FlutterFramework", package: "FlutterFramework"),
+            ],
             path: "Sources/NitroCamera"
         ),
     ]

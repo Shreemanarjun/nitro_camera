@@ -31,7 +31,9 @@ class NitroCameraImpl(
     private val textureRegistry: TextureRegistry,
 ) : HybridNitroCameraSpec, DefaultLifecycleObserver {
 
-    var activity: android.app.Activity? = null
+    // `activity` and `applicationContext` are provided by HybridNitroCameraSpec /
+    // NitroCameraJniBridge (nitro >= 0.5); the plugin feeds them via
+    // NitroCameraJniBridge.onActivityAttached/Detached.
 
     override fun onStop(owner: LifecycleOwner) {
         super.onStop(owner)
@@ -94,6 +96,20 @@ class NitroCameraImpl(
 
     private val _frameFlow = MutableSharedFlow<CameraFrame>(extraBufferCapacity = 10)
     override val frameStream: SharedFlow<CameraFrame> = _frameFlow
+
+    private val _eventFlow = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 32)
+    override val eventStream: SharedFlow<CameraEvent> = _eventFlow
+
+    private fun emitEvent(
+        type: CameraEventType,
+        textureId: Long = 0L,
+        reason: InterruptionReason = InterruptionReason.NONE,
+        message: String = "",
+    ) {
+        _eventFlow.tryEmit(
+            CameraEvent(type.nativeValue, textureId, reason.nativeValue, message)
+        )
+    }
 
     companion object {
         private const val TAG = "NitroCamera"
@@ -244,12 +260,16 @@ class NitroCameraImpl(
                 enableAudio  = enableAudio != 0L,
             )
             session.onFrame = { frame -> _frameFlow.tryEmit(frame) }
+            session.onEvent = { type, reason, message ->
+                _eventFlow.tryEmit(CameraEvent(type.nativeValue, textureId, reason.nativeValue, message))
+            }
             synchronized(sessionsLock) { sessions[textureId] = session }
 
             session.startPreview()
             return@withLock textureId
         } catch (e: Exception) {
             Log.e(TAG, "General openCamera failure: ${e.message}")
+            emitEvent(CameraEventType.ERROR, message = "openCamera failed: ${e.message}")
             withContext(Dispatchers.Main) {
                 surfaceTextureEntry?.release()
                 (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
@@ -308,6 +328,63 @@ class NitroCameraImpl(
     override fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
     override fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
     override fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer)      { /* reserved */ }
+
+    // ---- Declarative configuration & advanced controls ----
+
+    override suspend fun configure(textureId: Long, config: CameraConfig): ResolvedConfig {
+        val s = session(textureId) ?: error("No session $textureId")
+        s.setZoom(config.zoom)
+        s.setExposure(config.exposure)
+        s.setFlash(config.flash)
+        if (config.torchLevel > 0.0) s.setTorchLevel(config.torchLevel) else s.setTorch(config.torch != 0L)
+        s.setWhiteBalance(config.whiteBalanceKelvin)
+        s.setHdr(config.videoHdr != 0L)
+        s.setLowLightBoost(config.lowLightBoost != 0L)
+        s.setAutoFocus(config.autoFocus)
+        s.setVideoStabilization(config.videoStabilization)
+        s.setFrameFormat(config.pixelFormat)
+        s.setSamplingRate(config.samplingRate)
+        s.frameProcessingEnabled = (config.enableFrameProcessing != 0L)
+        if (config.active != 0L) s.startPreview() else s.stopPreview()
+        val afSystem = if (config.autoFocus == 0L) 0L else 2L // off vs phase-detection
+        return ResolvedConfig(
+            width = s.streamWidth.toLong(),
+            height = s.streamHeight.toLong(),
+            fps = s.activeFps.toLong(),
+            pixelFormat = s.currentPixelFormat,
+            videoHdrEnabled = config.videoHdr,
+            autoFocusSystem = afSystem,
+            active = config.active,
+        )
+    }
+
+    override fun getSessionStateJson(textureId: Long): String {
+        val s = session(textureId) ?: return JSONObject().put("running", false).toString()
+        return JSONObject().apply {
+            put("running", s.isPreviewRunning)
+            put("width", s.streamWidth)
+            put("height", s.streamHeight)
+            put("fps", s.activeFps)
+            put("pixelFormat", s.currentPixelFormat)
+        }.toString()
+    }
+
+    override fun setVideoStabilization(textureId: Long, mode: Long) { session(textureId)?.setVideoStabilization(mode) }
+    override fun setLowLightBoost(textureId: Long, enabled: Long)   { session(textureId)?.setLowLightBoost(enabled != 0L) }
+    override fun setTorchLevel(textureId: Long, level: Double)      { session(textureId)?.setTorchLevel(level) }
+    override fun lockExposure(textureId: Long, locked: Long)        { session(textureId)?.lockExposure(locked != 0L) }
+    override fun lockFocus(textureId: Long, locked: Long)           { session(textureId)?.lockFocus(locked != 0L) }
+    override fun lockWhiteBalance(textureId: Long, locked: Long)    { session(textureId)?.lockWhiteBalance(locked != 0L) }
+    override fun setTargetOrientation(textureId: Long, degrees: Long) { session(textureId)?.setTargetOrientation(degrees.toInt()) }
+
+    override suspend fun takePhotoWithOptions(textureId: Long, options: PhotoOptions): PhotoResult {
+        val s = session(textureId) ?: error("No session")
+        s.setFlash(options.flash)
+        return s.takePhoto()
+    }
+
+    override suspend fun takeSnapshot(textureId: Long): PhotoResult =
+        session(textureId)?.takePhoto() ?: error("No session")
 
     private fun session(textureId: Long) = synchronized(sessionsLock) { sessions[textureId] }
 

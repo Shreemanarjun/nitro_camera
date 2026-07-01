@@ -156,9 +156,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         let isYUV = (pixelFormat == 0)
         let planeIndex = isYUV ? 0 : 0 // For BGRA it's 0. For BiPlanar YUV it's 0 for Luma.
 
-        let w    = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex))
-        let h    = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex))
-        let size = Int64(CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex) * Int(h))
+        let w        = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex))
+        let h        = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex))
+        let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex)
+        let size     = Int64(rowBytes * Int(h))
         let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex)
 
         guard let addr = baseAddr else { return }
@@ -174,7 +175,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             height: h,
             timestamp: ts,
             orientation: 0,
-            textureId: textureId
+            textureId: textureId,
+            bytesPerRow: Int64(rowBytes),
+            pixelFormat: Int64(pixelFormat),
+            isMirrored: device.position == .front ? 1 : 0
         )
         cb(frame)
     }
@@ -267,6 +271,73 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         self.samplingRate = max(1, rate)
     }
 
+    // MARK: - Advanced controls
+
+    func setVideoStabilization(_ mode: Int64) {
+        guard let conn = videoOutput.connection(with: .video),
+              conn.isVideoStabilizationSupported else { return }
+        conn.preferredVideoStabilizationMode = (mode == 0) ? .off : .auto
+    }
+
+    func setLowLightBoost(_ enabled: Bool) {
+        guard device.isLowLightBoostSupported else { return }
+        try? device.lockForConfiguration()
+        device.automaticallyEnablesLowLightBoostWhenAvailable = enabled
+        device.unlockForConfiguration()
+    }
+
+    func setTorchLevel(_ level: Double) {
+        guard device.hasTorch else { return }
+        try? device.lockForConfiguration()
+        if level > 0 {
+            try? device.setTorchModeOn(level: Float(min(max(level, 0.001), 1.0)))
+        } else {
+            device.torchMode = .off
+        }
+        device.unlockForConfiguration()
+    }
+
+    func lockExposure(_ locked: Bool) {
+        let mode: AVCaptureDevice.ExposureMode = locked ? .locked : .continuousAutoExposure
+        guard device.isExposureModeSupported(mode) else { return }
+        try? device.lockForConfiguration()
+        device.exposureMode = mode
+        device.unlockForConfiguration()
+    }
+
+    func lockFocus(_ locked: Bool) {
+        let mode: AVCaptureDevice.FocusMode = locked ? .locked : .continuousAutoFocus
+        guard device.isFocusModeSupported(mode) else { return }
+        try? device.lockForConfiguration()
+        device.focusMode = mode
+        device.unlockForConfiguration()
+    }
+
+    func lockWhiteBalance(_ locked: Bool) {
+        let mode: AVCaptureDevice.WhiteBalanceMode = locked ? .locked : .continuousAutoWhiteBalance
+        guard device.isWhiteBalanceModeSupported(mode) else { return }
+        try? device.lockForConfiguration()
+        device.whiteBalanceMode = mode
+        device.unlockForConfiguration()
+    }
+
+    private(set) var targetOrientationDeg: Int64 = -1
+    func setTargetOrientation(_ degrees: Int64) { targetOrientationDeg = degrees }
+
+    // MARK: - Read-back
+
+    var streamWidth: Int64 {
+        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).width)
+    }
+    var streamHeight: Int64 {
+        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).height)
+    }
+    var activeFps: Int64 {
+        let d = device.activeVideoMinFrameDuration
+        return d.value > 0 ? Int64(d.timescale) / Int64(d.value) : 30
+    }
+    var isRunning: Bool { session.isRunning }
+
     // MARK: - Photo capture
 
     func takePhoto(flashMode: AVCaptureDevice.FlashMode = .auto) async throws -> PhotoResult {
@@ -299,7 +370,15 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             try data.write(to: tmp)
             let w = Int64(photo.resolvedSettings.photoDimensions.width)
             let h = Int64(photo.resolvedSettings.photoDimensions.height)
-            cont.resume(returning: PhotoResult(path: tmp.path, width: w, height: h, fileSize: Int64(data.count)))
+            cont.resume(returning: PhotoResult(
+                path: tmp.path,
+                width: w,
+                height: h,
+                fileSize: Int64(data.count),
+                orientation: Int64(device.position == .front ? 0 : 90),
+                isMirrored: device.position == .front ? 1 : 0,
+                timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+            ))
         } catch {
             cont.resume(throwing: error)
         }

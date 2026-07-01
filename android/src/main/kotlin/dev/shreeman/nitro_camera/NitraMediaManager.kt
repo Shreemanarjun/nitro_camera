@@ -93,11 +93,18 @@ class NitraMediaManager(
                     FileOutputStream(tmp).use { it.write(filteredBytes) }
                     
                     if (cont.isActive) {
+                        val sensorOrient =
+                            (characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0).toLong()
+                        val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
+                            CameraCharacteristics.LENS_FACING_FRONT
                         cont.resumeWith(Result.success(PhotoResult(
-                            path     = tmp.absolutePath,
-                            width    = imgWidth,
-                            height   = imgHeight,
-                            fileSize = filteredBytes.size.toLong()
+                            path        = tmp.absolutePath,
+                            width       = imgWidth,
+                            height      = imgHeight,
+                            fileSize    = filteredBytes.size.toLong(),
+                            orientation = sensorOrient,
+                            isMirrored  = if (isFront) 1L else 0L,
+                            timestamp   = System.currentTimeMillis(),
                         )))
                     }
                 } catch (e: Exception) {
@@ -139,11 +146,18 @@ class NitraMediaManager(
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
         
-        // Use a more compatible profile if possible, otherwise manual
-        // Fix: Ensure dimension are even (H264 requirement on many Android devices)
-        val safeWidth = if (width % 2 == 0) width else width - 1
-        val safeHeight = if (height % 2 == 0) height else height - 1
-        
+        // Pick an ENCODER-SUPPORTED recording size closest to the requested one.
+        // Recording at arbitrary (screen-derived) dimensions is the main cause of
+        // `MediaRecorder.prepare()` failing with -2147483648 on many devices.
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val supported = map?.getOutputSizes(MediaRecorder::class.java)
+        val target = supported?.minByOrNull {
+            Math.abs(it.width.toLong() * it.height - width.toLong() * height)
+        } ?: android.util.Size(width, height)
+        // H.264 requires even dimensions on many devices.
+        val safeWidth = if (target.width % 2 == 0) target.width else target.width - 1
+        val safeHeight = if (target.height % 2 == 0) target.height else target.height - 1
+
         recorder.setVideoSize(safeWidth, safeHeight)
         recorder.setVideoEncodingBitRate(6_000_000) // 6Mbps is more than enough for high quality
         recorder.setVideoFrameRate(30)

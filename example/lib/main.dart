@@ -5,13 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:async';
 import 'package:nitro/nitro.dart';
-import 'features/camera/state/camera_state.dart';
-import 'features/camera/ui/widgets/camera_preview.dart';
-import 'features/camera/ui/widgets/camera_status_widgets.dart';
-import 'features/camera/ui/widgets/top_bar.dart';
-import 'features/camera/ui/widgets/bottom_controls.dart';
-import 'features/camera/ui/widgets/frame_overlay.dart';
-import 'features/camera/ui/widgets/filter_selector.dart';
+import 'package:nitro_camera/nitro_camera.dart';
+import 'features/camera/state/camera_store.dart';
+import 'features/camera/ui/widgets/overlays/camera_status_widgets.dart';
+import 'features/camera/ui/widgets/controls/top_bar.dart';
+import 'features/camera/ui/widgets/controls/bottom_controls.dart';
+import 'features/camera/ui/widgets/overlays/frame_overlay.dart';
+import 'features/camera/ui/widgets/controls/filter_selector.dart';
+import 'features/camera/ui/widgets/controls/pro_controls.dart';
+import 'features/camera/ui/widgets/controls/control_panel.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +24,7 @@ void main() {
   NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
 
   // Pre-warm camera initialization in background after first frame draw
-  Future.delayed(Duration.zero, () => CameraState.init());
+  Future.delayed(Duration.zero, () => cameraStore.init());
 
   runApp(
     const MaterialApp(debugShowCheckedModeBanner: false, home: CameraApp()),
@@ -43,7 +45,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    CameraState.init();
+    cameraStore.init();
   }
 
   @override
@@ -56,21 +58,21 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       // Re-fetch devices in case they changed (e.g. external camera plugged in)
-      CameraState.init();
+      cameraStore.init();
     }
   }
 
   void _handleSwipe(DragEndDetails details) {
     if (details.primaryVelocity == null) return;
     final modes = ['SCANNER', 'PHOTO', 'VIDEO'];
-    int currentIndex = modes.indexOf(CameraState.mode.value);
+    int currentIndex = modes.indexOf(cameraStore.mode.value);
     if (details.primaryVelocity! < -300) {
       if (currentIndex < modes.length - 1) {
-        CameraState.setMode(modes[currentIndex + 1]);
+        cameraStore.setMode(modes[currentIndex + 1]);
       }
     } else if (details.primaryVelocity! > 300) {
       if (currentIndex > 0) {
-        CameraState.setMode(modes[currentIndex - 1]);
+        cameraStore.setMode(modes[currentIndex - 1]);
       }
     }
   }
@@ -80,7 +82,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
     // Sync resolution with screen aspect to avoid stretching
     final size = MediaQuery.of(context).size;
     final pixelRatio = MediaQuery.of(context).devicePixelRatio;
-    CameraState.setResolution(
+    cameraStore.setResolution(
       (size.width * pixelRatio).toInt(),
       (size.height * pixelRatio).toInt(),
     );
@@ -88,15 +90,15 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Watch((context) {
-        final cameraPermission = CameraState.cameraPermission.value;
+        final cameraPermission = cameraStore.cameraPermission.value;
         if (cameraPermission != 1) {
           return PermissionGuard(
             cameraStatus: cameraPermission,
-            onGrant: CameraState.grantPermission,
+            onGrant: cameraStore.grantPermission,
           );
         }
 
-        final loading = CameraState.loading.value;
+        final loading = cameraStore.loading.value;
         if (loading) {
           return const Center(
             child: CircularProgressIndicator(color: Colors.cyanAccent),
@@ -114,7 +116,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                   final local = box.globalToLocal(details.globalPosition);
 
                   // Correct focus coords if using aspect ratio
-                  final ar = CameraState.selectedAspectRatio.value;
+                  final ar = cameraStore.selectedAspectRatio.value;
                   double x = local.dx / box.size.width;
                   double y = local.dy / box.size.height;
 
@@ -135,48 +137,63 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
                   x = x.clamp(0.0, 1.0);
                   y = y.clamp(0.0, 1.0);
-                  CameraState.setFocusPoint(x, y);
-                  CameraState.focusIndicatorTrigger.value = local;
+                  cameraStore.setFocusPoint(x, y);
+                  cameraStore.focusIndicatorTrigger.value = local;
                 },
                 onHorizontalDragEnd: _handleSwipe,
-                onScaleStart: (_) => _baseScale = CameraState.currentZoom.value,
+                onScaleStart: (_) => _baseScale = cameraStore.currentZoom.value,
                 onScaleUpdate: (details) {
                   final newZoom = _baseScale * details.scale;
-                  if ((newZoom - CameraState.currentZoom.value).abs() > 0.05) {
+                  if ((newZoom - cameraStore.currentZoom.value).abs() > 0.05) {
                     HapticFeedback.selectionClick();
                   }
-                  CameraState.setZoom(newZoom);
+                  cameraStore.setZoom(newZoom);
                 },
                 behavior: HitTestBehavior.opaque,
                 child: Watch((context) {
-                  final status = CameraState.status.value;
-                  final currentDevice = CameraState.currentDevice.value;
-                  final devices = CameraState.devices;
-                  if (devices.isEmpty) return const SizedBox.shrink();
+                  final currentDevice = cameraStore.currentDevice.value;
+                  final devices = cameraStore.devices.value;
+                  if (devices.isEmpty || currentDevice == null) {
+                    return const Center(
+                      child: Text(
+                        "SELECT A CAMERA",
+                        style: TextStyle(color: Colors.white24),
+                      ),
+                    );
+                  }
 
-                  return currentDevice != null && status != CameraStatus.closed
-                      ? NitraCameraPreview(
-                          device: currentDevice,
-                          width: CameraState.width.value,
-                          height: CameraState.height.value,
-                          fps: CameraState.fps.value,
-                          zoom: CameraState.currentZoom.value,
-                          pixelFormat: CameraState.pixelFormat.value,
-                          filterShader: CameraState
-                              .filters[CameraState.currentFilterName.value],
-                          onStarted: (tid) {
-                            CameraState.status.value = CameraStatus.running;
-                            CameraState.activeTextureId.value = tid;
-                          },
-                          onError: (err) =>
-                              CameraState.errorMessage.value = err,
-                        )
-                      : const Center(
-                          child: Text(
-                            "SELECT A CAMERA",
-                            style: TextStyle(color: Colors.white24),
-                          ),
-                        );
+                  final ar = cameraStore.selectedAspectRatio.value;
+                  // Declarative session lifecycle: changing `device` / `width` /
+                  // `height` / `fps` reopens the camera (device/format switching
+                  // is handled by CameraView, not imperative teardown).
+                  final view = CameraView(
+                    device: currentDevice,
+                    width: cameraStore.width.value,
+                    height: cameraStore.height.value,
+                    fps: cameraStore.fps.value,
+                    settleDelay: const Duration(milliseconds: 200),
+                    loading: const ColoredBox(
+                      color: Colors.black,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.cyanAccent,
+                        ),
+                      ),
+                    ),
+                    errorBuilder: (err, retry) =>
+                        _PreviewError(error: err, onRetry: retry),
+                    // Publishes the controller, subscribes to the session event
+                    // stream, and re-applies current settings to the new session.
+                    onInitialized: cameraStore.onSessionReady,
+                    onClosing: cameraStore.onSessionClosing,
+                    onError: (err) =>
+                        cameraStore.errorMessage.value = err.toString(),
+                  );
+
+                  return ar == null
+                      ? view
+                      : Center(child: AspectRatio(aspectRatio: ar, child: view));
                 }),
               ),
             ),
@@ -189,7 +206,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
               right: 0,
               top: MediaQuery.of(context).size.height * 0.3,
               child: Watch((context) {
-                final zoom = CameraState.currentZoom.value;
+                final zoom = cameraStore.currentZoom.value;
                 if (zoom <= 1.02) return const SizedBox.shrink();
                 return Center(
                   child: Container(
@@ -216,13 +233,42 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
             // 2c. Focus Indicator
             Watch((context) {
-              final offset = CameraState.focusIndicatorTrigger.value;
+              final offset = cameraStore.focusIndicatorTrigger.value;
               if (offset == null) return const SizedBox.shrink();
               return _FocusIndicator(key: ValueKey(offset), offset: offset);
             }),
 
             // 3. Top Tactical Controls
             const TopBar(),
+
+            // 3b. Advanced controls — CONFIG (format/stream) + PRO (full controller API).
+            Positioned(
+              right: 16,
+              top: MediaQuery.of(context).padding.top + 56,
+              child: Builder(
+                builder: (context) => Column(
+                  children: [
+                    _PillButton(
+                      icon: Icons.settings_input_component,
+                      label: 'CONFIG',
+                      onTap: () => Navigator.of(context).push(
+                        PageRouteBuilder(
+                          opaque: false,
+                          barrierColor: Colors.black54,
+                          pageBuilder: (_, _, _) => const ControlPanel(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _PillButton(
+                      icon: Icons.tune,
+                      label: 'PRO',
+                      onTap: () => ProControlsSheet.show(context),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
             // 4. Tactical Control Trays (Filters & Sensors)
             // 4. Tactical Control Trays (Sensors)
@@ -235,7 +281,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
             // 4b. Collapsible Filter Tray
             Watch((context) {
-              final show = CameraState.showFilters.value;
+              final show = cameraStore.showFilters.value;
               return AnimatedPositioned(
                 duration: const Duration(milliseconds: 400),
                 curve: Curves.easeOutQuart,
@@ -256,7 +302,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
             // 5. Automated Processing Layer (QR etc) - Moved here to be above tactical trays
             Watch((context) {
-              final isScanner = CameraState.mode.value == 'SCANNER';
+              final isScanner = cameraStore.mode.value == 'SCANNER';
               return AnimatedSwitcher(
                 duration: const Duration(milliseconds: 400),
                 transitionBuilder: (child, anim) =>
@@ -264,7 +310,7 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                 child: isScanner
                     ? FrameOverlay(
                         key: const ValueKey('scanner'),
-                        isProcessing: CameraState.isProcessingFrames.value,
+                        isProcessing: cameraStore.isProcessingFrames.value,
                       )
                     : const SizedBox.shrink(key: ValueKey('none')),
               );
@@ -275,13 +321,13 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
             // 6. Global Overlays (Capture Flash, Rec status)
             Watch((context) {
-              final trigger = CameraState.photoTrigger.value;
+              final trigger = cameraStore.photoTrigger.value;
               if (trigger == 0) return const SizedBox.shrink();
               return _FlashOverlay(key: ValueKey(trigger));
             }),
 
             Watch((context) {
-              if (!CameraState.isRecording.value) {
+              if (!cameraStore.isRecording.value) {
                 return const SizedBox.shrink();
               }
               return const _VideoRecordingHUD();
@@ -299,8 +345,8 @@ class _SensorTray extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Watch((context) {
-      final devices = CameraState.devices.value;
-      final currentDevice = CameraState.currentDevice.value;
+      final devices = cameraStore.devices.value;
+      final currentDevice = cameraStore.currentDevice.value;
       if (devices.isEmpty) return const SizedBox.shrink();
       final backCameras = devices.where((d) => d.position == 1).toList();
       // Usually, lensType 1 is the 1.0x baseline.
@@ -348,7 +394,7 @@ class _SensorTray extends StatelessWidget {
                 }
 
                 return GestureDetector(
-                  onTap: () => CameraState.selectDevice(d),
+                  onTap: () => cameraStore.selectDevice(d),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     width: isSelected ? 54 : 44,
@@ -559,8 +605,8 @@ class _FocusIndicatorState extends State<_FocusIndicator>
       duration: const Duration(milliseconds: 600),
     );
     _ctrl.forward().then((_) {
-      if (CameraState.focusIndicatorTrigger.value == widget.offset) {
-        CameraState.focusIndicatorTrigger.value = null;
+      if (cameraStore.focusIndicatorTrigger.value == widget.offset) {
+        cameraStore.focusIndicatorTrigger.value = null;
       }
     });
   }
@@ -594,6 +640,87 @@ class _FocusIndicatorState extends State<_FocusIndicator>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Error state for [CameraView] — mirrors the previous preview's retry UI.
+/// Small glassy pill button used for the CONFIG / PRO entry points.
+class _PillButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _PillButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black45,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.cyanAccent, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.cyanAccent, size: 14),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.cyanAccent,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewError extends StatelessWidget {
+  final Object error;
+  final VoidCallback onRetry;
+  const _PreviewError({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70),
+            ),
+            TextButton(
+              onPressed: () {
+                NitroCamera.instance.reset();
+                onRetry();
+              },
+              child: const Text(
+                "RETRY",
+                style: TextStyle(color: Colors.cyanAccent),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,27 +1,15 @@
 PODS:
   - Flutter (1.0.0)
-  - nitro (0.0.1):
-    - Flutter
-  - nitro_camera (0.0.1):
-    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - nitro (from `.symlinks/plugins/nitro/ios`)
-  - nitro_camera (from `.symlinks/plugins/nitro_camera/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  nitro:
-    :path: ".symlinks/plugins/nitro/ios"
-  nitro_camera:
-    :path: ".symlinks/plugins/nitro_camera/ios"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  nitro: 3f399f826dcec7d59928ac53bfa3d6a4234bfb5a
-  nitro_camera: 7b360dace5443539474419c7545bfa93ee296952
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

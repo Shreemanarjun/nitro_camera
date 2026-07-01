@@ -3,7 +3,12 @@ import AVFoundation
 import Combine
 import Flutter
 
-/// Real AVFoundation implementation of HybridNitroCameraProtocol.
+/// Real AVFoundation implementation of `HybridNitroCameraProtocol`.
+///
+/// Method sync/async split mirrors the generated protocol exactly: `@nitroAsync`
+/// spec methods are `async throws` here; everything else is synchronous. Sync
+/// methods that delegate to throwing session calls swallow errors with `try?`
+/// (the bridge signature can't propagate them).
 @objc(NitroCameraImpl)
 public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
@@ -12,10 +17,22 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     private var sessions = [Int64: NitraCameraSession]()
     private let sessionsLock = NSLock()
 
-    // Frame stream publisher (CPU path)
+    // Frame stream publisher (CPU path).
     private let frameSubject = PassthroughSubject<CameraFrame, Never>()
     public var frameStream: AnyPublisher<CameraFrame, Never> {
         frameSubject.eraseToAnyPublisher()
+    }
+
+    // Session lifecycle / error / interruption event stream.
+    private let eventSubject = PassthroughSubject<CameraEvent, Never>()
+    public var eventStream: AnyPublisher<CameraEvent, Never> {
+        eventSubject.eraseToAnyPublisher()
+    }
+
+    // CameraEventType: 0=started 1=stopped 2=error 3=interruptionStarted
+    //                  4=interruptionEnded 5=frameDropped
+    private func emitEvent(_ type: Int64, textureId: Int64 = 0, reason: Int64 = 0, message: String = "") {
+        eventSubject.send(CameraEvent(type: type, textureId: textureId, reason: reason, message: message))
     }
 
     public init(textureRegistry: FlutterTextureRegistry) {
@@ -28,19 +45,19 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         return await withCheckedContinuation { continuation in
             switch AVCaptureDevice.authorizationStatus(for: .video) {
             case .authorized:
-                continuation.resume(returning: 1) // granted
+                continuation.resume(returning: 1)
             case .notDetermined:
                 AVCaptureDevice.requestAccess(for: .video) { granted in
                     continuation.resume(returning: granted ? 1 : 2)
                 }
-            case .denied:   continuation.resume(returning: 2)
+            case .denied:     continuation.resume(returning: 2)
             case .restricted: continuation.resume(returning: 3)
             @unknown default: continuation.resume(returning: 2)
             }
         }
     }
 
-    public func getCameraPermissionStatus() async throws -> Int64 {
+    public func getCameraPermissionStatus() -> Int64 {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .notDetermined: return 0
         case .authorized:    return 1
@@ -59,14 +76,14 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
                 AVCaptureDevice.requestAccess(for: .audio) { granted in
                     continuation.resume(returning: granted ? 1 : 2)
                 }
-            case .denied:   continuation.resume(returning: 2)
+            case .denied:     continuation.resume(returning: 2)
             case .restricted: continuation.resume(returning: 3)
             @unknown default: continuation.resume(returning: 2)
             }
         }
     }
 
-    public func getMicrophonePermissionStatus() async throws -> Int64 {
+    public func getMicrophonePermissionStatus() -> Int64 {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .notDetermined: return 0
         case .authorized:    return 1
@@ -80,9 +97,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     public func getAvailableCameraDevicesJson() async throws -> String {
         let devices = discoverySession().devices
-        let arr = devices.compactMap { device -> [String: Any]? in
-            return deviceInfoDict(for: device)
-        }
+        let arr = devices.compactMap { deviceInfoDict(for: $0) }
         guard let data = try? JSONSerialization.data(withJSONObject: arr, options: []),
               let json = String(data: data, encoding: .utf8) else {
             return "[]"
@@ -90,20 +105,24 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         return json
     }
 
-    public func getAvailableCameraDevices() async throws -> [CameraDevice] {
+    public func getAvailableCameraDevices() -> [CameraDevice] {
         return discoverySession().devices.map { deviceInfo(for: $0) }
     }
 
-    public func getDeviceCount() async throws -> Int64 {
+    public func getDeviceCount() -> Int64 {
         Int64(discoverySession().devices.count)
     }
 
-    public func getDevice(index: Int64) async throws -> CameraDevice {
+    public func getDevice(index: Int64) -> CameraDevice {
         let devices = discoverySession().devices
-        guard index >= 0 && index < Int64(devices.count) else {
-            throw NitraCameraError.deviceNotFound
+        guard !devices.isEmpty else {
+            return CameraDevice(
+                id: "", name: "", position: 2, lensType: 0, sensorOrientation: 0,
+                minZoom: 1, maxZoom: 1, neutralZoom: 1, hasFlash: 0, hasTorch: 0,
+                maxPhotoWidth: 0, maxPhotoHeight: 0, focalLength: 0, aperture: 0)
         }
-        return deviceInfo(for: devices[Int(index)])
+        let i = Int(max(0, min(index, Int64(devices.count - 1))))
+        return deviceInfo(for: devices[i])
     }
 
     // MARK: - Camera lifecycle
@@ -119,39 +138,18 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             throw NitraCameraError.configurationFailed
         }
 
-        // Texture must be registered on the main thread.
+        // Allocate a texture id on the main thread, then build the real session.
         let textureId: Int64 = try await MainActor.run {
-            let session = try NitraCameraSession(
-                textureId: 0, // placeholder — real id set after registration
-                device: avDevice,
-                textureRegistry: registry,
-                width: width,
-                height: height,
-                fps: fps,
-                enableAudio: enableAudio != 0
-            )
-            // Register with Flutter to get a real texture ID
-            let id = registry.register(session)
-            // Re-init with correct id via a thin wrapper approach
-            // (store the session under the registered id)
-            self.sessionsLock.lock()
-            // We need a fresh session with the correct id; rebuild cheaply
-            self.sessionsLock.unlock()
-            return id
+            let placeholder = try NitraCameraSession(
+                textureId: 0, device: avDevice, textureRegistry: registry,
+                width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
+            return registry.register(placeholder)
         }
 
-        // Build the real session with the registered textureId
         let realSession = try NitraCameraSession(
-            textureId: textureId,
-            device: avDevice,
-            textureRegistry: registry,
-            width: width,
-            height: height,
-            fps: fps,
-            enableAudio: enableAudio != 0
-        )
+            textureId: textureId, device: avDevice, textureRegistry: registry,
+            width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
 
-        // Re-register with the texture ID we already allocated
         await MainActor.run {
             registry.unregisterTexture(textureId)
             _ = registry.register(realSession)
@@ -166,6 +164,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         sessionsLock.unlock()
 
         realSession.start()
+        emitEvent(0 /* started */, textureId: textureId)
         return textureId
     }
 
@@ -174,48 +173,49 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         let session = sessions.removeValue(forKey: textureId)
         sessionsLock.unlock()
         session?.close()
+        emitEvent(1 /* stopped */, textureId: textureId)
     }
 
-    public func startPreview(textureId: Int64) async throws {
+    public func startPreview(textureId: Int64) {
         session(for: textureId)?.start()
     }
 
-    public func stopPreview(textureId: Int64) async throws {
+    public func stopPreview(textureId: Int64) {
         session(for: textureId)?.stop()
     }
 
     // MARK: - Camera controls
 
-    public func setZoom(textureId: Int64, zoom: Double) async throws {
-        try session(for: textureId)?.setZoom(zoom)
+    public func setZoom(textureId: Int64, zoom: Double) {
+        try? session(for: textureId)?.setZoom(zoom)
     }
 
-    public func setFocusPoint(textureId: Int64, x: Double, y: Double) async throws {
-        try session(for: textureId)?.setFocusPoint(x: x, y: y)
+    public func setFocusPoint(textureId: Int64, x: Double, y: Double) {
+        try? session(for: textureId)?.setFocusPoint(x: x, y: y)
     }
 
-    public func setAutoFocus(textureId: Int64, mode: Int64) async throws {
-        try session(for: textureId)?.setAutoFocus(mode: mode)
+    public func setAutoFocus(textureId: Int64, mode: Int64) {
+        try? session(for: textureId)?.setAutoFocus(mode: mode)
     }
 
-    public func setExposure(textureId: Int64, value: Double) async throws {
-        try session(for: textureId)?.setExposure(value: value)
+    public func setExposure(textureId: Int64, value: Double) {
+        try? session(for: textureId)?.setExposure(value: value)
     }
 
-    public func setFlash(textureId: Int64, mode: Int64) async throws {
+    public func setFlash(textureId: Int64, mode: Int64) {
         session(for: textureId)?.setFlash(mode: mode)
     }
 
-    public func setTorch(textureId: Int64, enabled: Int64) async throws {
-        try session(for: textureId)?.setTorch(enabled: enabled != 0)
+    public func setTorch(textureId: Int64, enabled: Int64) {
+        try? session(for: textureId)?.setTorch(enabled: enabled != 0)
     }
 
-    public func setWhiteBalance(textureId: Int64, temperature: Int64) async throws {
-        try session(for: textureId)?.setWhiteBalance(temperature: temperature)
+    public func setWhiteBalance(textureId: Int64, temperature: Int64) {
+        try? session(for: textureId)?.setWhiteBalance(temperature: temperature)
     }
 
-    public func setHdr(textureId: Int64, enabled: Int64) async throws {
-        try session(for: textureId)?.setHdr(enabled: enabled != 0)
+    public func setHdr(textureId: Int64, enabled: Int64) {
+        try? session(for: textureId)?.setHdr(enabled: enabled != 0)
     }
 
     // MARK: - Photo capture
@@ -237,42 +237,133 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         return try await s.stopVideoRecording()
     }
 
-    public func pauseRecording(textureId: Int64) async throws {
+    public func pauseRecording(textureId: Int64) {
         session(for: textureId)?.pauseVideoRecording()
     }
 
-    public func resumeRecording(textureId: Int64) async throws {
+    public func resumeRecording(textureId: Int64) {
         session(for: textureId)?.resumeVideoRecording()
     }
 
-    public func cancelRecording(textureId: Int64) async throws {
-        guard let s = session(for: textureId) else { return }
-        try await s.cancelVideoRecording()
+    public func cancelRecording(textureId: Int64) {
+        let s = session(for: textureId)
+        Task { try? await s?.cancelVideoRecording() }
     }
 
     // MARK: - Frame processing
 
-    public func enableFrameProcessing(textureId: Int64, enabled: Int64) async throws {
+    public func enableFrameProcessing(textureId: Int64, enabled: Int64) {
         session(for: textureId)?.frameProcessingEnabled = (enabled != 0)
     }
 
-    public func setFrameFormat(textureId: Int64, format: Int64) async throws {
+    public func setFrameFormat(textureId: Int64, format: Int64) {
         session(for: textureId)?.setFrameFormat(format)
     }
 
-    public func setSamplingRate(textureId: Int64, samplingRate: Int64) async throws {
+    public func setSamplingRate(textureId: Int64, samplingRate: Int64) {
         session(for: textureId)?.setSamplingRate(samplingRate)
     }
 
-    public func setFilterShader(textureId: Int64, shaderSource: String) async throws {
-        // Implementation stub
+    public func setFilterShader(textureId: Int64, shaderSource: String) {
+        // GPU preview filter is Android-only for now; reserved on iOS.
     }
 
-    public func updateOverlay(textureId: Int64, overlayData: Data) async throws {
-        // Implementation stub
+    public func updateOverlay(textureId: Int64, overlayData: Data) {
+        // Reserved.
     }
 
-    public func reset() async throws {
+    // MARK: - Declarative configuration & advanced controls
+
+    public func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig {
+        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
+        try? s.setZoom(config.zoom)
+        try? s.setExposure(value: config.exposure)
+        s.setFlash(mode: config.flash)
+        if config.torchLevel > 0 {
+            s.setTorchLevel(config.torchLevel)
+        } else {
+            try? s.setTorch(enabled: config.torch != 0)
+        }
+        try? s.setWhiteBalance(temperature: config.whiteBalanceKelvin)
+        try? s.setHdr(enabled: config.videoHdr != 0)
+        s.setLowLightBoost(config.lowLightBoost != 0)
+        try? s.setAutoFocus(mode: config.autoFocus)
+        s.setVideoStabilization(config.videoStabilization)
+        s.setFrameFormat(config.pixelFormat)
+        s.setSamplingRate(config.samplingRate)
+        s.frameProcessingEnabled = (config.enableFrameProcessing != 0)
+        if config.active != 0 { s.start() } else { s.stop() }
+
+        let afSystem: Int64 = config.autoFocus == 0 ? 0 : 2 // off vs phase-detection
+        return ResolvedConfig(
+            width: s.streamWidth,
+            height: s.streamHeight,
+            fps: s.activeFps,
+            pixelFormat: s.pixelFormat,
+            videoHdrEnabled: config.videoHdr,
+            autoFocusSystem: afSystem,
+            active: config.active)
+    }
+
+    public func getSessionStateJson(textureId: Int64) -> String {
+        guard let s = session(for: textureId) else { return "{\"running\":false}" }
+        let dict: [String: Any] = [
+            "running":     s.isRunning,
+            "width":       s.streamWidth,
+            "height":      s.streamHeight,
+            "fps":         s.activeFps,
+            "pixelFormat": s.pixelFormat,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    public func setVideoStabilization(textureId: Int64, mode: Int64) {
+        session(for: textureId)?.setVideoStabilization(mode)
+    }
+
+    public func setLowLightBoost(textureId: Int64, enabled: Int64) {
+        session(for: textureId)?.setLowLightBoost(enabled != 0)
+    }
+
+    public func setTorchLevel(textureId: Int64, level: Double) {
+        session(for: textureId)?.setTorchLevel(level)
+    }
+
+    public func lockExposure(textureId: Int64, locked: Int64) {
+        session(for: textureId)?.lockExposure(locked != 0)
+    }
+
+    public func lockFocus(textureId: Int64, locked: Int64) {
+        session(for: textureId)?.lockFocus(locked != 0)
+    }
+
+    public func lockWhiteBalance(textureId: Int64, locked: Int64) {
+        session(for: textureId)?.lockWhiteBalance(locked != 0)
+    }
+
+    public func setTargetOrientation(textureId: Int64, degrees: Int64) {
+        session(for: textureId)?.setTargetOrientation(degrees)
+    }
+
+    public func takePhotoWithOptions(textureId: Int64, options: PhotoOptions) async throws -> PhotoResult {
+        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
+        let flash: AVCaptureDevice.FlashMode
+        switch options.flash {
+        case 1:  flash = .on
+        case 2:  flash = .auto
+        default: flash = .off
+        }
+        return try await s.takePhoto(flashMode: flash)
+    }
+
+    public func takeSnapshot(textureId: Int64) async throws -> PhotoResult {
+        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
+        return try await s.takePhoto()
+    }
+
+    public func reset() {
         sessionsLock.lock()
         for session in sessions.values {
             session.close()
@@ -369,7 +460,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             "maxExposure":          maxEv,
             "minFocusDistanceCm":   minFocusDist,
             "isMultiCam":           false,
-            "supportsLowLightBoost": false,
+            "supportsLowLightBoost": device.isLowLightBoostSupported,
             "supportsRawCapture":   false,
             "supportsFocus":        device.isFocusPointOfInterestSupported,
             "hardwareLevel":        "full",
@@ -386,7 +477,6 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         case .builtInTelephotoCamera: lensType = 3
         default:                      lensType = 1
         }
-        // Get max photo dimensions
         var maxW: Int64 = 0, maxH: Int64 = 0
         for fmt in device.formats {
             let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
@@ -405,8 +495,8 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             hasTorch: device.hasTorch ? Int64(1) : Int64(0),
             maxPhotoWidth: maxW,
             maxPhotoHeight: maxH,
-            focalLength: 3.5, // placeholder
-            aperture: 1.8 // placeholder
+            focalLength: 3.5,
+            aperture: 1.8
         )
     }
 }

@@ -21,7 +21,10 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
             textureRegistry = binding.textureRegistry,
         )
         impl = nitroImpl
-        NitroCameraJniBridge.register(nitroImpl)
+        // nitro >= 0.5: register a factory + app context. We return the same shared
+        // instance so the plugin, the platform view and the Dart-side singleton all
+        // talk to one NitroCameraImpl.
+        NitroCameraJniBridge.registerFactory({ nitroImpl }, binding.applicationContext)
 
         binding.platformViewRegistry.registerViewFactory(
             "dev.shreeman.nitro_camera/platform_view",
@@ -38,19 +41,17 @@ class NitroCameraPlugin : FlutterPlugin, ActivityAware {
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        impl?.activity = binding.activity
-        (binding.activity as? LifecycleOwner)?.lifecycle?.addObserver(impl!!)
+        NitroCameraJniBridge.onActivityAttached(binding.activity)
+        impl?.let { (binding.activity as? LifecycleOwner)?.lifecycle?.addObserver(it) }
         binding.addRequestPermissionsResultListener { requestCode, _, grantResults ->
             impl?.handlePermissionResult(requestCode, grantResults) ?: false
         }
     }
 
     override fun onDetachedFromActivity() {
-        val target = impl
-        if (target != null) {
-            (target.activity as? LifecycleOwner)?.lifecycle?.removeObserver(target)
-            target.activity = null
-        }
+        val act = NitroCameraJniBridge.activity
+        impl?.let { i -> (act as? LifecycleOwner)?.lifecycle?.removeObserver(i) }
+        NitroCameraJniBridge.onActivityDetached()
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {

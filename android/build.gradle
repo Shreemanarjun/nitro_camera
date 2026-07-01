@@ -1,22 +1,15 @@
+plugins {
+    id "com.android.library"
+    id "org.jetbrains.kotlin.android"
+}
+
 group = "dev.shreeman.nitro_camera"
 version = "1.0"
-
-buildscript {
-    repositories { google(); mavenCentral() }
-    dependencies { classpath("com.android.tools.build:gradle:8.11.1") }
-}
-
-rootProject.allprojects {
-    repositories { google(); mavenCentral() }
-}
-
-apply plugin: "com.android.library"
-apply plugin: "kotlin-android"
 
 android {
     namespace = "dev.shreeman.nitro_camera"
     compileSdk = 36
-    ndkVersion = android.ndkVersion
+    ndkVersion = "27.0.12077973"
 
     externalNativeBuild {
         cmake { path = "../src/CMakeLists.txt" }
@@ -34,7 +27,6 @@ android {
     sourceSets {
         main {
             kotlin.srcDirs += "${project.projectDir}/../lib/src/generated/kotlin"
-            java.srcDirs += "${project.projectDir}/../lib/src/generated/kotlin"
         }
     }
 }

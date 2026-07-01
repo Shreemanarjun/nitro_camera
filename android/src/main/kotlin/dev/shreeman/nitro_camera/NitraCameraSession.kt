@@ -76,6 +76,22 @@ class NitraCameraSession(
     private var exposureValue: Double = 0.0
     private var afMode: Long = 1L
     private var torchEnabled: Boolean = false
+    private var torchLevel: Double = 1.0
+    private var videoStabMode: Long = 0L
+    private var lowLightBoost: Boolean = false
+    private var aeLocked: Boolean = false
+    private var awbLocked: Boolean = false
+    private var afLocked: Boolean = false
+    private var targetOrientationDeg: Int = -1
+    private var whiteBalanceKelvin: Long = 0L
+    private var hdrEnabled: Boolean = false
+
+    // --- Read-back accessors (used by configure()/getSessionStateJson) ---
+    val streamWidth: Int get() = resolvedSize.width
+    val streamHeight: Int get() = resolvedSize.height
+    val activeFps: Int get() = bestFpsRange()?.upper ?: requestedFps
+    val currentPixelFormat: Long get() = pixelFormat
+    val isPreviewRunning: Boolean get() = captureSession != null
 
     init {
         val latch = java.util.concurrent.CountDownLatch(1)
@@ -132,6 +148,7 @@ class NitraCameraSession(
             }
         }
     var onFrame: ((CameraFrame) -> Unit)? = null
+    var onEvent: ((CameraEventType, InterruptionReason, String) -> Unit)? = null
     private var pixelFormat: Long = 1
     private var samplingRate: Long = 1
     private var frameCounter: Long = 0
@@ -153,6 +170,11 @@ class NitraCameraSession(
         try {
             cameraDevice.close()
         } catch (_: Exception) {}
+        onEvent?.invoke(
+            CameraEventType.INTERRUPTIONSTARTED,
+            InterruptionReason.VIDEODEVICENOTAVAILABLEINBACKGROUND,
+            "",
+        )
         Log.d("NitroCamera", "Session $textureId paused hardware")
     }
 
@@ -183,8 +205,14 @@ class NitraCameraSession(
             }
             this.cameraDevice = newDevice
             startPreview()
+            onEvent?.invoke(CameraEventType.INTERRUPTIONENDED, InterruptionReason.NONE, "")
         } catch (e: Exception) {
             Log.e("NitroCamera", "Failed to resume session $textureId: ${e.message}")
+            onEvent?.invoke(
+                CameraEventType.ERROR,
+                InterruptionReason.NONE,
+                "Failed to resume session: ${e.message}",
+            )
         }
     }
 
@@ -220,9 +248,15 @@ class NitraCameraSession(
                         if (isClosed) { session.close(); return }
                         captureSession = session
                         sendPreviewRequest(session)
+                        onEvent?.invoke(CameraEventType.STARTED, InterruptionReason.NONE, "")
                     }
                     override fun onConfigureFailed(session: CameraCaptureSession) {
                         Log.e("NitroCamera", "Preview session config failed")
+                        onEvent?.invoke(
+                            CameraEventType.ERROR,
+                            InterruptionReason.NONE,
+                            "Preview session configuration failed",
+                        )
                     }
                 },
                 cameraHandler,
@@ -281,12 +315,38 @@ class NitraCameraSession(
     }
 
     private fun applySessionSettings(builder: CaptureRequest.Builder) {
-        val af = when (afMode) {
-            0L   -> CaptureRequest.CONTROL_AF_MODE_OFF
-            2L   -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-            else -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+        val af = when {
+            afLocked      -> CaptureRequest.CONTROL_AF_MODE_OFF
+            afMode == 0L  -> CaptureRequest.CONTROL_AF_MODE_OFF
+            afMode == 2L  -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+            else          -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
         }
         builder.set(CaptureRequest.CONTROL_AF_MODE, af)
+
+        // White balance (temperature → nearest supported preset) + 3A locks.
+        val awbModes = characteristics.get(
+            CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES
+        ) ?: intArrayOf()
+        val awb = awbModeFor(whiteBalanceKelvin)
+        builder.set(
+            CaptureRequest.CONTROL_AWB_MODE,
+            if (awbModes.contains(awb)) awb else CaptureRequest.CONTROL_AWB_MODE_AUTO,
+        )
+        builder.set(CaptureRequest.CONTROL_AE_LOCK, aeLocked)
+        builder.set(CaptureRequest.CONTROL_AWB_LOCK, awbLocked)
+
+        // Video stabilization (falls back to OFF when the requested mode is
+        // unsupported by the device).
+        val stabModes = characteristics.get(
+            CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES
+        ) ?: intArrayOf()
+        val stab = if (videoStabMode != 0L &&
+            stabModes.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+        } else {
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        }
+        builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, stab)
 
         // Handle Flash/Torch logic
         if (torchEnabled) {
@@ -362,7 +422,8 @@ class NitraCameraSession(
     suspend fun close() {
         if (isClosed) return
         isClosed = true
-        
+        onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, "")
+
         // 1. DETACH from Flutter immediately on Main thread to prevent new frames from scheduling
         withContext(Dispatchers.Main) {
             try {
@@ -475,8 +536,41 @@ class NitraCameraSession(
         }
     }
 
-    fun setWhiteBalance(temperature: Long) { /* Implementation stub */ }
-    fun setHdr(enabled: Boolean) { /* Implementation stub */ }
+    /// White balance by colour temperature (Kelvin). 0 = auto. Maps the
+    /// temperature to the nearest device-supported `CONTROL_AWB_MODE` preset
+    /// (falls back to AUTO when the preset is unavailable).
+    fun setWhiteBalance(temperature: Long) { whiteBalanceKelvin = temperature; triggerUpdate() }
+
+    /// HDR still capture. Real 10-bit HDR *video* needs a DynamicRangeProfile at
+    /// session creation; here we enable the HDR scene mode on the still-capture
+    /// request only, so the preview 3A pipeline is left untouched.
+    fun setHdr(enabled: Boolean) { hdrEnabled = enabled }
+
+    private fun awbModeFor(kelvin: Long): Int = when {
+        kelvin <= 0L    -> CaptureRequest.CONTROL_AWB_MODE_AUTO
+        kelvin < 3200L  -> CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT
+        kelvin < 4000L  -> CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT
+        kelvin < 5000L  -> CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
+        kelvin < 5800L  -> CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT
+        kelvin < 7000L  -> CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT
+        else            -> CaptureRequest.CONTROL_AWB_MODE_TWILIGHT
+    }
+
+    fun setVideoStabilization(mode: Long) { videoStabMode = mode; triggerUpdate() }
+    fun setLowLightBoost(enabled: Boolean) { lowLightBoost = enabled; triggerUpdate() }
+    fun lockExposure(locked: Boolean) { aeLocked = locked; triggerUpdate() }
+    fun lockWhiteBalance(locked: Boolean) { awbLocked = locked; triggerUpdate() }
+    fun lockFocus(locked: Boolean) { afLocked = locked; triggerUpdate() }
+    fun setTargetOrientation(degrees: Int) { targetOrientationDeg = degrees }
+
+    fun setTorchLevel(level: Double) {
+        torchLevel = level.coerceIn(0.0, 1.0)
+        torchEnabled = torchLevel > 0.0
+        // Per-level brightness (CameraManager.turnOnTorchWithStrengthLevel, API 33+)
+        // is device-specific; here we drive the capture-request torch and keep the
+        // level for future strength support.
+        triggerUpdate()
+    }
 
     fun setFrameFormat(format: Long)     { pixelFormat = format }
     fun setSamplingRate(rate: Long)     { samplingRate = rate }
@@ -517,6 +611,17 @@ class NitraCameraSession(
         val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
 
+        // HDR still capture (scene mode) when requested + supported.
+        if (hdrEnabled) {
+            val sceneModes = characteristics.get(
+                CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES
+            ) ?: intArrayOf()
+            if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
+                builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
+                builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
+            }
+        }
+
         // For Manual Flash 'ON', some devices need an AE trigger to ensure it fires
         if (flashMode == 1L) {
              builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
@@ -533,25 +638,34 @@ class NitraCameraSession(
         }
     }
 
-    fun startVideoRecording(outputPath: String) {
-        if (isClosed) return
-        cameraHandler.post {
-            if (isClosed) return@post
-            try {
-                // 1. Prepare recorder and get its surface
-                val recSurface = mediaManager.prepareVideoRecorder(outputPath)
-                
-                // 2. Start the hardware recorder FIRST (important for some drivers)
-                mediaManager.startVideoRecorder()
-
-                // 3. Enable the surface on the GL thread ONLY after the recorder is active
-                glHandler.post { 
-                    renderer.setRecordingSurface(recSurface)
+    suspend fun startVideoRecording(outputPath: String) {
+        if (isClosed) throw IllegalStateException("Camera session is closed")
+        // Await the cameraHandler result so a MediaRecorder prepare/start failure
+        // propagates to the caller (Dart) instead of being silently swallowed.
+        suspendCancellableCoroutine { cont ->
+            cameraHandler.post {
+                if (isClosed) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(IllegalStateException("Camera session is closed")))
+                    return@post
                 }
-
-                Log.d("NitroCamera", "Video recording started on GPU pipeline")
-            } catch (e: Exception) { 
-                Log.e("NitroCamera", "startVideoRecording failed: ${e.message}") 
+                try {
+                    // 1. Prepare recorder + surface (throws if the encoder rejects the config)
+                    val recSurface = mediaManager.prepareVideoRecorder(outputPath)
+                    // 2. Start the hardware recorder FIRST (important for some drivers)
+                    mediaManager.startVideoRecorder()
+                    // 3. Enable the surface on the GL thread ONLY after the recorder is active
+                    glHandler.post { renderer.setRecordingSurface(recSurface) }
+                    Log.d("NitroCamera", "Video recording started on GPU pipeline")
+                    if (cont.isActive) cont.resume(Unit)
+                } catch (e: Exception) {
+                    Log.e("NitroCamera", "startVideoRecording failed: ${e.message}")
+                    onEvent?.invoke(
+                        CameraEventType.ERROR,
+                        InterruptionReason.NONE,
+                        "startVideoRecording failed: ${e.message}",
+                    )
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
             }
         }
     }
@@ -593,9 +707,14 @@ class NitraCameraSession(
                 180 -> 180
                 else -> 0
             }
+            // The frame reader delivers YUV_420_888; plane[0] is the luma plane,
+            // whose row stride (`rowStride`) may exceed width due to alignment.
+            val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_FRONT
 
             cb(CameraFrame(buffer, size, image.width.toLong(), image.height.toLong(),
-                System.currentTimeMillis(), rotation.toLong(), textureId))
+                System.currentTimeMillis(), rotation.toLong(), textureId,
+                plane.rowStride.toLong(), 0L /* YUV luma */, if (isFront) 1L else 0L))
         } catch (_: Exception) { }
     }
 }
