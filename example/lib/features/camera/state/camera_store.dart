@@ -158,19 +158,25 @@ class CameraStore {
   void reapplyCurrentSettings() {
     final ctrl = activeController.value;
     if (ctrl == null || !ctrl.isInitialized) return;
-    ctrl
-      ..setPixelFormat(PixelFormat.fromNative(pixelFormat.value))
-      ..setSamplingRate(samplingRate.value)
-      ..setVideoStabilization(VideoStabilizationMode.values[videoStabilization.value])
-      ..setFilterShader(filters[currentFilterName.value] ?? '')
-      ..setFlash(flashMode.value)
-      ..setZoom(currentZoom.value)
-      ..setExposure(exposure.value)
-      ..setWhiteBalance(whiteBalanceKelvin.value)
-      ..setHdr(enabled: hdrEnabled.value)
-      ..setLowLightBoost(enabled: lowLightBoost.value)
-      ..setAutoFocus(autoFocusMode.value)
-      ..setFrameProcessing(enabled: mode.value == 'SCANNER');
+    // Native setters are already capability-guarded, but wrap defensively so a
+    // single unsupported control on an odd device can never abort session start.
+    try {
+      ctrl
+        ..setPixelFormat(PixelFormat.fromNative(pixelFormat.value))
+        ..setSamplingRate(samplingRate.value)
+        ..setVideoStabilization(VideoStabilizationMode.values[videoStabilization.value])
+        ..setFilterShader(filters[currentFilterName.value] ?? '')
+        ..setFlash(flashMode.value)
+        ..setZoom(currentZoom.value)
+        ..setExposure(exposure.value)
+        ..setWhiteBalance(whiteBalanceKelvin.value)
+        ..setHdr(enabled: hdrEnabled.value)
+        ..setLowLightBoost(enabled: lowLightBoost.value)
+        ..setAutoFocus(autoFocusMode.value)
+        ..setFrameProcessing(enabled: mode.value == 'SCANNER');
+    } catch (e) {
+      debugPrint('reapplyCurrentSettings: $e');
+    }
     resolvedConfig.value = ctrl.resolvedConfig;
   }
 
@@ -229,8 +235,12 @@ class CameraStore {
   Future<void> setMode(String m) async {
     if (mode.value == m) return;
     mode.value = m;
-    isProcessingFrames.value = m == 'SCANNER';
-    activeController.value?.setFrameProcessing(enabled: m == 'SCANNER');
+    final scanning = m == 'SCANNER';
+    isProcessingFrames.value = scanning;
+    // The barcode scanner decodes the luma plane, which only exists in YUV;
+    // BGRA bytes decode as noise. Switch pixel format together with the mode.
+    setPixelFormat(scanning ? 0 /* YUV */ : 1 /* BGRA */);
+    activeController.value?.setFrameProcessing(enabled: scanning);
   }
 
   void toggleProcessing(bool val) {
@@ -381,7 +391,20 @@ class CameraStore {
     }
   }
 
+  bool _recordingBusy = false;
   Future<void> toggleRecording() async {
+    // Re-entrancy guard: a double-tap while stop() is still awaiting would fire a
+    // second stopVideoRecording (isRecording hasn't flipped yet).
+    if (_recordingBusy) return;
+    _recordingBusy = true;
+    try {
+      await _toggleRecordingImpl();
+    } finally {
+      _recordingBusy = false;
+    }
+  }
+
+  Future<void> _toggleRecordingImpl() async {
     final ctrl = activeController.value;
     if (ctrl == null) return;
     if (isRecording.value) {

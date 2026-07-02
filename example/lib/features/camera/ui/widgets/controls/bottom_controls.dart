@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:io';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../../../state/camera_store.dart';
 
 class BottomControls extends StatelessWidget {
@@ -337,7 +338,8 @@ class _FullscreenView extends StatefulWidget {
 }
 
 class _FullscreenViewState extends State<_FullscreenView> {
-  VideoPlayerController? _vctrl;
+  Player? _player;
+  VideoController? _controller;
 
   @override
   void initState() {
@@ -347,18 +349,18 @@ class _FullscreenViewState extends State<_FullscreenView> {
     if (widget.item.isVideo &&
         widget.item.path.isNotEmpty &&
         File(widget.item.path).existsSync()) {
-      _vctrl = VideoPlayerController.file(File(widget.item.path))
-        ..initialize().then((_) {
-          if (mounted) setState(() {});
-        })
-        ..setLooping(true)
-        ..play();
+      final player = Player();
+      _player = player;
+      _controller = VideoController(player);
+      player
+        ..setPlaylistMode(PlaylistMode.loop)
+        ..open(Media(widget.item.path));
     }
   }
 
   @override
   void dispose() {
-    _vctrl?.dispose();
+    _player?.dispose();
     super.dispose();
   }
 
@@ -382,11 +384,8 @@ class _FullscreenViewState extends State<_FullscreenView> {
         child:
             (widget.item.isVideo ||
                 widget.item.path.toLowerCase().endsWith(".mp4"))
-            ? (_vctrl != null && _vctrl!.value.isInitialized
-                  ? AspectRatio(
-                      aspectRatio: _vctrl!.value.aspectRatio,
-                      child: VideoPlayer(_vctrl!),
-                    )
+            ? (_controller != null
+                  ? Video(controller: _controller!, fit: BoxFit.contain)
                   : const CircularProgressIndicator(color: Colors.cyanAccent))
             : Image.file(File(widget.item.path)),
       ),

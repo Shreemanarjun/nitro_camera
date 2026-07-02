@@ -19,6 +19,10 @@ class ProControlsSheet extends StatelessWidget {
         context: context,
         backgroundColor: Colors.transparent,
         isScrollControlled: true,
+        // Never let the sheet grow under the status bar / notch.
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
+        ),
         builder: (_) => const ProControlsSheet(),
       );
 
@@ -30,27 +34,45 @@ class ProControlsSheet extends StatelessWidget {
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.82),
             border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
-          child: SingleChildScrollView(
-            child: Column(
+          // Keep the close button (and everything else) clear of the status bar.
+          child: SafeArea(
+            top: true,
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              child: SingleChildScrollView(
+                child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+                Row(
+                  children: [
+                    const SizedBox(width: 28),
+                    const Spacer(),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).maybePop(),
+                      behavior: HitTestBehavior.opaque,
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.close, color: Colors.white54, size: 22),
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 12),
 
                 // Exposure
                 Watch((_) {
@@ -179,7 +201,9 @@ class ProControlsSheet extends StatelessWidget {
 
                 const Divider(color: Colors.white12, height: 28),
                 const SessionPanel(),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),

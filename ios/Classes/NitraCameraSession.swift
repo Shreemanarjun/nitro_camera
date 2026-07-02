@@ -4,19 +4,29 @@ import CoreVideo
 import Flutter
 
 /// Manages one AVCaptureSession + Flutter texture for a single open camera.
-public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate {
+public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
 
     // MARK: - Public state
-    public let textureId: Int64
+    // Settable so the impl can adopt the id returned by `registry.register(self)`.
+    public var textureId: Int64
     public private(set) var device: AVCaptureDevice
 
     // MARK: - Private
     private let session      = AVCaptureSession()
     private var videoOutput  = AVCaptureVideoDataOutput()
     private var photoOutput  = AVCapturePhotoOutput()
-    private var movieOutput: AVCaptureMovieFileOutput?
-    private var movieStartTime: Date?
-    private var movieOutputPath: String = ""
+    // Recording — vision-camera-style AVAssetWriter `RecordingSession`. Records
+    // from the existing video-data output (+ an audio-data output) and NEVER
+    // adds/removes an output on the running session (which is what causes the
+    // FigCapture interruptions of the old AVCaptureMovieFileOutput approach).
+    private var audioOutput: AVCaptureAudioDataOutput?
+    private var assetWriter: AVAssetWriter?
+    private var videoWriterInput: AVAssetWriterInput?
+    private var audioWriterInput: AVAssetWriterInput?
+    private var recordingURL: URL?
+    private var recordingStartTime: Date?
+    private var isWriting = false
+    private var recordingPaused = false
     private var movieContinuation: CheckedContinuation<RecordingResult, Error>?
     private weak var textureRegistry: FlutterTextureRegistry?
 
@@ -26,6 +36,11 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     // Latest camera frame (GPU path → Flutter Texture)
     private var latestPixelBuffer: CVPixelBuffer?
     private let pixelLock = NSLock()
+
+    // CPU path — ONE reused frame buffer (never per-frame allocate; that leaks
+    // the whole camera stream. Mirrors the Android `directBuffer`. Freed in deinit.)
+    private var frameBuffer: UnsafeMutablePointer<UInt8>?
+    private var frameBufferCapacity: Int = 0
 
     // Frame processing (CPU path → Nitro stream)
     var frameProcessingEnabled = false
@@ -38,6 +53,11 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     // Photo capture continuations
     private var photoContinuation: CheckedContinuation<PhotoResult, Error>?
+
+    // Serialises access to the capture continuations so a continuation is never
+    // leaked (set-but-never-resumed) or double-resumed (which is fatal) when a
+    // stop / delegate / teardown race.
+    private let captureLock = NSLock()
 
     // MARK: - Init
 
@@ -56,17 +76,25 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         super.init()
 
         session.beginConfiguration()
-        session.sessionPreset = Self.preset(width: width, height: height)
+        // We manage formats manually via `device.activeFormat` (vision-camera-style
+        // constraint negotiation below), so opt out of preset-based selection.
+        session.sessionPreset = .inputPriority
 
         // Video input
         let videoInput = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(videoInput) else { throw NitraCameraError.configurationFailed }
         session.addInput(videoInput)
 
-        // Audio input
+        // Audio input + data output (so recordings can mux audio via AVAssetWriter).
         if enableAudio, let mic = AVCaptureDevice.default(for: .audio) {
             if let audioInput = try? AVCaptureDeviceInput(device: mic), session.canAddInput(audioInput) {
                 session.addInput(audioInput)
+                let ao = AVCaptureAudioDataOutput()
+                if session.canAddOutput(ao) {
+                    session.addOutput(ao)
+                    ao.setSampleBufferDelegate(self, queue: frameQueue)
+                    audioOutput = ao
+                }
             }
         }
 
@@ -81,18 +109,49 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
         // Photo output
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
-        if photoOutput.isHighResolutionCaptureEnabled { photoOutput.isHighResolutionCaptureEnabled = true }
+        photoOutput.isHighResolutionCaptureEnabled = true
+        // Opt in to the full quality range so per-shot settings can request up to
+        // `.quality` (requesting above the output's max throws at capture time).
+        if #available(iOS 13.0, *) {
+            photoOutput.maxPhotoQualityPrioritization = .quality
+        }
 
-        // Target FPS
+        // Format negotiation (vision-camera v5 constraint-penalty port): choose the
+        // best `activeFormat` for the requested resolution + fps (with phase-detect
+        // AF / HDR-capable tiebreakers), then apply the fps within that format's
+        // supported range. `activeFormat` is set first because fps/HDR depend on it.
         try device.lockForConfiguration()
-        let targetFps = CMTime(value: 1, timescale: CMTimeScale(fps))
-        device.activeVideoMinFrameDuration = targetFps
-        device.activeVideoMaxFrameDuration = targetFps
+        if let best = Self.bestFormat(for: device,
+                                      targetWidth: width,
+                                      targetHeight: height,
+                                      targetFps: fps),
+           device.activeFormat != best {
+            device.activeFormat = best
+        }
+        // Setting an unsupported frame duration throws an *uncatchable* NSException,
+        // so clamp into the (chosen) active format's range.
+        if fps > 0 {
+            let ranges = device.activeFormat.videoSupportedFrameRateRanges
+            let maxRate = ranges.map { $0.maxFrameRate }.max() ?? 30
+            let minRate = ranges.map { $0.minFrameRate }.min() ?? 1
+            let clamped = min(max(Double(fps), minRate), maxRate)
+            let dur = CMTime(value: 1, timescale: CMTimeScale(clamped.rounded()))
+            device.activeVideoMinFrameDuration = dur
+            device.activeVideoMaxFrameDuration = dur
+        }
         device.unlockForConfiguration()
 
-        // Mirror front-facing camera automatically
-        if let conn = videoOutput.connection(with: .video), device.position == .front {
-            conn.isVideoMirrored = true
+        // Deliver UPRIGHT (portrait) buffers so the Flutter Texture isn't rotated
+        // 90° (the sensor's native orientation is landscape), and mirror the front
+        // camera. Both are per-connection and must be capability-guarded.
+        if let conn = videoOutput.connection(with: .video) {
+            if conn.isVideoOrientationSupported {
+                conn.videoOrientation = .portrait
+            }
+            if device.position == .front, conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = false
+                conn.isVideoMirrored = true
+            }
         }
 
         session.commitConfiguration()
@@ -114,7 +173,35 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     public func close() {
         stop()
+        // Drop the sample-buffer delegate and release the held pixel buffer so
+        // the capture pool can be torn down (otherwise a reopened session leaks
+        // its predecessor's buffers + pool).
+        videoOutput.setSampleBufferDelegate(nil, queue: nil)
+        audioOutput?.setSampleBufferDelegate(nil, queue: nil)
+        onFrame = nil
+        frameProcessingEnabled = false
+        pixelLock.lock()
+        latestPixelBuffer = nil
+        pixelLock.unlock()
+        // Abort any in-flight recording so the writer doesn't outlive the session.
+        isWriting = false
+        if let w = assetWriter, w.status == .writing { w.cancelWriting() }
+        assetWriter = nil
+        videoWriterInput = nil
+        audioWriterInput = nil
+        // Resolve any in-flight capture continuations so their awaiting tasks
+        // don't hang forever when the session is torn down mid-capture.
+        captureLock.lock()
+        let mc = movieContinuation; movieContinuation = nil
+        let pc = photoContinuation; photoContinuation = nil
+        captureLock.unlock()
+        mc?.resume(throwing: NitraCameraError.captureFailed)
+        pc?.resume(throwing: NitraCameraError.captureFailed)
         textureRegistry?.unregisterTexture(textureId)
+    }
+
+    deinit {
+        frameBuffer?.deallocate()
     }
 
     // MARK: - FlutterTexture
@@ -131,6 +218,11 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     public func captureOutput(_ output: AVCaptureOutput,
                               didOutput sampleBuffer: CMSampleBuffer,
                               from connection: AVCaptureConnection) {
+        // Audio sample buffers (from the audio-data output) → the recording only.
+        if output === audioOutput {
+            appendAudioSample(sampleBuffer)
+            return
+        }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // GPU path — update Flutter texture
@@ -138,6 +230,9 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         latestPixelBuffer = pixelBuffer
         pixelLock.unlock()
         textureRegistry?.textureFrameAvailable(textureId)
+
+        // Recording path — feed the AVAssetWriter (runs on this same frameQueue).
+        appendVideoSample(sampleBuffer)
 
         // CPU path — optional frame processor
         guard frameProcessingEnabled, let cb = onFrame else { return }
@@ -151,22 +246,39 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         frameCounter += 1
         if frameCounter % samplingRate != 0 { return }
 
-        // 2. Optimized Pixel Formats
-        // If YUV (0), we usually only care about Plane 0 (Luma/Y) for CV
-        let isYUV = (pixelFormat == 0)
-        let planeIndex = isYUV ? 0 : 0 // For BGRA it's 0. For BiPlanar YUV it's 0 for Luma.
-
-        let w        = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, planeIndex))
-        let h        = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, planeIndex))
-        let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, planeIndex)
-        let size     = Int64(rowBytes * Int(h))
-        let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, planeIndex)
+        // 2. Read the pixels. Planar (YUV) → plane 0 = the luma/Y plane (what the
+        // barcode scanner wants). Non-planar (BGRA) → the plane APIs return NULL,
+        // so use the non-plane variants. Getting this wrong drops every frame.
+        let w: Int64
+        let h: Int64
+        let rowBytes: Int
+        let baseAddr: UnsafeMutableRawPointer?
+        if CVPixelBufferIsPlanar(pixelBuffer) {
+            w        = Int64(CVPixelBufferGetWidthOfPlane(pixelBuffer, 0))
+            h        = Int64(CVPixelBufferGetHeightOfPlane(pixelBuffer, 0))
+            rowBytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+            baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)
+        } else {
+            w        = Int64(CVPixelBufferGetWidth(pixelBuffer))
+            h        = Int64(CVPixelBufferGetHeight(pixelBuffer))
+            rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            baseAddr = CVPixelBufferGetBaseAddress(pixelBuffer)
+        }
+        let size = Int64(rowBytes * Int(h))
 
         guard let addr = baseAddr else { return }
 
-        // Copy pixels so Dart can safely hold the buffer
-        let copy = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(size))
-        memcpy(copy, addr, Int(size))
+        // Copy into the REUSED buffer (grow-only). Dart reads `pixels` as a
+        // zero-copy borrow inside the stream listener and copies it out
+        // (TransferableTypedData) before the next frame reuses this memory.
+        let n = Int(size)
+        if frameBuffer == nil || frameBufferCapacity < n {
+            frameBuffer?.deallocate()
+            frameBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: n)
+            frameBufferCapacity = n
+        }
+        guard let copy = frameBuffer else { return }
+        memcpy(copy, addr, n)
 
         let frame = CameraFrame(
             pixels: copy,
@@ -193,29 +305,46 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     }
 
     func setFocusPoint(x: Double, y: Double) throws {
-        guard device.isFocusPointOfInterestSupported else { return }
+        guard device.isFocusPointOfInterestSupported ||
+              device.isExposurePointOfInterestSupported else { return }
         try device.lockForConfiguration()
-        device.focusPointOfInterest = CGPoint(x: x, y: y)
-        device.focusMode = .autoFocus
-        device.unlockForConfiguration()
-    }
-
-    func setAutoFocus(mode: Int64) throws {
-        try device.lockForConfiguration()
-        switch mode {
-        case 1: device.focusMode = .continuousAutoFocus
-        case 2: device.focusMode = .locked
-        default: device.focusMode = .autoFocus
+        let point = CGPoint(x: x, y: y)
+        // Every AVCaptureDevice property must be gated by its `isXSupported`
+        // check — setting an unsupported mode throws an *uncatchable* NSException
+        // (mirrors vision-camera's guarding).
+        if device.isFocusPointOfInterestSupported {
+            device.focusPointOfInterest = point
+        }
+        if device.isFocusModeSupported(.autoFocus) {
+            device.focusMode = .autoFocus
+        }
+        if device.isExposurePointOfInterestSupported {
+            device.exposurePointOfInterest = point
+        }
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
         }
         device.unlockForConfiguration()
     }
 
-    func setExposure(value: Double) throws {
-        guard device.isExposureModeSupported(.custom) else { return }
+    func setAutoFocus(mode: Int64) throws {
+        let target: AVCaptureDevice.FocusMode
+        switch mode {
+        case 1: target = .continuousAutoFocus
+        case 2: target = .locked
+        default: target = .autoFocus
+        }
+        guard device.isFocusModeSupported(target) else { return }
         try device.lockForConfiguration()
-        // Map -1.0…1.0 to the device's min/max EV range
-        let ev = Float(value) * 3.0 // typical EV range ±3
-        let clamped = max(device.minExposureTargetBias, min(ev, device.maxExposureTargetBias))
+        device.focusMode = target
+        device.unlockForConfiguration()
+    }
+
+    func setExposure(value: Double) throws {
+        // Exposure *bias* in EV — clamp into the device's supported range.
+        try device.lockForConfiguration()
+        let clamped = max(device.minExposureTargetBias,
+                          min(Float(value), device.maxExposureTargetBias))
         device.setExposureTargetBias(clamped, completionHandler: nil)
         device.unlockForConfiguration()
     }
@@ -234,9 +363,14 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     func setWhiteBalance(temperature: Int64) throws {
         try device.lockForConfiguration()
         if temperature == 0 {
-            device.whiteBalanceMode = .continuousAutoWhiteBalance
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
         } else {
-            guard device.isWhiteBalanceModeSupported(.locked) else { return }
+            guard device.isWhiteBalanceModeSupported(.locked) else {
+                device.unlockForConfiguration()
+                return
+            }
             let currentGains = device.deviceWhiteBalanceGains
             var temp = device.temperatureAndTintValues(for: currentGains)
             temp.temperature = Float(temperature)
@@ -248,11 +382,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     }
 
     func setHdr(enabled: Bool) throws {
+        guard device.activeFormat.isVideoHDRSupported else { return }
         try device.lockForConfiguration()
-        if #available(iOS 13.0, *) {
-            device.automaticallyAdjustsVideoHDREnabled = false
-            device.isVideoHDREnabled = enabled
-        }
+        device.automaticallyAdjustsVideoHDREnabled = false
+        device.isVideoHDREnabled = enabled
         device.unlockForConfiguration()
     }
 
@@ -326,11 +459,13 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     // MARK: - Read-back
 
+    // Buffers are delivered PORTRAIT (connection.videoOrientation = .portrait), so
+    // report the rotated dimensions — the preview sizes its aspect from these.
     var streamWidth: Int64 {
-        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).width)
+        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).height)
     }
     var streamHeight: Int64 {
-        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).height)
+        Int64(CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription).width)
     }
     var activeFps: Int64 {
         let d = device.activeVideoMinFrameDuration
@@ -340,15 +475,34 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     // MARK: - Photo capture
 
-    func takePhoto(flashMode: AVCaptureDevice.FlashMode = .auto) async throws -> PhotoResult {
+    func takePhoto(flashMode: AVCaptureDevice.FlashMode = .auto,
+                   quality: Int64 = 1,
+                   redEyeReduction: Bool = false) async throws -> PhotoResult {
         let settings = AVCapturePhotoSettings()
         settings.flashMode = device.hasFlash ? flashMode : .off
-        if photoOutput.availablePhotoCodecTypes.contains(.jpeg) {
-            // default JPEG
+
+        if #available(iOS 13.0, *) {
+            // Map 0/1/2 → speed/balanced/quality, then CLAMP to the output's max
+            // (a request above `maxPhotoQualityPrioritization` throws at capture).
+            let requested: AVCapturePhotoOutput.QualityPrioritization
+            switch quality {
+            case 0:  requested = .speed
+            case 2:  requested = .quality
+            default: requested = .balanced
+            }
+            let capped = min(requested.rawValue,
+                             photoOutput.maxPhotoQualityPrioritization.rawValue)
+            settings.photoQualityPrioritization =
+                AVCapturePhotoOutput.QualityPrioritization(rawValue: capped) ?? .balanced
+        }
+        if redEyeReduction, photoOutput.isAutoRedEyeReductionSupported {
+            settings.isAutoRedEyeReductionEnabled = true
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            self.photoContinuation = continuation
+            captureLock.lock()
+            photoContinuation = continuation
+            captureLock.unlock()
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -356,8 +510,11 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     public func photoOutput(_ output: AVCapturePhotoOutput,
                             didFinishProcessingPhoto photo: AVCapturePhoto,
                             error: Error?) {
-        guard let cont = photoContinuation else { return }
+        captureLock.lock()
+        let maybeCont = photoContinuation
         photoContinuation = nil
+        captureLock.unlock()
+        guard let cont = maybeCont else { return }
 
         if let error = error { cont.resume(throwing: error); return }
         guard let data = photo.fileDataRepresentation() else {
@@ -384,79 +541,201 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         }
     }
 
-    // MARK: - Video recording
+    // MARK: - Video recording (AVAssetWriter `RecordingSession` — vision-camera style)
+    //
+    // All recording-state mutation + reads happen on `frameQueue`, so the capture
+    // callbacks and start/stop never race. The running session is never touched.
 
     func startVideoRecording(to path: String) async throws {
-        let output = AVCaptureMovieFileOutput()
-        guard session.canAddOutput(output) else { throw NitraCameraError.configurationFailed }
-        session.beginConfiguration()
-        session.addOutput(output)
-        session.commitConfiguration()
-        movieOutput = output
-        movieOutputPath = path
-        movieStartTime = Date()
+        guard !isWriting, assetWriter == nil else { throw NitraCameraError.captureFailed }
+
         let url = URL(fileURLWithPath: path)
-        output.startRecording(to: url, recordingDelegate: self)
+        try? FileManager.default.removeItem(at: url)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+
+        // Video settings matched to the current video-data output so the
+        // (portrait-oriented) sample buffers append without a size mismatch.
+        let videoSettings = videoOutput.recommendedVideoSettingsForAssetWriter(writingTo: .mp4)
+            ?? [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: streamWidth,
+                AVVideoHeightKey: streamHeight,
+            ]
+        let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        vInput.expectsMediaDataInRealTime = true
+        guard writer.canAdd(vInput) else { throw NitraCameraError.configurationFailed }
+        writer.add(vInput)
+
+        var aInput: AVAssetWriterInput?
+        if audioOutput != nil {
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 1,
+                AVSampleRateKey: 44100,
+            ]
+            let ai = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            ai.expectsMediaDataInRealTime = true
+            if writer.canAdd(ai) { writer.add(ai); aInput = ai }
+        }
+
+        // Publish on the frame queue so captureOutput sees a consistent state.
+        frameQueue.sync {
+            self.assetWriter = writer
+            self.videoWriterInput = vInput
+            self.audioWriterInput = aInput
+            self.recordingURL = url
+            self.recordingStartTime = Date()
+            self.recordingPaused = false
+            self.isWriting = true
+        }
+    }
+
+    /// Appends a video frame to the writer (on `frameQueue`). Anchors the writer's
+    /// session on the first frame so the timeline starts at t=0.
+    private func appendVideoSample(_ sampleBuffer: CMSampleBuffer) {
+        guard isWriting, !recordingPaused,
+              let writer = assetWriter, let input = videoWriterInput else { return }
+        if writer.status == .unknown {
+            writer.startWriting()
+            writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        }
+        if writer.status == .writing, input.isReadyForMoreMediaData {
+            input.append(sampleBuffer)
+        }
+    }
+
+    private func appendAudioSample(_ sampleBuffer: CMSampleBuffer) {
+        guard isWriting, !recordingPaused,
+              let writer = assetWriter, writer.status == .writing,
+              let input = audioWriterInput, input.isReadyForMoreMediaData else { return }
+        input.append(sampleBuffer)
     }
 
     func stopVideoRecording() async throws -> RecordingResult {
         return try await withCheckedThrowingContinuation { continuation in
-            self.movieContinuation = continuation
-            movieOutput?.stopRecording()
+            frameQueue.async {
+                self.captureLock.lock()
+                let stopping = self.movieContinuation != nil
+                guard self.isWriting, let writer = self.assetWriter, !stopping else {
+                    self.captureLock.unlock()
+                    // Nothing recording / a stop already in flight → fail fast
+                    // instead of leaking the continuation.
+                    continuation.resume(throwing: NitraCameraError.captureFailed)
+                    return
+                }
+                self.movieContinuation = continuation
+                self.captureLock.unlock()
+
+                self.isWriting = false
+                let start = self.recordingStartTime
+                let url = self.recordingURL
+                self.videoWriterInput?.markAsFinished()
+                self.audioWriterInput?.markAsFinished()
+                writer.finishWriting {
+                    let cont = self.takeMovieContinuation()
+                    self.frameQueue.async {
+                        self.assetWriter = nil
+                        self.videoWriterInput = nil
+                        self.audioWriterInput = nil
+                        self.recordingURL = nil
+                    }
+                    guard let cont = cont else { return }
+                    if writer.status == .completed, let url = url {
+                        let duration = Int64((Date().timeIntervalSince(start ?? Date())) * 1000)
+                        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                        cont.resume(returning: RecordingResult(
+                            path: url.path, durationMs: duration, fileSize: size))
+                    } else {
+                        cont.resume(throwing: writer.error ?? NitraCameraError.captureFailed)
+                    }
+                }
+            }
         }
     }
 
-    func pauseVideoRecording() {
-        if #available(iOS 18.0, *) {
-            movieOutput?.pauseRecording()
-        }
-    }
-
-    func resumeVideoRecording() {
-        if #available(iOS 18.0, *) {
-            movieOutput?.resumeRecording()
-        }
-    }
+    func pauseVideoRecording()  { recordingPaused = true }
+    func resumeVideoRecording() { recordingPaused = false }
 
     func cancelVideoRecording() async throws {
-        movieContinuation = nil
-        movieOutput?.stopRecording()
-        let path = movieOutputPath
-        movieOutput = nil
-        movieOutputPath = ""
-        if !path.isEmpty {
-            try? FileManager.default.removeItem(atPath: path)
+        takeMovieContinuation()?.resume(throwing: NitraCameraError.captureFailed)
+        let url = recordingURL
+        frameQueue.sync {
+            self.isWriting = false
+            if let w = self.assetWriter, w.status == .writing { w.cancelWriting() }
+            self.assetWriter = nil
+            self.videoWriterInput = nil
+            self.audioWriterInput = nil
+            self.recordingURL = nil
         }
+        if let url = url { try? FileManager.default.removeItem(at: url) }
     }
 
-    // MARK: - AVCaptureFileOutputRecordingDelegate
-
-    public func fileOutput(_ output: AVCaptureFileOutput,
-                           didFinishRecordingTo outputFileURL: URL,
-                           from connections: [AVCaptureConnection],
-                           error: Error?) {
-        guard let cont = movieContinuation else { return }
-        movieContinuation = nil
-        session.beginConfiguration()
-        if let mo = movieOutput { session.removeOutput(mo) }
-        session.commitConfiguration()
-        movieOutput = nil
-
-        if let error = error { cont.resume(throwing: error); return }
-
-        let duration = Int64((Date().timeIntervalSince(movieStartTime ?? Date())) * 1000)
-        let size = (try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)[.size] as? Int64) ?? 0
-        cont.resume(returning: RecordingResult(path: outputFileURL.path, durationMs: duration, fileSize: size))
+    private func takeMovieContinuation() -> CheckedContinuation<RecordingResult, Error>? {
+        captureLock.lock(); defer { captureLock.unlock() }
+        let c = movieContinuation; movieContinuation = nil; return c
     }
 
     // MARK: - Helpers
 
-    private static func preset(width: Int64, height: Int64) -> AVCaptureSession.Preset {
-        let p = max(width, height)
-        if p >= 3840 { return .hd4K3840x2160 }
-        if p >= 1920 { return .hd1920x1080 }
-        if p >= 1280 { return .hd1280x720 }
-        return .vga640x480
+    /// Picks the best `AVCaptureDevice.Format` by summing weighted penalties
+    /// (lower = better) — a faithful port of vision-camera v5's `ConstraintResolver`.
+    /// Priority order (higher weight dominates): resolution → fps → phase-detect
+    /// autofocus → HDR-capable → high photo quality.
+    ///
+    /// Resolution penalty = `100 × relativeAspectDiff` (past a 2% tolerance) +
+    /// `|ln(actualPixels / targetPixels)|` (scale-invariant). FPS penalty = 0 in
+    /// range, else the raw fps-distance to the nearest supported range. The others
+    /// are small integer penalties, so resolution + fps decide the winner and the
+    /// rest break ties — exactly as upstream.
+    private static func bestFormat(
+        for device: AVCaptureDevice,
+        targetWidth: Int64,
+        targetHeight: Int64,
+        targetFps: Int64
+    ) -> AVCaptureDevice.Format? {
+        // Orientation-independent target (long/short edges).
+        let targetLong = Double(max(targetWidth, targetHeight))
+        let targetShort = Double(max(1, min(targetWidth, targetHeight)))
+        let targetAspect = targetLong / targetShort
+        let targetPixels = max(1, targetLong * targetShort)
+        let desiredFps = Double(targetFps)
+
+        // weight = (N - index) for constraints in priority order [res, fps, af, hdr, photoQ].
+        let wRes = 5.0, wFps = 4.0, wAf = 3.0, wHdr = 2.0, wPhoto = 1.0
+
+        func penalty(_ f: AVCaptureDevice.Format) -> Double {
+            let dims = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            let long = Double(max(dims.width, dims.height))
+            let short = Double(max(1, min(dims.width, dims.height)))
+
+            // Resolution: aspect (100× past 2% tolerance) + log-pixel distance.
+            let aspectDiff = abs((long / short) - targetAspect) / targetAspect
+            let aspectPenalty = aspectDiff < 0.02 ? 0.0 : 100.0 * aspectDiff
+            let logPixel = abs(log((long * short) / targetPixels))
+            var total = (aspectPenalty + logPixel) * wRes
+
+            // FPS: 0 if inside a supported range, else nearest-range distance.
+            if desiredFps > 0 {
+                let fpsPenalty = f.videoSupportedFrameRateRanges.map { r -> Double in
+                    if desiredFps >= r.minFrameRate && desiredFps <= r.maxFrameRate { return 0 }
+                    return max(r.minFrameRate - desiredFps, desiredFps - r.maxFrameRate)
+                }.min() ?? 1000
+                total += fpsPenalty * wFps
+            }
+
+            // Phase-detection autofocus preference.
+            if #available(iOS 13.0, *) {
+                total += (f.autoFocusSystem == .phaseDetection ? 0.0 : 1.0) * wAf
+            }
+            // Prefer HDR-capable + high-quality-photo formats (so later toggles work).
+            total += (f.isVideoHDRSupported ? 0.0 : 1.0) * wHdr
+            if #available(iOS 15.0, *) {
+                total += (f.isHighPhotoQualitySupported ? 0.0 : 1.0) * wPhoto
+            }
+            return total
+        }
+
+        return device.formats.min(by: { penalty($0) < penalty($1) })
     }
 }
 

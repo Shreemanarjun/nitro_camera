@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:async';
+import 'package:media_kit/media_kit.dart';
 import 'package:nitro/nitro.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'features/camera/state/camera_store.dart';
@@ -17,6 +18,7 @@ import 'features/camera/ui/widgets/controls/control_panel.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   NitroConfig.instance.enable(
     slowCallThresholdMs: 200,
     level: NitroLogLevel.verbose,
@@ -191,9 +193,11 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                         cameraStore.errorMessage.value = err.toString(),
                   );
 
+                  final filtered = _FilteredPreview(child: view);
                   return ar == null
-                      ? view
-                      : Center(child: AspectRatio(aspectRatio: ar, child: view));
+                      ? filtered
+                      : Center(
+                          child: AspectRatio(aspectRatio: ar, child: filtered));
                 }),
               ),
             ),
@@ -254,6 +258,8 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                       onTap: () => Navigator.of(context).push(
                         PageRouteBuilder(
                           opaque: false,
+                          barrierDismissible: true,
+                          barrierLabel: 'CONFIG',
                           barrierColor: Colors.black54,
                           pageBuilder: (_, _, _) => const ControlPanel(),
                         ),
@@ -647,6 +653,77 @@ class _FocusIndicatorState extends State<_FocusIndicator>
 }
 
 /// Error state for [CameraView] — mirrors the previous preview's retry UI.
+/// Applies the selected preview filter as a Flutter-layer effect on iOS (Android
+/// filters run in the native GL renderer). Four filters are pure per-pixel color
+/// transforms (expressible as a [ColorFilter.matrix]); VIGNETTE is a radial
+/// darkening overlay. Colour-matrix offsets are in 0–255 space.
+class _FilteredPreview extends StatelessWidget {
+  final Widget child;
+  const _FilteredPreview({required this.child});
+
+  static const Map<String, List<double>> _matrices = {
+    'INVERT': [
+      -1, 0, 0, 0, 255, //
+      0, -1, 0, 0, 255, //
+      0, 0, -1, 0, 255, //
+      0, 0, 0, 1, 0,
+    ],
+    'GRAYSCALE': [
+      0.299, 0.587, 0.114, 0, 0, //
+      0.299, 0.587, 0.114, 0, 0, //
+      0.299, 0.587, 0.114, 0, 0, //
+      0, 0, 0, 1, 0,
+    ],
+    'SEPIA': [
+      0.393, 0.769, 0.189, 0, 0, //
+      0.349, 0.686, 0.168, 0, 0, //
+      0.272, 0.534, 0.131, 0, 0, //
+      0, 0, 0, 1, 0,
+    ],
+    // mix(blue,pink,luma): R=luma, G=1-luma, B=1
+    'CYBERPUNK': [
+      0.299, 0.587, 0.114, 0, 0, //
+      -0.299, -0.587, -0.114, 0, 255, //
+      0, 0, 0, 0, 255, //
+      0, 0, 0, 1, 0,
+    ],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    if (!Platform.isIOS) return child; // Android: native GL filter.
+    return Watch((_) {
+      final name = cameraStore.currentFilterName.value;
+      Widget out = child;
+      final matrix = _matrices[name];
+      if (matrix != null) {
+        out = ColorFiltered(
+          colorFilter: ColorFilter.matrix(matrix),
+          child: out,
+        );
+      }
+      if (name == 'VIGNETTE') {
+        out = Stack(
+          fit: StackFit.expand,
+          children: [
+            out,
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  radius: 1.0,
+                  colors: [Colors.transparent, Colors.black],
+                  stops: [0.55, 1.0],
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+      return out;
+    });
+  }
+}
+
 /// Small glassy pill button used for the CONFIG / PRO entry points.
 class _PillButton extends StatelessWidget {
   final IconData icon;

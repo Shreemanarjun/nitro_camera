@@ -185,8 +185,20 @@ class CameraController extends ChangeNotifier {
       targetFps,
       audio ? 1 : 0,
     );
-    _width = w;
-    _height = h;
+    // The requested w/h are screen-matched, not the camera's real output size —
+    // read back the actual, orientation-corrected preview dimensions so the
+    // preview's aspect ratio is correct (not stretched). Defensive: never let a
+    // read-back hiccup abort opening.
+    int aw = w, ah = h;
+    try {
+      final st = getSessionState();
+      if (st.width > 0 && st.height > 0) {
+        aw = st.width;
+        ah = st.height;
+      }
+    } catch (_) {}
+    _width = aw;
+    _height = ah;
     _sensorOrientation = device.sensorOrientation;
     _isActive = true;
     _configuration = CameraConfiguration(

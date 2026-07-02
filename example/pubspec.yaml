@@ -47,7 +47,11 @@ dependencies:
   signals: ^6.3.0
   nitro: ^0.5.3
   signals_flutter: ^6.3.0
-  video_player: ^2.11.1
+  # media_kit replaces video_player (video_player_avfoundation is CocoaPods-only
+  # and is fragile under the SPM-based iOS build).
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
 
 dev_dependencies:
   flutter_test:

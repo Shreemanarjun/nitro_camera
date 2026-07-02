@@ -138,22 +138,19 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             throw NitraCameraError.configurationFailed
         }
 
-        // Allocate a texture id on the main thread, then build the real session.
-        let textureId: Int64 = try await MainActor.run {
-            let placeholder = try NitraCameraSession(
+        // Build the session and register it as a Flutter texture ON the main
+        // thread, then ADOPT the id `register()` returns. (The previous
+        // placeholder/unregister/re-register dance returned a stale texture id to
+        // Dart while the live session streamed to a different, unwatched id →
+        // permanently black preview.)
+        let realSession = try await MainActor.run { () -> NitraCameraSession in
+            let s = try NitraCameraSession(
                 textureId: 0, device: avDevice, textureRegistry: registry,
                 width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
-            return registry.register(placeholder)
+            s.textureId = registry.register(s)
+            return s
         }
-
-        let realSession = try NitraCameraSession(
-            textureId: textureId, device: avDevice, textureRegistry: registry,
-            width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
-
-        await MainActor.run {
-            registry.unregisterTexture(textureId)
-            _ = registry.register(realSession)
-        }
+        let textureId = realSession.textureId
 
         realSession.onFrame = { [weak self] frame in
             self?.frameSubject.send(frame)
@@ -355,7 +352,10 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         case 2:  flash = .auto
         default: flash = .off
         }
-        return try await s.takePhoto(flashMode: flash)
+        return try await s.takePhoto(
+            flashMode: flash,
+            quality: options.qualityPrioritization,
+            redEyeReduction: options.enableAutoRedEyeReduction != 0)
     }
 
     public func takeSnapshot(textureId: Int64) async throws -> PhotoResult {
@@ -448,7 +448,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             "name":                 device.localizedName,
             "position":             position,
             "lensType":             lensType,
-            "sensorOrientation":    90,
+            // 0: buffers are delivered upright (connection.videoOrientation = .portrait),
+            // so the Flutter preview must NOT swap width/height.
+            "sensorOrientation":    0,
             "minZoom":              Double(device.minAvailableVideoZoomFactor),
             "maxZoom":              Double(device.maxAvailableVideoZoomFactor),
             "neutralZoom":          1.0,
@@ -487,7 +489,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             name: device.localizedName,
             position: position,
             lensType: lensType,
-            sensorOrientation: Int64(90),
+            sensorOrientation: Int64(0), // upright buffers — see JSON variant above
             minZoom: Double(device.minAvailableVideoZoomFactor),
             maxZoom: Double(device.maxAvailableVideoZoomFactor),
             neutralZoom: 1.0,
