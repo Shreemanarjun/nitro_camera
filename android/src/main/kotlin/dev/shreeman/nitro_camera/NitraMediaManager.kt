@@ -130,7 +130,19 @@ class NitraMediaManager(
         }
     }
 
-    fun prepareVideoRecorder(outputPath: String): Surface {
+    /// Invoked when MediaRecorder hits a configured maxDuration/maxFileSize limit.
+    var onMaxReached: (() -> Unit)? = null
+
+    fun prepareVideoRecorder(
+        outputPath: String,
+        codec: Int = 0,            // 0 = H.264, 1 = HEVC
+        bitRate: Int = 0,          // 0 = default (6 Mbps)
+        maxDurationMs: Int = 0,    // 0 = unlimited
+        maxFileSizeBytes: Long = 0, // 0 = unlimited
+        lat: Double = 0.0,
+        lon: Double = 0.0,
+        hasLocation: Boolean = false,
+    ): Surface {
         recordingOutputPath = outputPath
         recordingStartMs = System.currentTimeMillis()
         isRecording = true
@@ -144,8 +156,9 @@ class NitraMediaManager(
 
         if (enableAudio) recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
         recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+        // Android's MediaRecorder container is MPEG-4 for both mp4 & mov requests.
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        
+
         // Pick an ENCODER-SUPPORTED recording size closest to the requested one.
         // Recording at arbitrary (screen-derived) dimensions is the main cause of
         // `MediaRecorder.prepare()` failing with -2147483648 on many devices.
@@ -159,12 +172,30 @@ class NitraMediaManager(
         val safeHeight = if (target.height % 2 == 0) target.height else target.height - 1
 
         recorder.setVideoSize(safeWidth, safeHeight)
-        recorder.setVideoEncodingBitRate(6_000_000) // 6Mbps is more than enough for high quality
+        recorder.setVideoEncodingBitRate(if (bitRate > 0) bitRate else 6_000_000)
         recorder.setVideoFrameRate(30)
-        
-        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+
+        val encoder = if (codec == 1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            MediaRecorder.VideoEncoder.HEVC
+        } else {
+            MediaRecorder.VideoEncoder.H264
+        }
+        recorder.setVideoEncoder(encoder)
         if (enableAudio) recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-        
+
+        if (maxDurationMs > 0) recorder.setMaxDuration(maxDurationMs)
+        if (maxFileSizeBytes > 0) recorder.setMaxFileSize(maxFileSizeBytes)
+        if (hasLocation) recorder.setLocation(lat.toFloat(), lon.toFloat())
+        if (maxDurationMs > 0 || maxFileSizeBytes > 0) {
+            recorder.setOnInfoListener { _, what, _ ->
+                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
+                    what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
+                ) {
+                    onMaxReached?.invoke()
+                }
+            }
+        }
+
         recorder.setOutputFile(outputPath)
         recorder.prepare()
 

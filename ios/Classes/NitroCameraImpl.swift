@@ -155,6 +155,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         realSession.onFrame = { [weak self] frame in
             self?.frameSubject.send(frame)
         }
+        realSession.onEvent = { [weak self] type, message in
+            self?.emitEvent(type, textureId: textureId, message: message)
+        }
 
         sessionsLock.lock()
         sessions[textureId] = realSession
@@ -224,9 +227,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     // MARK: - Video recording
 
-    public func startVideoRecording(textureId: Int64, outputPath: String) async throws {
+    public func startVideoRecording(textureId: Int64, outputPath: String, options: RecordingOptions) async throws {
         guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        try await s.startVideoRecording(to: outputPath)
+        try await s.startVideoRecording(to: outputPath, options: options)
     }
 
     public func stopVideoRecording(textureId: Int64) async throws -> RecordingResult {
@@ -352,10 +355,15 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         case 2:  flash = .auto
         default: flash = .off
         }
+        let loc: (lat: Double, lon: Double, alt: Double)? =
+            options.hasLocation != 0
+                ? (options.latitude, options.longitude, options.altitude)
+                : nil
         return try await s.takePhoto(
             flashMode: flash,
             quality: options.qualityPrioritization,
-            redEyeReduction: options.enableAutoRedEyeReduction != 0)
+            redEyeReduction: options.enableAutoRedEyeReduction != 0,
+            location: loc)
     }
 
     public func takeSnapshot(textureId: Int64) async throws -> PhotoResult {

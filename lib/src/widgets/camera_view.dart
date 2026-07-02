@@ -35,6 +35,7 @@ class CameraView extends StatefulWidget {
     this.audio = false,
     this.isActive = true,
     this.previewMode = PreviewMode.texture,
+    this.resizeMode = PreviewResizeMode.cover,
     this.settleDelay = Duration.zero,
     this.loading,
     this.errorBuilder,
@@ -66,6 +67,9 @@ class CameraView extends StatefulWidget {
   final bool isActive;
 
   final PreviewMode previewMode;
+
+  /// How the preview fills its box — cover (crop) or contain (letterbox).
+  final PreviewResizeMode resizeMode;
 
   /// Delay between closing the old session and opening the new one on a
   /// device/resolution switch — lets the camera HAL settle on some chipsets.
@@ -215,6 +219,7 @@ class _CameraViewState extends State<CameraView> {
     return CameraPreview(
       controller: controller,
       mode: widget.previewMode,
+      resizeMode: widget.resizeMode,
       child: widget.child,
     );
   }

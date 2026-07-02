@@ -16,7 +16,7 @@ NITRO_EXPORT uint32_t nitro_camera_nitro_abi_version(void) {
     return 1;
 }
 NITRO_EXPORT const char* nitro_camera_nitro_bridge_checksum(void) {
-    return "3994262ed3af1afb";
+    return "923b2e831b9f1934";
 }
 NITRO_EXPORT intptr_t nitro_camera_init_dart_api_dl(void* data) {
     return Dart_InitializeApiDL(data);
@@ -58,6 +58,10 @@ void nitro_camera_release_ResolvedConfig(void* ptr) {
     free(ptr);
 }
 void nitro_camera_release_PhotoOptions(void* ptr) {
+    if (!ptr) { return; }
+    free(ptr);
+}
+void nitro_camera_release_RecordingOptions(void* ptr) {
     if (!ptr) { return; }
     free(ptr);
 }
@@ -169,6 +173,21 @@ static jfieldID g_fid_PhotoOptions_qualityPrioritization = nullptr;
 static jfieldID g_fid_PhotoOptions_enableShutterSound = nullptr;
 static jfieldID g_fid_PhotoOptions_skipMetadata = nullptr;
 static jfieldID g_fid_PhotoOptions_enableAutoRedEyeReduction = nullptr;
+static jfieldID g_fid_PhotoOptions_latitude = nullptr;
+static jfieldID g_fid_PhotoOptions_longitude = nullptr;
+static jfieldID g_fid_PhotoOptions_altitude = nullptr;
+static jfieldID g_fid_PhotoOptions_hasLocation = nullptr;
+static jclass g_cls_RecordingOptions = nullptr;
+static jmethodID g_ctor_RecordingOptions = nullptr;
+static jfieldID g_fid_RecordingOptions_codec = nullptr;
+static jfieldID g_fid_RecordingOptions_fileType = nullptr;
+static jfieldID g_fid_RecordingOptions_bitRate = nullptr;
+static jfieldID g_fid_RecordingOptions_maxDurationMs = nullptr;
+static jfieldID g_fid_RecordingOptions_maxFileSizeBytes = nullptr;
+static jfieldID g_fid_RecordingOptions_latitude = nullptr;
+static jfieldID g_fid_RecordingOptions_longitude = nullptr;
+static jfieldID g_fid_RecordingOptions_altitude = nullptr;
+static jfieldID g_fid_RecordingOptions_hasLocation = nullptr;
 
 #include <unordered_map>
 #include <mutex>
@@ -308,10 +327,31 @@ static PhotoOptions pack_PhotoOptions_from_jni(JNIEnv* env, jobject obj) {
     result.enableShutterSound = env->GetLongField(obj, g_fid_PhotoOptions_enableShutterSound);
     result.skipMetadata = env->GetLongField(obj, g_fid_PhotoOptions_skipMetadata);
     result.enableAutoRedEyeReduction = env->GetLongField(obj, g_fid_PhotoOptions_enableAutoRedEyeReduction);
+    result.latitude = env->GetDoubleField(obj, g_fid_PhotoOptions_latitude);
+    result.longitude = env->GetDoubleField(obj, g_fid_PhotoOptions_longitude);
+    result.altitude = env->GetDoubleField(obj, g_fid_PhotoOptions_altitude);
+    result.hasLocation = env->GetLongField(obj, g_fid_PhotoOptions_hasLocation);
     return result;
 }
 static jobject unpack_PhotoOptions_to_jni(JNIEnv* env, const PhotoOptions* st) {
-    jobject result = env->NewObject(g_cls_PhotoOptions, g_ctor_PhotoOptions, (jlong)st->flash, (jlong)st->qualityPrioritization, (jlong)st->enableShutterSound, (jlong)st->skipMetadata, (jlong)st->enableAutoRedEyeReduction);
+    jobject result = env->NewObject(g_cls_PhotoOptions, g_ctor_PhotoOptions, (jlong)st->flash, (jlong)st->qualityPrioritization, (jlong)st->enableShutterSound, (jlong)st->skipMetadata, (jlong)st->enableAutoRedEyeReduction, (jdouble)st->latitude, (jdouble)st->longitude, (jdouble)st->altitude, (jlong)st->hasLocation);
+    return result;
+}
+static RecordingOptions pack_RecordingOptions_from_jni(JNIEnv* env, jobject obj) {
+    RecordingOptions result;
+    result.codec = env->GetLongField(obj, g_fid_RecordingOptions_codec);
+    result.fileType = env->GetLongField(obj, g_fid_RecordingOptions_fileType);
+    result.bitRate = env->GetLongField(obj, g_fid_RecordingOptions_bitRate);
+    result.maxDurationMs = env->GetLongField(obj, g_fid_RecordingOptions_maxDurationMs);
+    result.maxFileSizeBytes = env->GetLongField(obj, g_fid_RecordingOptions_maxFileSizeBytes);
+    result.latitude = env->GetDoubleField(obj, g_fid_RecordingOptions_latitude);
+    result.longitude = env->GetDoubleField(obj, g_fid_RecordingOptions_longitude);
+    result.altitude = env->GetDoubleField(obj, g_fid_RecordingOptions_altitude);
+    result.hasLocation = env->GetLongField(obj, g_fid_RecordingOptions_hasLocation);
+    return result;
+}
+static jobject unpack_RecordingOptions_to_jni(JNIEnv* env, const RecordingOptions* st) {
+    jobject result = env->NewObject(g_cls_RecordingOptions, g_ctor_RecordingOptions, (jlong)st->codec, (jlong)st->fileType, (jlong)st->bitRate, (jlong)st->maxDurationMs, (jlong)st->maxFileSizeBytes, (jdouble)st->latitude, (jdouble)st->longitude, (jdouble)st->altitude, (jlong)st->hasLocation);
     return result;
 }
 
@@ -740,17 +780,18 @@ void* nitro_camera_take_photo(int64_t instanceId, int64_t textureId) {
     return result;
 }
 
-void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath) {
+void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath, void* options) {
     NitroError* _nitro_err = nullptr; // async: errors use TLS not out-param
     JNIEnv* env = GetEnv();
     if (env == nullptr) { return; }
     jmethodID methodId = g_mid_startVideoRecording_call;
-    if (methodId == nullptr) { LOGE("Method not found: startVideoRecording_call sig=(JJLjava/lang/String;)V"); return; }
+    if (methodId == nullptr) { LOGE("Method not found: startVideoRecording_call sig=(JJLjava/lang/String;Lnitro/nitro_camera_module/RecordingOptions;)V"); return; }
 
     nitro_camera_clear_error();
     if (env->PushLocalFrame(16) != 0) { return; }
     jstring j_outputPath = env->NewStringUTF(outputPath);
-    env->CallStaticVoidMethod(g_bridgeClass, methodId, (jlong)instanceId, textureId, j_outputPath);
+    jobject jobj_options = unpack_RecordingOptions_to_jni(env, (const RecordingOptions*)options);
+    env->CallStaticVoidMethod(g_bridgeClass, methodId, (jlong)instanceId, textureId, j_outputPath, jobj_options);
     env->PopLocalFrame(nullptr);
     if (env->ExceptionCheck()) { nitro_report_jni_exception(env, env->ExceptionOccurred(), _nitro_err); }
 }
@@ -1273,8 +1314,8 @@ JNIEXPORT void JNICALL Java_nitro_nitro_1camera_1module_NitroCameraJniBridge_ini
         if (!g_mid_setHdr_call && env->ExceptionCheck()) { env->ExceptionClear(); LOGE("Method not found: setHdr_call sig=(JJJ)V"); }
         g_mid_takePhoto_call = env->GetStaticMethodID(g_bridgeClass, "takePhoto_call", "(JJ)[B");
         if (!g_mid_takePhoto_call && env->ExceptionCheck()) { env->ExceptionClear(); LOGE("Method not found: takePhoto_call sig=(JJ)[B"); }
-        g_mid_startVideoRecording_call = env->GetStaticMethodID(g_bridgeClass, "startVideoRecording_call", "(JJLjava/lang/String;)V");
-        if (!g_mid_startVideoRecording_call && env->ExceptionCheck()) { env->ExceptionClear(); LOGE("Method not found: startVideoRecording_call sig=(JJLjava/lang/String;)V"); }
+        g_mid_startVideoRecording_call = env->GetStaticMethodID(g_bridgeClass, "startVideoRecording_call", "(JJLjava/lang/String;Lnitro/nitro_camera_module/RecordingOptions;)V");
+        if (!g_mid_startVideoRecording_call && env->ExceptionCheck()) { env->ExceptionClear(); LOGE("Method not found: startVideoRecording_call sig=(JJLjava/lang/String;Lnitro/nitro_camera_module/RecordingOptions;)V"); }
         g_mid_stopVideoRecording_call = env->GetStaticMethodID(g_bridgeClass, "stopVideoRecording_call", "(JJ)[B");
         if (!g_mid_stopVideoRecording_call && env->ExceptionCheck()) { env->ExceptionClear(); LOGE("Method not found: stopVideoRecording_call sig=(JJ)[B"); }
         g_mid_pauseRecording_call = env->GetStaticMethodID(g_bridgeClass, "pauseRecording_call", "(JJ)V");
@@ -1399,12 +1440,33 @@ JNIEXPORT void JNICALL Java_nitro_nitro_1camera_1module_NitroCameraJniBridge_ini
         if (local_cls_PhotoOptions != nullptr) {
             g_cls_PhotoOptions = (jclass)env->NewGlobalRef(local_cls_PhotoOptions);
             env->DeleteLocalRef(local_cls_PhotoOptions);
-            g_ctor_PhotoOptions = env->GetMethodID(g_cls_PhotoOptions, "<init>", "(JJJJJ)V");
+            g_ctor_PhotoOptions = env->GetMethodID(g_cls_PhotoOptions, "<init>", "(JJJJJDDDJ)V");
             g_fid_PhotoOptions_flash = env->GetFieldID(g_cls_PhotoOptions, "flash", "J");
             g_fid_PhotoOptions_qualityPrioritization = env->GetFieldID(g_cls_PhotoOptions, "qualityPrioritization", "J");
             g_fid_PhotoOptions_enableShutterSound = env->GetFieldID(g_cls_PhotoOptions, "enableShutterSound", "J");
             g_fid_PhotoOptions_skipMetadata = env->GetFieldID(g_cls_PhotoOptions, "skipMetadata", "J");
             g_fid_PhotoOptions_enableAutoRedEyeReduction = env->GetFieldID(g_cls_PhotoOptions, "enableAutoRedEyeReduction", "J");
+            g_fid_PhotoOptions_latitude = env->GetFieldID(g_cls_PhotoOptions, "latitude", "D");
+            g_fid_PhotoOptions_longitude = env->GetFieldID(g_cls_PhotoOptions, "longitude", "D");
+            g_fid_PhotoOptions_altitude = env->GetFieldID(g_cls_PhotoOptions, "altitude", "D");
+            g_fid_PhotoOptions_hasLocation = env->GetFieldID(g_cls_PhotoOptions, "hasLocation", "J");
+        }
+    }
+    {
+        jclass local_cls_RecordingOptions = env->FindClass("nitro/nitro_camera_module/RecordingOptions");
+        if (local_cls_RecordingOptions != nullptr) {
+            g_cls_RecordingOptions = (jclass)env->NewGlobalRef(local_cls_RecordingOptions);
+            env->DeleteLocalRef(local_cls_RecordingOptions);
+            g_ctor_RecordingOptions = env->GetMethodID(g_cls_RecordingOptions, "<init>", "(JJJJJDDDJ)V");
+            g_fid_RecordingOptions_codec = env->GetFieldID(g_cls_RecordingOptions, "codec", "J");
+            g_fid_RecordingOptions_fileType = env->GetFieldID(g_cls_RecordingOptions, "fileType", "J");
+            g_fid_RecordingOptions_bitRate = env->GetFieldID(g_cls_RecordingOptions, "bitRate", "J");
+            g_fid_RecordingOptions_maxDurationMs = env->GetFieldID(g_cls_RecordingOptions, "maxDurationMs", "J");
+            g_fid_RecordingOptions_maxFileSizeBytes = env->GetFieldID(g_cls_RecordingOptions, "maxFileSizeBytes", "J");
+            g_fid_RecordingOptions_latitude = env->GetFieldID(g_cls_RecordingOptions, "latitude", "D");
+            g_fid_RecordingOptions_longitude = env->GetFieldID(g_cls_RecordingOptions, "longitude", "D");
+            g_fid_RecordingOptions_altitude = env->GetFieldID(g_cls_RecordingOptions, "altitude", "D");
+            g_fid_RecordingOptions_hasLocation = env->GetFieldID(g_cls_RecordingOptions, "hasLocation", "J");
         }
     }
 }
@@ -1926,12 +1988,12 @@ void* nitro_camera_take_photo(int64_t instanceId, int64_t textureId) {
 #endif
 }
 
-extern void _nitro_camera_call_startVideoRecording(int64_t textureId, const char* outputPath);
-void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath) {
+extern void _nitro_camera_call_startVideoRecording(int64_t textureId, const char* outputPath, void* options);
+void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath, void* options) {
     NitroError* _nitro_err = nullptr; // async: errors use TLS not out-param
 #ifdef __OBJC__
     @try {
-        _nitro_camera_call_startVideoRecording(textureId, outputPath);
+        _nitro_camera_call_startVideoRecording(textureId, outputPath, options);
     } @catch (NSException* e) {
         if (_nitro_err) {
             // sync: write exception to out-param error slot.
@@ -1946,7 +2008,7 @@ void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, c
         }
     }
 #else
-    _nitro_camera_call_startVideoRecording(textureId, outputPath);
+    _nitro_camera_call_startVideoRecording(textureId, outputPath, options);
 #endif
 }
 

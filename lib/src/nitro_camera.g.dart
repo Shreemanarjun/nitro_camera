@@ -64,6 +64,22 @@ extension QualityPrioritizationFromNativeExt on int {
       QualityPrioritization.values[this - 0];
 }
 
+extension VideoCodecNativeExt on VideoCodec {
+  int get nativeValue => index + 0;
+}
+
+extension VideoCodecFromNativeExt on int {
+  VideoCodec toVideoCodec() => VideoCodec.values[this - 0];
+}
+
+extension VideoFileTypeNativeExt on VideoFileType {
+  int get nativeValue => index + 0;
+}
+
+extension VideoFileTypeFromNativeExt on int {
+  VideoFileType toVideoFileType() => VideoFileType.values[this - 0];
+}
+
 extension CameraEventTypeNativeExt on CameraEventType {
   int get nativeValue => index + 0;
 }
@@ -280,6 +296,14 @@ final class PhotoOptionsFfi extends Struct {
   external int skipMetadata;
   @Int64()
   external int enableAutoRedEyeReduction;
+  @Double()
+  external double latitude;
+  @Double()
+  external double longitude;
+  @Double()
+  external double altitude;
+  @Int64()
+  external int hasLocation;
 }
 
 extension PhotoOptionsFfiExt on PhotoOptionsFfi {
@@ -290,6 +314,10 @@ extension PhotoOptionsFfiExt on PhotoOptionsFfi {
       enableShutterSound: enableShutterSound,
       skipMetadata: skipMetadata,
       enableAutoRedEyeReduction: enableAutoRedEyeReduction,
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      hasLocation: hasLocation,
     );
   }
 
@@ -306,6 +334,67 @@ extension PhotoOptionsExt on PhotoOptions {
     ptr.ref.enableShutterSound = enableShutterSound;
     ptr.ref.skipMetadata = skipMetadata;
     ptr.ref.enableAutoRedEyeReduction = enableAutoRedEyeReduction;
+    ptr.ref.latitude = latitude;
+    ptr.ref.longitude = longitude;
+    ptr.ref.altitude = altitude;
+    ptr.ref.hasLocation = hasLocation;
+    return ptr;
+  }
+}
+
+final class RecordingOptionsFfi extends Struct {
+  @Int64()
+  external int codec;
+  @Int64()
+  external int fileType;
+  @Int64()
+  external int bitRate;
+  @Int64()
+  external int maxDurationMs;
+  @Int64()
+  external int maxFileSizeBytes;
+  @Double()
+  external double latitude;
+  @Double()
+  external double longitude;
+  @Double()
+  external double altitude;
+  @Int64()
+  external int hasLocation;
+}
+
+extension RecordingOptionsFfiExt on RecordingOptionsFfi {
+  RecordingOptions toDart() {
+    return RecordingOptions(
+      codec: codec,
+      fileType: fileType,
+      bitRate: bitRate,
+      maxDurationMs: maxDurationMs,
+      maxFileSizeBytes: maxFileSizeBytes,
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      hasLocation: hasLocation,
+    );
+  }
+
+  /// Frees internal fields (like strings) that were allocated on the C heap.
+  /// Does NOT free the struct itself.
+  void freeFields() {}
+}
+
+extension RecordingOptionsExt on RecordingOptions {
+  Pointer<RecordingOptionsFfi> toNative(Arena arena) {
+    final ptr = arena<RecordingOptionsFfi>();
+    ptr.ref.codec = codec;
+    ptr.ref.fileType = fileType;
+    ptr.ref.bitRate = bitRate;
+    ptr.ref.maxDurationMs = maxDurationMs;
+    ptr.ref.maxFileSizeBytes = maxFileSizeBytes;
+    ptr.ref.latitude = latitude;
+    ptr.ref.longitude = longitude;
+    ptr.ref.altitude = altitude;
+    ptr.ref.hasLocation = hasLocation;
     return ptr;
   }
 }
@@ -611,6 +700,10 @@ final class PhotoOptionsProxy extends PhotoOptions implements Finalizable {
         enableShutterSound: 0,
         skipMetadata: 0,
         enableAutoRedEyeReduction: 0,
+        latitude: 0.0,
+        longitude: 0.0,
+        altitude: 0.0,
+        hasLocation: 0,
       ) {
     assert(
       _finalizer != null,
@@ -630,6 +723,14 @@ final class PhotoOptionsProxy extends PhotoOptions implements Finalizable {
   int get skipMetadata => _native.ref.skipMetadata;
   @override
   int get enableAutoRedEyeReduction => _native.ref.enableAutoRedEyeReduction;
+  @override
+  double get latitude => _native.ref.latitude;
+  @override
+  double get longitude => _native.ref.longitude;
+  @override
+  double get altitude => _native.ref.altitude;
+  @override
+  int get hasLocation => _native.ref.hasLocation;
 
   /// Eagerly copies all fields to a plain [PhotoOptions] value, detaches
   /// the finalizer, and frees native memory immediately.
@@ -637,6 +738,90 @@ final class PhotoOptionsProxy extends PhotoOptions implements Finalizable {
   /// prefer consuming the proxy fields lazily then letting it GC.
   /// Must not be called more than once.
   PhotoOptions toDartAndRelease() {
+    final v = _native.ref.toDart();
+    _finalizer?.detach(this);
+    malloc.free(_native);
+    return v;
+  }
+}
+
+/// Zero-copy proxy for [RecordingOptions].
+/// Extends [RecordingOptions] and overrides every getter to read lazily from
+/// native memory — no field is copied at construction time.
+/// Because `RecordingOptionsProxy <: RecordingOptions`, a `Stream<RecordingOptionsProxy>`
+/// satisfies `Stream<RecordingOptions>` via Dart covariant generics.
+/// Native memory is freed via a [NativeFinalizer] backed by the
+/// generated C symbol 'nitro_camera_release_RecordingOptions'.
+/// Ownership: this proxy owns the generated struct shell. Zero-copy
+/// field buffers remain owned by the native implementation and must
+/// stay valid until this proxy is released by the finalizer or
+/// [toDartAndRelease].
+final class RecordingOptionsProxy extends RecordingOptions
+    implements Finalizable {
+  final Pointer<RecordingOptionsFfi> _native;
+
+  static NativeFinalizer? _finalizer;
+
+  /// Binds the generated release symbol from [dylib].
+  /// Must be called once — typically in the impl class constructor.
+  /// Idempotent: subsequent calls are a no-op.
+  static void _init(DynamicLibrary dylib) {
+    _finalizer ??= NativeFinalizer(
+      dylib.lookup<NativeFunction<Void Function(Pointer<Void>)>>(
+        'nitro_camera_release_RecordingOptions',
+      ),
+    );
+  }
+
+  /// Takes ownership of [native]. Super fields are zeroed and never read;
+  /// all getters below are overridden to read from native memory instead.
+  /// Do NOT call [malloc.free] on the struct shell after passing it here,
+  /// and do not free zero-copy field buffers while the proxy may be read.
+  RecordingOptionsProxy(this._native)
+    : super(
+        codec: 0,
+        fileType: 0,
+        bitRate: 0,
+        maxDurationMs: 0,
+        maxFileSizeBytes: 0,
+        latitude: 0.0,
+        longitude: 0.0,
+        altitude: 0.0,
+        hasLocation: 0,
+      ) {
+    assert(
+      _finalizer != null,
+      'RecordingOptionsProxy._init() was not called. Ensure the Nitro impl class constructor ran before creating proxies.',
+    );
+    _finalizer!.attach(this, _native.cast(), detach: this);
+  }
+
+  // @override lazy getters — read native memory on demand, zero allocation.
+  @override
+  int get codec => _native.ref.codec;
+  @override
+  int get fileType => _native.ref.fileType;
+  @override
+  int get bitRate => _native.ref.bitRate;
+  @override
+  int get maxDurationMs => _native.ref.maxDurationMs;
+  @override
+  int get maxFileSizeBytes => _native.ref.maxFileSizeBytes;
+  @override
+  double get latitude => _native.ref.latitude;
+  @override
+  double get longitude => _native.ref.longitude;
+  @override
+  double get altitude => _native.ref.altitude;
+  @override
+  int get hasLocation => _native.ref.hasLocation;
+
+  /// Eagerly copies all fields to a plain [RecordingOptions] value, detaches
+  /// the finalizer, and frees native memory immediately.
+  /// Use this only when you need an immutable snapshot; for streams
+  /// prefer consuming the proxy fields lazily then letting it GC.
+  /// Must not be called more than once.
+  RecordingOptions toDartAndRelease() {
     final v = _native.ref.toDart();
     _finalizer?.detach(this);
     malloc.free(_native);
@@ -814,7 +999,7 @@ class _NitroCameraImpl extends NitroCamera {
     );
     NitroRuntime.checkLinkChecksum(
       'nitro_camera',
-      '3994262ed3af1afb',
+      '923b2e831b9f1934',
       () => _dylib
           .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
             'nitro_camera_nitro_bridge_checksum',
@@ -825,6 +1010,7 @@ class _NitroCameraImpl extends NitroCamera {
     CameraConfigProxy._init(_dylib);
     ResolvedConfigProxy._init(_dylib);
     PhotoOptionsProxy._init(_dylib);
+    RecordingOptionsProxy._init(_dylib);
     final _keyPtr = _instanceKey.toNativeUtf8();
     try {
       _instanceId = _createInstancePtr(_keyPtr);
@@ -1007,10 +1193,11 @@ class _NitroCameraImpl extends NitroCamera {
         Pointer<Uint8> Function(Int64, Int64),
         Pointer<Uint8> Function(int, int)
       >('nitro_camera_take_photo');
-  late final void Function(int, int, Pointer<Utf8>) _startVideoRecordingPtr =
-      _dylib.lookupFunction<
-        Void Function(Int64, Int64, Pointer<Utf8>),
-        void Function(int, int, Pointer<Utf8>)
+  late final void Function(int, int, Pointer<Utf8>, Pointer<Void>)
+  _startVideoRecordingPtr = _dylib
+      .lookupFunction<
+        Void Function(Int64, Int64, Pointer<Utf8>, Pointer<Void>),
+        void Function(int, int, Pointer<Utf8>, Pointer<Void>)
       >('nitro_camera_start_video_recording');
   late final Pointer<Uint8> Function(int, int) _stopVideoRecordingPtr = _dylib
       .lookupFunction<
@@ -1495,13 +1682,22 @@ class _NitroCameraImpl extends NitroCamera {
   }
 
   @override
-  Future<void> startVideoRecording(int textureId, String outputPath) async {
+  Future<void> startVideoRecording(
+    int textureId,
+    String outputPath,
+    RecordingOptions options,
+  ) async {
     checkDisposed();
     final arena = Arena();
     try {
       await NitroRuntime.callAsync<void>(
         _startVideoRecordingPtr,
-        [_instanceId, textureId, outputPath.toNativeUtf8(allocator: arena)],
+        [
+          _instanceId,
+          textureId,
+          outputPath.toNativeUtf8(allocator: arena),
+          options.toNative(arena).cast<Void>(),
+        ],
         getError: _getErrorNativePtr,
         clearError: _clearErrorNativePtr,
         methodName: 'startVideoRecording',

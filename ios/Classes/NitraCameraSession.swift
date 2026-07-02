@@ -1,6 +1,8 @@
 import Foundation
 import AVFoundation
 import CoreVideo
+import CoreImage
+import ImageIO
 import Flutter
 
 /// Manages one AVCaptureSession + Flutter texture for a single open camera.
@@ -45,6 +47,17 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     // Frame processing (CPU path → Nitro stream)
     var frameProcessingEnabled = false
     var onFrame: ((CameraFrame) -> Void)?
+    /// Session → impl event hook: (CameraEventType index, message).
+    var onEvent: ((Int64, String) -> Void)?
+
+    // Recording limits / geotag captured at start.
+    private var recordingMaxDurationMs: Int64 = 0
+    private var recordingMaxFileSizeBytes: Int64 = 0
+    private var recordingStartPTS: CMTime = .invalid
+    private var recordingSizeCheckTick = 0
+    // Pending GPS geotag for the next photo (EXIF injection in the delegate).
+    private var pendingPhotoLocation: (lat: Double, lon: Double, alt: Double)?
+    private let ciContext = CIContext()
 
     // Modernized properties for per-frame analysis
     var samplingRate: Int64 = 1
@@ -477,7 +490,8 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
     func takePhoto(flashMode: AVCaptureDevice.FlashMode = .auto,
                    quality: Int64 = 1,
-                   redEyeReduction: Bool = false) async throws -> PhotoResult {
+                   redEyeReduction: Bool = false,
+                   location: (lat: Double, lon: Double, alt: Double)? = nil) async throws -> PhotoResult {
         let settings = AVCapturePhotoSettings()
         settings.flashMode = device.hasFlash ? flashMode : .off
 
@@ -498,6 +512,15 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         if redEyeReduction, photoOutput.isAutoRedEyeReductionSupported {
             settings.isAutoRedEyeReductionEnabled = true
         }
+        // Request a low-res preview buffer so we can emit a fast thumbnail.
+        if let previewType = settings.availablePreviewPhotoPixelFormatTypes.first {
+            settings.previewPhotoFormat = [
+                kCVPixelBufferPixelFormatTypeKey as String: previewType,
+                kCVPixelBufferWidthKey as String: 256,
+                kCVPixelBufferHeightKey as String: 256,
+            ]
+        }
+        pendingPhotoLocation = location
 
         return try await withCheckedThrowingContinuation { continuation in
             captureLock.lock()
@@ -507,6 +530,16 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         }
     }
 
+    // Shutter-timing callbacks → events (vision-camera onWill{Begin,Capture}Photo).
+    public func photoOutput(_ output: AVCapturePhotoOutput,
+                            willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        onEvent?(6 /* photoCaptureBegan */, "")
+    }
+    public func photoOutput(_ output: AVCapturePhotoOutput,
+                            willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+        onEvent?(7 /* photoCaptureShutter */, "")
+    }
+
     public func photoOutput(_ output: AVCapturePhotoOutput,
                             didFinishProcessingPhoto photo: AVCapturePhoto,
                             error: Error?) {
@@ -514,12 +547,33 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         let maybeCont = photoContinuation
         photoContinuation = nil
         captureLock.unlock()
+        let location = pendingPhotoLocation
+        pendingPhotoLocation = nil
+
+        // Fast low-res thumbnail from the embedded preview buffer → event, so the
+        // UI can show the shot before the full-res JPEG is written.
+        if let preview = photo.previewPixelBuffer, let onEvent = onEvent {
+            let ci = CIImage(cvPixelBuffer: preview)
+            if let jpeg = ciContext.jpegRepresentation(
+                of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(), options: [:]) {
+                let thumbURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + "_thumb.jpg")
+                if (try? jpeg.write(to: thumbURL)) != nil {
+                    onEvent(8 /* photoThumbnail */, thumbURL.path)
+                }
+            }
+        }
+
         guard let cont = maybeCont else { return }
 
         if let error = error { cont.resume(throwing: error); return }
-        guard let data = photo.fileDataRepresentation() else {
+        guard let raw = photo.fileDataRepresentation() else {
             cont.resume(throwing: NitraCameraError.captureFailed); return
         }
+        // Inject GPS EXIF if a geotag was supplied.
+        let data = location.flatMap {
+            Self.jpegWithGPS(raw, lat: $0.lat, lon: $0.lon, alt: $0.alt)
+        } ?? raw
 
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".jpg")
@@ -546,21 +600,40 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     // All recording-state mutation + reads happen on `frameQueue`, so the capture
     // callbacks and start/stop never race. The running session is never touched.
 
-    func startVideoRecording(to path: String) async throws {
+    func startVideoRecording(to path: String, options: RecordingOptions) async throws {
         guard !isWriting, assetWriter == nil else { throw NitraCameraError.captureFailed }
 
+        let fileType: AVFileType = (options.fileType == 1) ? .mov : .mp4
         let url = URL(fileURLWithPath: path)
         try? FileManager.default.removeItem(at: url)
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
 
-        // Video settings matched to the current video-data output so the
-        // (portrait-oriented) sample buffers append without a size mismatch.
-        let videoSettings = videoOutput.recommendedVideoSettingsForAssetWriter(writingTo: .mp4)
+        // GPS geotag → QuickTime movie metadata.
+        if options.hasLocation != 0 {
+            let item = AVMutableMetadataItem()
+            item.keySpace = .quickTimeMetadata
+            item.identifier = .quickTimeMetadataLocationISO6709
+            item.value = Self.iso6709(lat: options.latitude,
+                                      lon: options.longitude,
+                                      alt: options.altitude) as NSString
+            writer.metadata = [item]
+        }
+
+        // Video settings — start from what the output recommends (correct size),
+        // then override codec + bit-rate per the options.
+        var videoSettings = videoOutput.recommendedVideoSettingsForAssetWriter(writingTo: fileType)
             ?? [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: streamWidth,
                 AVVideoHeightKey: streamHeight,
             ]
+        videoSettings[AVVideoCodecKey] = (options.codec == 1)
+            ? AVVideoCodecType.hevc : AVVideoCodecType.h264
+        if options.bitRate > 0 {
+            var compression = (videoSettings[AVVideoCompressionPropertiesKey] as? [String: Any]) ?? [:]
+            compression[AVVideoAverageBitRateKey] = options.bitRate
+            videoSettings[AVVideoCompressionPropertiesKey] = compression
+        }
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
         guard writer.canAdd(vInput) else { throw NitraCameraError.configurationFailed }
@@ -585,9 +658,37 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             self.audioWriterInput = aInput
             self.recordingURL = url
             self.recordingStartTime = Date()
+            self.recordingStartPTS = .invalid
+            self.recordingMaxDurationMs = options.maxDurationMs
+            self.recordingMaxFileSizeBytes = options.maxFileSizeBytes
             self.recordingPaused = false
             self.isWriting = true
         }
+    }
+
+    /// ISO-6709 location string for QuickTime metadata, e.g. `+37.7749-122.4194+010.000/`.
+    private static func iso6709(lat: Double, lon: Double, alt: Double) -> String {
+        String(format: "%+09.5f%+010.5f%+.3f/", lat, lon, alt)
+    }
+
+    /// Re-encodes JPEG [data] with a GPS EXIF dictionary added.
+    private static func jpegWithGPS(_ data: Data, lat: Double, lon: Double, alt: Double) -> Data? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let uti = CGImageSourceGetType(src) else { return nil }
+        let gps: [CFString: Any] = [
+            kCGImagePropertyGPSLatitude: abs(lat),
+            kCGImagePropertyGPSLatitudeRef: lat >= 0 ? "N" : "S",
+            kCGImagePropertyGPSLongitude: abs(lon),
+            kCGImagePropertyGPSLongitudeRef: lon >= 0 ? "E" : "W",
+            kCGImagePropertyGPSAltitude: abs(alt),
+            kCGImagePropertyGPSAltitudeRef: alt >= 0 ? 0 : 1,
+        ]
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, uti, 1, nil) else { return nil }
+        CGImageDestinationAddImageFromSource(
+            dest, src, 0, [kCGImagePropertyGPSDictionary: gps] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return out as Data
     }
 
     /// Appends a video frame to the writer (on `frameQueue`). Anchors the writer's
@@ -595,12 +696,52 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     private func appendVideoSample(_ sampleBuffer: CMSampleBuffer) {
         guard isWriting, !recordingPaused,
               let writer = assetWriter, let input = videoWriterInput else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if writer.status == .unknown {
             writer.startWriting()
-            writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+            writer.startSession(atSourceTime: pts)
+            recordingStartPTS = pts
         }
         if writer.status == .writing, input.isReadyForMoreMediaData {
             input.append(sampleBuffer)
+        }
+
+        // Auto-stop on the configured limits (vision-camera's maxDuration/maxFileSize).
+        if recordingMaxDurationMs > 0, recordingStartPTS.isValid {
+            let elapsedMs = Int64(CMTimeGetSeconds(pts - recordingStartPTS) * 1000)
+            if elapsedMs >= recordingMaxDurationMs { autoStopRecording(); return }
+        }
+        if recordingMaxFileSizeBytes > 0 {
+            recordingSizeCheckTick += 1
+            if recordingSizeCheckTick % 15 == 0, let url = recordingURL {
+                let size = ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int64) ?? 0
+                if size >= recordingMaxFileSizeBytes { autoStopRecording() }
+            }
+        }
+    }
+
+    /// Finalises the recording on a duration/size limit (on `frameQueue`) and
+    /// emits a `stopped` event carrying the file path (there's no pending
+    /// `stopVideoRecording` continuation in this path).
+    private func autoStopRecording() {
+        guard isWriting, let writer = assetWriter else { return }
+        isWriting = false
+        let url = recordingURL
+        videoWriterInput?.markAsFinished()
+        audioWriterInput?.markAsFinished()
+        writer.finishWriting { [weak self] in
+            guard let self = self else { return }
+            self.frameQueue.async {
+                self.assetWriter = nil
+                self.videoWriterInput = nil
+                self.audioWriterInput = nil
+                self.recordingURL = nil
+            }
+            if writer.status == .completed, let url = url {
+                self.onEvent?(1 /* stopped */, url.path)
+            } else {
+                self.onEvent?(2 /* error */, writer.error?.localizedDescription ?? "recording failed")
+            }
         }
     }
 

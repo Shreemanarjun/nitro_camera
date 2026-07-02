@@ -463,10 +463,20 @@ class CameraController extends ChangeNotifier {
   // ---- Video recording (mirrors vision_camera) ----
 
   /// Starts recording to [outputPath].
-  Future<void> startRecording(String outputPath) async {
+  ///
+  /// [options] controls codec / bit-rate / container / auto-stop limits and an
+  /// optional GPS geotag (see [RecordingOptions]).
+  Future<void> startRecording(
+    String outputPath, {
+    RecordingOptions? options,
+  }) async {
     _requireInitialized();
     if (_isRecording) return;
-    await NitroCamera.instance.startVideoRecording(_textureId!, outputPath);
+    await NitroCamera.instance.startVideoRecording(
+      _textureId!,
+      outputPath,
+      options ?? const RecordingOptions(),
+    );
     _isRecording = true;
     _isRecordingPaused = false;
     notifyListeners();

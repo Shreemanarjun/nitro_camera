@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';
@@ -18,6 +19,10 @@ class ControlPanel extends StatelessWidget {
       final pixelFormat = cameraStore.pixelFormat.value;
       final samplingRate = cameraStore.samplingRate.value;
       final videoStab = cameraStore.videoStabilization.value;
+      final videoCodec = cameraStore.videoCodec.value;
+      final geotag = cameraStore.geotagEnabled.value;
+      final showFps = cameraStore.showFpsGraph.value;
+      final resizeCover = cameraStore.resizeCover.value;
 
       final isRunning = status == CameraStatus.running;
       final isChanging = status == CameraStatus.opening || status == CameraStatus.closing;
@@ -174,6 +179,33 @@ class ControlPanel extends StatelessWidget {
                         _ChoiceBtn(label: 'OFF', isSelected: videoStab == 0, onTap: () => cameraStore.setVideoStabilization(0)),
                         _ChoiceBtn(label: 'STANDARD', isSelected: videoStab == 1, onTap: () => cameraStore.setVideoStabilization(1)),
                         _ChoiceBtn(label: 'CINEMATIC', isSelected: videoStab == 2, onTap: () => cameraStore.setVideoStabilization(2)),
+                      ]),
+                      const SizedBox(height: 24),
+
+                      // 6. Video codec (H.264 / HEVC)
+                      const _PanelHeader(icon: Icons.movie_creation_outlined, title: "VIDEO CODEC"),
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        _ChoiceBtn(label: 'H.264', isSelected: videoCodec == VideoCodec.h264, onTap: () => cameraStore.videoCodec.value = VideoCodec.h264),
+                        _ChoiceBtn(label: 'HEVC', isSelected: videoCodec == VideoCodec.hevc, onTap: () => cameraStore.videoCodec.value = VideoCodec.hevc),
+                      ]),
+                      const SizedBox(height: 24),
+
+                      // 7. Preview fit (resizeMode)
+                      const _PanelHeader(icon: Icons.crop_free, title: "PREVIEW FIT"),
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        _ChoiceBtn(label: 'COVER', isSelected: resizeCover, onTap: () => cameraStore.resizeCover.value = true),
+                        _ChoiceBtn(label: 'CONTAIN', isSelected: !resizeCover, onTap: () => cameraStore.resizeCover.value = false),
+                      ]),
+                      const SizedBox(height: 24),
+
+                      // 8. Capture toggles (geotag / FPS graph)
+                      const _PanelHeader(icon: Icons.tune, title: "CAPTURE"),
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        _ChoiceBtn(label: 'GEOTAG', isSelected: geotag, onTap: () => cameraStore.geotagEnabled.value = !geotag),
+                        _ChoiceBtn(label: 'FPS GRAPH', isSelected: showFps, onTap: () => cameraStore.showFpsGraph.value = !showFps),
                       ]),
                     ],
                   ),

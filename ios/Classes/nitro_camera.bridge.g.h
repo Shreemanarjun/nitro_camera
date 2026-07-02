@@ -83,12 +83,25 @@ typedef enum {
 } QualityPrioritization;
 
 typedef enum {
+  VIDEOCODEC_H264 = 0,
+  VIDEOCODEC_HEVC = 1,
+} VideoCodec;
+
+typedef enum {
+  VIDEOFILETYPE_MP4 = 0,
+  VIDEOFILETYPE_MOV = 1,
+} VideoFileType;
+
+typedef enum {
   CAMERAEVENTTYPE_STARTED = 0,
   CAMERAEVENTTYPE_STOPPED = 1,
   CAMERAEVENTTYPE_ERROR = 2,
   CAMERAEVENTTYPE_INTERRUPTION_STARTED = 3,
   CAMERAEVENTTYPE_INTERRUPTION_ENDED = 4,
   CAMERAEVENTTYPE_FRAME_DROPPED = 5,
+  CAMERAEVENTTYPE_PHOTO_CAPTURE_BEGAN = 6,
+  CAMERAEVENTTYPE_PHOTO_CAPTURE_SHUTTER = 7,
+  CAMERAEVENTTYPE_PHOTO_THUMBNAIL = 8,
 } CameraEventType;
 
 typedef enum {
@@ -159,8 +172,27 @@ typedef struct {
   int64_t enableShutterSound; 
   int64_t skipMetadata; 
   int64_t enableAutoRedEyeReduction; 
+  double latitude; 
+  double longitude; 
+  double altitude; 
+  int64_t hasLocation; 
 } PhotoOptions;
 #endif // NITRO_STRUCT_PHOTOOPTIONS_DEFINED
+
+#ifndef NITRO_STRUCT_RECORDINGOPTIONS_DEFINED
+#define NITRO_STRUCT_RECORDINGOPTIONS_DEFINED
+typedef struct {
+  int64_t codec; 
+  int64_t fileType; 
+  int64_t bitRate; 
+  int64_t maxDurationMs; 
+  int64_t maxFileSizeBytes; 
+  double latitude; 
+  double longitude; 
+  double altitude; 
+  int64_t hasLocation; 
+} RecordingOptions;
+#endif // NITRO_STRUCT_RECORDINGOPTIONS_DEFINED
 
 #ifdef __cplusplus
 extern "C" {
@@ -198,7 +230,7 @@ NITRO_EXPORT void nitro_camera_set_torch(int64_t instanceId, int64_t textureId, 
 NITRO_EXPORT void nitro_camera_set_white_balance(int64_t instanceId, int64_t textureId, int64_t temperature, NitroError* _nitro_err);
 NITRO_EXPORT void nitro_camera_set_hdr(int64_t instanceId, int64_t textureId, int64_t enabled, NitroError* _nitro_err);
 NITRO_EXPORT void* nitro_camera_take_photo(int64_t instanceId, int64_t textureId);
-NITRO_EXPORT void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath);
+NITRO_EXPORT void nitro_camera_start_video_recording(int64_t instanceId, int64_t textureId, const char* outputPath, void* options);
 NITRO_EXPORT void* nitro_camera_stop_video_recording(int64_t instanceId, int64_t textureId);
 NITRO_EXPORT void nitro_camera_pause_recording(int64_t instanceId, int64_t textureId, NitroError* _nitro_err);
 NITRO_EXPORT void nitro_camera_resume_recording(int64_t instanceId, int64_t textureId, NitroError* _nitro_err);
@@ -234,6 +266,7 @@ NITRO_EXPORT void nitro_camera_release_CameraFrame(void* ptr);
 NITRO_EXPORT void nitro_camera_release_CameraConfig(void* ptr);
 NITRO_EXPORT void nitro_camera_release_ResolvedConfig(void* ptr);
 NITRO_EXPORT void nitro_camera_release_PhotoOptions(void* ptr);
+NITRO_EXPORT void nitro_camera_release_RecordingOptions(void* ptr);
 
 #ifdef __cplusplus
 }

@@ -309,8 +309,8 @@ class NitroCameraImpl(
     override suspend fun takePhoto(textureId: Long): PhotoResult =
         session(textureId)?.takePhoto() ?: error("No session")
 
-    override suspend fun startVideoRecording(textureId: Long, outputPath: String) {
-        session(textureId)?.startVideoRecording(outputPath)
+    override suspend fun startVideoRecording(textureId: Long, outputPath: String, options: RecordingOptions) {
+        session(textureId)?.startVideoRecording(outputPath, options)
     }
 
     override suspend fun stopVideoRecording(textureId: Long): RecordingResult =

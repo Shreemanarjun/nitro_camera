@@ -62,6 +62,18 @@ class CameraStore {
   final photoQuality = signal(QualityPrioritization.balanced);
   Timer? _recordingTimer;
 
+  // ── Quick-wins (vision-camera parity) ───────────────────────────────────────
+  final videoCodec = signal(VideoCodec.h264);
+  final geotagEnabled = signal(false);
+  final showFpsGraph = signal(false);
+  final resizeCover = signal(true); // cover vs contain
+  final shutterFlash = signal(0); // bump to trigger a shutter flash animation
+  final lastThumbnailPath = signal<String?>(null);
+
+  /// Demo geotag (San Francisco). A real app would read GPS via e.g. geolocator.
+  static const _demoLocation =
+      (latitude: 37.7749, longitude: -122.4194, altitude: 12.0);
+
   // ── Live settings ──────────────────────────────────────────────────────────
   final flashMode = signal(FlashMode.off);
   final currentZoom = signal(1.0);
@@ -141,6 +153,23 @@ class CameraStore {
       sessionEvents.value =
           log.length > 20 ? log.sublist(log.length - 20) : log;
       if (e.isError) errorMessage.value = e.message;
+      switch (e.type) {
+        case CameraEventType.photoCaptureShutter:
+          shutterFlash.value++; // drive a white shutter-flash animation
+          break;
+        case CameraEventType.photoThumbnail:
+          if (e.message.isNotEmpty) lastThumbnailPath.value = e.message;
+          break;
+        case CameraEventType.stopped:
+          // Auto-stop (maxDuration/maxFileSize) delivers the finished path here.
+          final p = e.message;
+          if (isRecording.value && p.isNotEmpty && File(p).existsSync()) {
+            _onRecordingFinished(p);
+          }
+          break;
+        default:
+          break;
+      }
     });
 
     reapplyCurrentSettings();
@@ -359,6 +388,7 @@ class CameraStore {
           PhotoCaptureOptions(
             flash: flashMode.value,
             quality: photoQuality.value,
+            location: geotagEnabled.value ? _demoLocation : null,
           ),
         ),
       );
@@ -410,24 +440,19 @@ class CameraStore {
     if (isRecording.value) {
       try {
         final result = await ctrl.stopRecording();
-        _recordingTimer?.cancel();
-        _recordingTimer = null;
         final path = result.path;
         final ok = path.isNotEmpty && File(path).existsSync() && result.fileSize > 0;
-        batch(() {
-          isRecording.value = false;
-          recordingDuration.value = 0;
-          if (ok) {
-            lastCapturedPath.value = path;
-            isLastCapturedVideo.value = true;
-            capturedMedia.value = [
-              ...capturedMedia.value,
-              (path: path, isVideo: true),
-            ];
-          } else {
+        if (ok) {
+          _onRecordingFinished(path);
+        } else {
+          _recordingTimer?.cancel();
+          _recordingTimer = null;
+          batch(() {
+            isRecording.value = false;
+            recordingDuration.value = 0;
             errorMessage.value = 'Recording failed — no video was written.';
-          }
-        });
+          });
+        }
       } catch (e) {
         isRecording.value = false;
         _recordingTimer?.cancel();
@@ -437,9 +462,22 @@ class CameraStore {
     } else {
       try {
         final dir = await getTemporaryDirectory();
+        final ext = videoCodec.value == VideoCodec.hevc ? 'mov' : 'mp4';
         final path =
-            '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-        await ctrl.startRecording(path);
+            '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await ctrl.startRecording(
+          path,
+          options: RecordingOptions(
+            codec: videoCodec.value.nativeValue,
+            fileType: videoCodec.value == VideoCodec.hevc
+                ? VideoFileType.mov.nativeValue
+                : VideoFileType.mp4.nativeValue,
+            latitude: geotagEnabled.value ? _demoLocation.latitude : 0,
+            longitude: geotagEnabled.value ? _demoLocation.longitude : 0,
+            altitude: geotagEnabled.value ? _demoLocation.altitude : 0,
+            hasLocation: geotagEnabled.value ? 1 : 0,
+          ),
+        );
         isRecording.value = true;
         recordingDuration.value = 0;
         _recordingTimer = Timer.periodic(
@@ -450,6 +488,23 @@ class CameraStore {
         errorMessage.value = 'Start video failed: $e';
       }
     }
+  }
+
+  /// Shared finalisation for a completed recording (manual stop or native
+  /// maxDuration/maxFileSize auto-stop).
+  void _onRecordingFinished(String path) {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    batch(() {
+      isRecording.value = false;
+      recordingDuration.value = 0;
+      lastCapturedPath.value = path;
+      isLastCapturedVideo.value = true;
+      capturedMedia.value = [
+        ...capturedMedia.value,
+        (path: path, isVideo: true),
+      ];
+    });
   }
 }
 

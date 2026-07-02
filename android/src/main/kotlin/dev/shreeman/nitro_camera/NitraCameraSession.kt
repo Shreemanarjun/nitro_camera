@@ -53,16 +53,25 @@ class NitraCameraSession(
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?: throw IllegalStateException("No stream configuration map")
         val sizes = map.getOutputSizes(SurfaceTexture::class.java)
-        
-        // Find size that matches requested aspect ratio best, or closest matching size
-        val targetAspect = width.toFloat() / height.toFloat()
-        
-        sizes.minByOrNull { s ->
-            val aspect = s.width.toFloat() / s.height.toFloat()
-            val aspectDiff = Math.abs(aspect - targetAspect)
-            val areaDiff = Math.abs(s.width * s.height - width * height)
-            aspectDiff * 1000000 + areaDiff
-        } ?: sizes[0]
+
+        // Camera output sizes are LANDSCAPE; the requested width/height are the
+        // (portrait) screen dims. Compare orientation-independently (long/short)
+        // and CAP the preview to ~1080p. Picking the multi-MP photo size for the
+        // preview (the old bug) tanked GL/preview perf AND, being 4:3, stretched a
+        // 16:9-ish screen.
+        val targetLong = maxOf(width, height).toDouble()
+        val targetShort = maxOf(1, minOf(width, height)).toDouble()
+        val targetAspect = targetLong / targetShort
+        val maxPreviewDim = 1920
+
+        (sizes.filter { maxOf(it.width, it.height) <= maxPreviewDim }
+            .ifEmpty { sizes.toList() })
+            .minByOrNull { s ->
+                val aspect = maxOf(s.width, s.height).toDouble() / minOf(s.width, s.height)
+                val aspectDiff = Math.abs(aspect - targetAspect)
+                // Aspect dominates; among equal aspects prefer the largest.
+                aspectDiff * 1_000_000.0 - (s.width.toLong() * s.height)
+            } ?: sizes[0]
     }
 
     private val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
@@ -596,50 +605,72 @@ class NitraCameraSession(
 
 
     suspend fun takePhoto(): PhotoResult {
+        // Self-healing: the full request layers scene-mode HDR + 3A which some HALs
+        // (e.g. Oplus at full res) reject with REASON_ERROR. If it fails, retry once
+        // with a minimal, known-good request so a photo is still produced.
+        return try {
+            doCapture(useHdr = hdrEnabled, minimal = false)
+        } catch (e: Exception) {
+            Log.w("NitroCamera", "takePhoto failed (${e.message}); retrying minimal request")
+            doCapture(useHdr = false, minimal = true)
+        }
+    }
+
+    private suspend fun doCapture(useHdr: Boolean, minimal: Boolean): PhotoResult {
         val session = captureSession ?: throw Exception("No active session")
-        
-        // 1. Explicitly stop repeating request to prepare for Still Capture
+
+        // Stop the preview repeating request to prepare for the still capture.
         try { session.stopRepeating() } catch (_: Exception) {}
 
-        val builder = cameraDevice.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+        val builder = cameraDevice.createCaptureRequest(
+            android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
         builder.addTarget(mediaManager.photoReader.surface)
-        
-        // Sync hardware state to high-res request
-        applySessionSettings(builder)
-        
-        // JPEG orientation
+
         val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
 
-        // HDR still capture (scene mode) when requested + supported.
-        if (hdrEnabled) {
-            val sceneModes = characteristics.get(
-                CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES
-            ) ?: intArrayOf()
-            if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
-                builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
-                builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
+        if (minimal) {
+            builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        } else {
+            applySessionSettings(builder)
+            // HDR still (scene mode) when requested + supported.
+            if (useHdr) {
+                val sceneModes = characteristics.get(
+                    CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES) ?: intArrayOf()
+                if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
+                    builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
+                    builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
+                }
+            }
+            // Manual Flash 'ON' → AE precapture so the flash fires.
+            if (flashMode == 1L) {
+                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
             }
         }
 
-        // For Manual Flash 'ON', some devices need an AE trigger to ensure it fires
-        if (flashMode == 1L) {
-             builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-        }
-        
         return mediaManager.takePhotoWithRequest(
-            session = session, 
-            request = builder.build(), 
-            renderer = renderer, 
+            session = session,
+            request = builder.build(),
+            renderer = renderer,
             shader = lastRawShader ?: "",
         ) {
-            // 2. Resume repeating request after capture completes (now thread-safe and non-blocking)
+            // Resume the preview repeating request after capture.
             cameraHandler.post { triggerUpdate() }
         }
     }
 
-    suspend fun startVideoRecording(outputPath: String) {
+    suspend fun startVideoRecording(outputPath: String, options: RecordingOptions) {
         if (isClosed) throw IllegalStateException("Camera session is closed")
+        // Auto-stop (maxDuration/maxFileSize) → finalise + emit a `stopped` event
+        // carrying the path (no pending stopVideoRecording call in that path).
+        mediaManager.onMaxReached = {
+            glHandler.post { renderer.setRecordingSurface(null) }
+            val result = mediaManager.stopVideoRecording()
+            onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, result.path)
+        }
         // Await the cameraHandler result so a MediaRecorder prepare/start failure
         // propagates to the caller (Dart) instead of being silently swallowed.
         suspendCancellableCoroutine { cont ->
@@ -650,7 +681,16 @@ class NitraCameraSession(
                 }
                 try {
                     // 1. Prepare recorder + surface (throws if the encoder rejects the config)
-                    val recSurface = mediaManager.prepareVideoRecorder(outputPath)
+                    val recSurface = mediaManager.prepareVideoRecorder(
+                        outputPath,
+                        codec = options.codec.toInt(),
+                        bitRate = options.bitRate.toInt(),
+                        maxDurationMs = options.maxDurationMs.toInt(),
+                        maxFileSizeBytes = options.maxFileSizeBytes,
+                        lat = options.latitude,
+                        lon = options.longitude,
+                        hasLocation = options.hasLocation != 0L,
+                    )
                     // 2. Start the hardware recorder FIRST (important for some drivers)
                     mediaManager.startVideoRecorder()
                     // 3. Enable the surface on the GL thread ONLY after the recorder is active

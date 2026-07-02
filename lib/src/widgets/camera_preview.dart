@@ -1,6 +1,16 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../controller/camera_controller.dart';
+
+/// How the preview fills its box (vision-camera's `resizeMode`).
+enum PreviewResizeMode {
+  /// Fill the box, cropping overflow (default).
+  cover,
+
+  /// Fit entirely inside the box, letterboxing as needed.
+  contain,
+}
 
 /// Defines how the camera preview is rendered.
 enum PreviewMode {
@@ -24,6 +34,7 @@ class CameraPreview extends StatelessWidget {
     super.key,
     required this.controller,
     this.mode = PreviewMode.texture,
+    this.resizeMode = PreviewResizeMode.cover,
     this.child,
   });
 
@@ -32,6 +43,10 @@ class CameraPreview extends StatelessWidget {
 
   /// The rendering mode to use.
   final PreviewMode mode;
+
+  /// How the preview fills its box — [PreviewResizeMode.cover] (crop) or
+  /// [PreviewResizeMode.contain] (letterbox).
+  final PreviewResizeMode resizeMode;
 
   /// Optional overlay widget rendered on top of the camera preview.
   final Widget? child;
@@ -55,18 +70,33 @@ class CameraPreview extends StatelessWidget {
             );
           case PreviewMode.impeller:
           case PreviewMode.texture:
-            final isPortrait = controller.sensorOrientation % 180 != 0;
-            final logicalWidth = isPortrait ? controller.height : controller.width;
-            final logicalHeight = isPortrait ? controller.width : controller.height;
-
-            preview = FittedBox(
-              fit: BoxFit.cover,
-              child: SizedBox(
-                width: logicalWidth.toDouble(),
-                height: logicalHeight.toDouble(),
-                child: Texture(textureId: controller.textureId!),
-              ),
-            );
+            final texture = Texture(textureId: controller.textureId!);
+            if (defaultTargetPlatform == TargetPlatform.android) {
+              // Android's native GL renderer already center-crops the camera into
+              // the output surface (sized to the view), so just fill — wrapping it
+              // in a FittedBox/SizedBox would double-transform and stretch it.
+              // (resizeMode there is effectively cover, done on the GPU.)
+              preview = SizedBox.expand(child: texture);
+            } else {
+              // iOS delivers the raw camera buffer via the Texture, so frame it
+              // here: size a box to the (orientation-corrected) stream aspect and
+              // cover/contain-fit it.
+              final isPortrait = controller.sensorOrientation % 180 != 0;
+              final logicalWidth =
+                  isPortrait ? controller.height : controller.width;
+              final logicalHeight =
+                  isPortrait ? controller.width : controller.height;
+              preview = FittedBox(
+                fit: resizeMode == PreviewResizeMode.contain
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+                child: SizedBox(
+                  width: logicalWidth.toDouble(),
+                  height: logicalHeight.toDouble(),
+                  child: texture,
+                ),
+              );
+            }
         }
 
         return Stack(

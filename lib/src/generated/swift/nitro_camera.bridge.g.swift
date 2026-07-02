@@ -79,6 +79,16 @@ public enum QualityPrioritization: Int64 {
   case quality = 2
 }
 
+public enum VideoCodec: Int64 {
+  case h264 = 0
+  case hevc = 1
+}
+
+public enum VideoFileType: Int64 {
+  case mp4 = 0
+  case mov = 1
+}
+
 public enum CameraEventType: Int64 {
   case started = 0
   case stopped = 1
@@ -86,6 +96,9 @@ public enum CameraEventType: Int64 {
   case interruptionStarted = 3
   case interruptionEnded = 4
   case frameDropped = 5
+  case photoCaptureBegan = 6
+  case photoCaptureShutter = 7
+  case photoThumbnail = 8
 }
 
 public enum InterruptionReason: Int64 {
@@ -280,6 +293,10 @@ public struct PhotoOptions {
   public var enableShutterSound: Int64
   public var skipMetadata: Int64
   public var enableAutoRedEyeReduction: Int64
+  public var latitude: Double
+  public var longitude: Double
+  public var altitude: Double
+  public var hasLocation: Int64
 }
 
 // C-ABI shadow — layout matches the C typedef PhotoOptions
@@ -289,6 +306,10 @@ fileprivate struct _PhotoOptionsC {
   var enableShutterSound: Int64
   var skipMetadata: Int64
   var enableAutoRedEyeReduction: Int64
+  var latitude: Double
+  var longitude: Double
+  var altitude: Double
+  var hasLocation: Int64
 
   static func fromSwift(_ s: PhotoOptions) -> _PhotoOptionsC {
     return _PhotoOptionsC(
@@ -296,7 +317,11 @@ fileprivate struct _PhotoOptionsC {
       qualityPrioritization: s.qualityPrioritization,
       enableShutterSound: s.enableShutterSound,
       skipMetadata: s.skipMetadata,
-      enableAutoRedEyeReduction: s.enableAutoRedEyeReduction
+      enableAutoRedEyeReduction: s.enableAutoRedEyeReduction,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      altitude: s.altitude,
+      hasLocation: s.hasLocation
     )
   }
 
@@ -306,7 +331,64 @@ fileprivate struct _PhotoOptionsC {
       qualityPrioritization: qualityPrioritization,
       enableShutterSound: enableShutterSound,
       skipMetadata: skipMetadata,
-      enableAutoRedEyeReduction: enableAutoRedEyeReduction
+      enableAutoRedEyeReduction: enableAutoRedEyeReduction,
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      hasLocation: hasLocation
+    )
+  }
+}
+
+public struct RecordingOptions {
+  public var codec: Int64
+  public var fileType: Int64
+  public var bitRate: Int64
+  public var maxDurationMs: Int64
+  public var maxFileSizeBytes: Int64
+  public var latitude: Double
+  public var longitude: Double
+  public var altitude: Double
+  public var hasLocation: Int64
+}
+
+// C-ABI shadow — layout matches the C typedef RecordingOptions
+fileprivate struct _RecordingOptionsC {
+  var codec: Int64
+  var fileType: Int64
+  var bitRate: Int64
+  var maxDurationMs: Int64
+  var maxFileSizeBytes: Int64
+  var latitude: Double
+  var longitude: Double
+  var altitude: Double
+  var hasLocation: Int64
+
+  static func fromSwift(_ s: RecordingOptions) -> _RecordingOptionsC {
+    return _RecordingOptionsC(
+      codec: s.codec,
+      fileType: s.fileType,
+      bitRate: s.bitRate,
+      maxDurationMs: s.maxDurationMs,
+      maxFileSizeBytes: s.maxFileSizeBytes,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      altitude: s.altitude,
+      hasLocation: s.hasLocation
+    )
+  }
+
+  func toSwift() -> RecordingOptions {
+    return RecordingOptions(
+      codec: codec,
+      fileType: fileType,
+      bitRate: bitRate,
+      maxDurationMs: maxDurationMs,
+      maxFileSizeBytes: maxFileSizeBytes,
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      hasLocation: hasLocation
     )
   }
 }
@@ -911,91 +993,91 @@ public class NitroRecordReader {
  * Keep mutable state thread-safe or marshal work onto your own queue/actor.
  */
 public protocol HybridNitroCameraProtocol: AnyObject {
-    // source: nitro_camera.native.dart:283
+    // source: nitro_camera.native.dart:330
     func requestCameraPermission() async throws -> Int64
-    // source: nitro_camera.native.dart:286
+    // source: nitro_camera.native.dart:333
     func getCameraPermissionStatus() -> Int64
-    // source: nitro_camera.native.dart:291
+    // source: nitro_camera.native.dart:338
     func requestMicrophonePermission() async throws -> Int64
-    // source: nitro_camera.native.dart:294
+    // source: nitro_camera.native.dart:341
     func getMicrophonePermissionStatus() -> Int64
-    // source: nitro_camera.native.dart:299
+    // source: nitro_camera.native.dart:346
     func getAvailableCameraDevicesJson() async throws -> String
-    // source: nitro_camera.native.dart:302
+    // source: nitro_camera.native.dart:349
     func getAvailableCameraDevices() -> [CameraDevice]
-    // source: nitro_camera.native.dart:305
+    // source: nitro_camera.native.dart:352
     func getDeviceCount() -> Int64
-    // source: nitro_camera.native.dart:306
+    // source: nitro_camera.native.dart:353
     func getDevice(index: Int64) -> CameraDevice
-    // source: nitro_camera.native.dart:322
-    func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64
-    // source: nitro_camera.native.dart:331
-    func closeCamera(textureId: Int64) async throws -> Void
-    // source: nitro_camera.native.dart:334
-    func startPreview(textureId: Int64) -> Void
-    // source: nitro_camera.native.dart:337
-    func stopPreview(textureId: Int64) -> Void
-    // source: nitro_camera.native.dart:342
-    func setZoom(textureId: Int64, zoom: Double) -> Void
-    // source: nitro_camera.native.dart:345
-    func setFocusPoint(textureId: Int64, x: Double, y: Double) -> Void
-    // source: nitro_camera.native.dart:348
-    func setAutoFocus(textureId: Int64, mode: Int64) -> Void
-    // source: nitro_camera.native.dart:351
-    func setExposure(textureId: Int64, value: Double) -> Void
-    // source: nitro_camera.native.dart:354
-    func setFlash(textureId: Int64, mode: Int64) -> Void
-    // source: nitro_camera.native.dart:357
-    func setTorch(textureId: Int64, enabled: Int64) -> Void
-    // source: nitro_camera.native.dart:361
-    func setWhiteBalance(textureId: Int64, temperature: Int64) -> Void
-    // source: nitro_camera.native.dart:364
-    func setHdr(textureId: Int64, enabled: Int64) -> Void
     // source: nitro_camera.native.dart:369
-    func takePhoto(textureId: Int64) async throws -> PhotoResult
-    // source: nitro_camera.native.dart:374
-    func startVideoRecording(textureId: Int64, outputPath: String) async throws -> Void
-    // source: nitro_camera.native.dart:377
-    func stopVideoRecording(textureId: Int64) async throws -> RecordingResult
-    // source: nitro_camera.native.dart:380
-    func pauseRecording(textureId: Int64) -> Void
-    // source: nitro_camera.native.dart:383
-    func resumeRecording(textureId: Int64) -> Void
-    // source: nitro_camera.native.dart:386
-    func cancelRecording(textureId: Int64) -> Void
-    // source: nitro_camera.native.dart:396
-    func enableFrameProcessing(textureId: Int64, enabled: Int64) -> Void
-    // source: nitro_camera.native.dart:400
-    func setFrameFormat(textureId: Int64, format: Int64) -> Void
+    func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64
+    // source: nitro_camera.native.dart:378
+    func closeCamera(textureId: Int64) async throws -> Void
+    // source: nitro_camera.native.dart:381
+    func startPreview(textureId: Int64) -> Void
+    // source: nitro_camera.native.dart:384
+    func stopPreview(textureId: Int64) -> Void
+    // source: nitro_camera.native.dart:389
+    func setZoom(textureId: Int64, zoom: Double) -> Void
+    // source: nitro_camera.native.dart:392
+    func setFocusPoint(textureId: Int64, x: Double, y: Double) -> Void
+    // source: nitro_camera.native.dart:395
+    func setAutoFocus(textureId: Int64, mode: Int64) -> Void
+    // source: nitro_camera.native.dart:398
+    func setExposure(textureId: Int64, value: Double) -> Void
+    // source: nitro_camera.native.dart:401
+    func setFlash(textureId: Int64, mode: Int64) -> Void
     // source: nitro_camera.native.dart:404
-    func setSamplingRate(textureId: Int64, samplingRate: Int64) -> Void
+    func setTorch(textureId: Int64, enabled: Int64) -> Void
+    // source: nitro_camera.native.dart:408
+    func setWhiteBalance(textureId: Int64, temperature: Int64) -> Void
     // source: nitro_camera.native.dart:411
-    func setFilterShader(textureId: Int64, shaderSource: String) -> Void
+    func setHdr(textureId: Int64, enabled: Int64) -> Void
     // source: nitro_camera.native.dart:416
-    func updateOverlay(textureId: Int64, overlayData: Data) -> Void
-    // source: nitro_camera.native.dart:429
-    func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig
-    // source: nitro_camera.native.dart:433
-    func getSessionStateJson(textureId: Int64) -> String
-    // source: nitro_camera.native.dart:436
-    func setVideoStabilization(textureId: Int64, mode: Int64) -> Void
-    // source: nitro_camera.native.dart:439
-    func setLowLightBoost(textureId: Int64, enabled: Int64) -> Void
-    // source: nitro_camera.native.dart:442
-    func setTorchLevel(textureId: Int64, level: Double) -> Void
-    // source: nitro_camera.native.dart:445
-    func lockExposure(textureId: Int64, locked: Int64) -> Void
-    // source: nitro_camera.native.dart:448
-    func lockFocus(textureId: Int64, locked: Int64) -> Void
+    func takePhoto(textureId: Int64) async throws -> PhotoResult
+    // source: nitro_camera.native.dart:421
+    func startVideoRecording(textureId: Int64, outputPath: String, options: RecordingOptions) async throws -> Void
+    // source: nitro_camera.native.dart:428
+    func stopVideoRecording(textureId: Int64) async throws -> RecordingResult
+    // source: nitro_camera.native.dart:431
+    func pauseRecording(textureId: Int64) -> Void
+    // source: nitro_camera.native.dart:434
+    func resumeRecording(textureId: Int64) -> Void
+    // source: nitro_camera.native.dart:437
+    func cancelRecording(textureId: Int64) -> Void
+    // source: nitro_camera.native.dart:447
+    func enableFrameProcessing(textureId: Int64, enabled: Int64) -> Void
     // source: nitro_camera.native.dart:451
+    func setFrameFormat(textureId: Int64, format: Int64) -> Void
+    // source: nitro_camera.native.dart:455
+    func setSamplingRate(textureId: Int64, samplingRate: Int64) -> Void
+    // source: nitro_camera.native.dart:462
+    func setFilterShader(textureId: Int64, shaderSource: String) -> Void
+    // source: nitro_camera.native.dart:467
+    func updateOverlay(textureId: Int64, overlayData: Data) -> Void
+    // source: nitro_camera.native.dart:480
+    func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig
+    // source: nitro_camera.native.dart:484
+    func getSessionStateJson(textureId: Int64) -> String
+    // source: nitro_camera.native.dart:487
+    func setVideoStabilization(textureId: Int64, mode: Int64) -> Void
+    // source: nitro_camera.native.dart:490
+    func setLowLightBoost(textureId: Int64, enabled: Int64) -> Void
+    // source: nitro_camera.native.dart:493
+    func setTorchLevel(textureId: Int64, level: Double) -> Void
+    // source: nitro_camera.native.dart:496
+    func lockExposure(textureId: Int64, locked: Int64) -> Void
+    // source: nitro_camera.native.dart:499
+    func lockFocus(textureId: Int64, locked: Int64) -> Void
+    // source: nitro_camera.native.dart:502
     func lockWhiteBalance(textureId: Int64, locked: Int64) -> Void
-    // source: nitro_camera.native.dart:454
+    // source: nitro_camera.native.dart:505
     func setTargetOrientation(textureId: Int64, degrees: Int64) -> Void
-    // source: nitro_camera.native.dart:458
+    // source: nitro_camera.native.dart:509
     func takePhotoWithOptions(textureId: Int64, options: PhotoOptions) async throws -> PhotoResult
-    // source: nitro_camera.native.dart:463
+    // source: nitro_camera.native.dart:514
     func takeSnapshot(textureId: Int64) async throws -> PhotoResult
-    // source: nitro_camera.native.dart:468
+    // source: nitro_camera.native.dart:519
     func reset() -> Void
     var frameStream: AnyPublisher<CameraFrame, Never> { get }
     var eventStream: AnyPublisher<CameraEvent, Never> { get }
@@ -1017,7 +1099,7 @@ public class NitroCameraRegistry {
 
 // MARK: - C bridge stubs — exported as C symbols called by the generated .cpp shim
 
-// source: nitro_camera.native.dart:283
+// source: nitro_camera.native.dart:330
 @_cdecl("_nitro_camera_call_requestCameraPermission")
 public func _nitro_camera_call_requestCameraPermission() -> Int64 {
     guard let impl = NitroCameraRegistry.impl else { return 0 }
@@ -1031,14 +1113,14 @@ public func _nitro_camera_call_requestCameraPermission() -> Int64 {
     return result ?? 0
 }
 
-// source: nitro_camera.native.dart:286
+// source: nitro_camera.native.dart:333
 @_cdecl("_nitro_camera_call_getCameraPermissionStatus")
 public func _nitro_camera_call_getCameraPermissionStatus() -> Int64 {
     guard let impl = NitroCameraRegistry.impl else { return 0 }
     return impl.getCameraPermissionStatus()
 }
 
-// source: nitro_camera.native.dart:291
+// source: nitro_camera.native.dart:338
 @_cdecl("_nitro_camera_call_requestMicrophonePermission")
 public func _nitro_camera_call_requestMicrophonePermission() -> Int64 {
     guard let impl = NitroCameraRegistry.impl else { return 0 }
@@ -1052,14 +1134,14 @@ public func _nitro_camera_call_requestMicrophonePermission() -> Int64 {
     return result ?? 0
 }
 
-// source: nitro_camera.native.dart:294
+// source: nitro_camera.native.dart:341
 @_cdecl("_nitro_camera_call_getMicrophonePermissionStatus")
 public func _nitro_camera_call_getMicrophonePermissionStatus() -> Int64 {
     guard let impl = NitroCameraRegistry.impl else { return 0 }
     return impl.getMicrophonePermissionStatus()
 }
 
-// source: nitro_camera.native.dart:299
+// source: nitro_camera.native.dart:346
 @_cdecl("_nitro_camera_call_getAvailableCameraDevicesJson")
 public func _nitro_camera_call_getAvailableCameraDevicesJson() -> UnsafeMutablePointer<CChar>? {
     guard let impl = NitroCameraRegistry.impl else { return _nitroStringToCString("") }
@@ -1073,28 +1155,28 @@ public func _nitro_camera_call_getAvailableCameraDevicesJson() -> UnsafeMutableP
     return _nitroStringToCString(result)
 }
 
-// source: nitro_camera.native.dart:302
+// source: nitro_camera.native.dart:349
 @_cdecl("_nitro_camera_call_getAvailableCameraDevices")
 public func _nitro_camera_call_getAvailableCameraDevices() -> UnsafeMutableRawPointer? {
     guard let r = NitroCameraRegistry.impl?.getAvailableCameraDevices() else { return nil }
     return NitroRecordWriter.encodeIndexedList(r) { w, e in e.writeFields(w) }.map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:305
+// source: nitro_camera.native.dart:352
 @_cdecl("_nitro_camera_call_getDeviceCount")
 public func _nitro_camera_call_getDeviceCount() -> Int64 {
     guard let impl = NitroCameraRegistry.impl else { return 0 }
     return impl.getDeviceCount()
 }
 
-// source: nitro_camera.native.dart:306
+// source: nitro_camera.native.dart:353
 @_cdecl("_nitro_camera_call_getDevice")
 public func _nitro_camera_call_getDevice(_ index: Int64) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
     return impl.getDevice(index: index).toNative().map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:322
+// source: nitro_camera.native.dart:369
 @_cdecl("_nitro_camera_call_openCamera")
 public func _nitro_camera_call_openCamera(_ deviceId: UnsafePointer<CChar>?, _ width: Int64, _ height: Int64, _ fps: Int64, _ enableAudio: Int64) -> Int64 {
     let deviceIdStr = _nitroStringFromCString(deviceId)
@@ -1109,7 +1191,7 @@ public func _nitro_camera_call_openCamera(_ deviceId: UnsafePointer<CChar>?, _ w
     return result ?? 0
 }
 
-// source: nitro_camera.native.dart:331
+// source: nitro_camera.native.dart:378
 @_cdecl("_nitro_camera_call_closeCamera")
 public func _nitro_camera_call_closeCamera(_ textureId: Int64) -> Void {
     guard let impl = NitroCameraRegistry.impl else { return }
@@ -1128,67 +1210,67 @@ public func _nitro_camera_call_closeCamera(_ textureId: Int64) -> Void {
     }
 }
 
-// source: nitro_camera.native.dart:334
+// source: nitro_camera.native.dart:381
 @_cdecl("_nitro_camera_call_startPreview")
 public func _nitro_camera_call_startPreview(_ textureId: Int64) -> Void {
     NitroCameraRegistry.impl?.startPreview(textureId: textureId)
 }
 
-// source: nitro_camera.native.dart:337
+// source: nitro_camera.native.dart:384
 @_cdecl("_nitro_camera_call_stopPreview")
 public func _nitro_camera_call_stopPreview(_ textureId: Int64) -> Void {
     NitroCameraRegistry.impl?.stopPreview(textureId: textureId)
 }
 
-// source: nitro_camera.native.dart:342
+// source: nitro_camera.native.dart:389
 @_cdecl("_nitro_camera_call_setZoom")
 public func _nitro_camera_call_setZoom(_ textureId: Int64, _ zoom: Double) -> Void {
     NitroCameraRegistry.impl?.setZoom(textureId: textureId, zoom: zoom)
 }
 
-// source: nitro_camera.native.dart:345
+// source: nitro_camera.native.dart:392
 @_cdecl("_nitro_camera_call_setFocusPoint")
 public func _nitro_camera_call_setFocusPoint(_ textureId: Int64, _ x: Double, _ y: Double) -> Void {
     NitroCameraRegistry.impl?.setFocusPoint(textureId: textureId, x: x, y: y)
 }
 
-// source: nitro_camera.native.dart:348
+// source: nitro_camera.native.dart:395
 @_cdecl("_nitro_camera_call_setAutoFocus")
 public func _nitro_camera_call_setAutoFocus(_ textureId: Int64, _ mode: Int64) -> Void {
     NitroCameraRegistry.impl?.setAutoFocus(textureId: textureId, mode: mode)
 }
 
-// source: nitro_camera.native.dart:351
+// source: nitro_camera.native.dart:398
 @_cdecl("_nitro_camera_call_setExposure")
 public func _nitro_camera_call_setExposure(_ textureId: Int64, _ value: Double) -> Void {
     NitroCameraRegistry.impl?.setExposure(textureId: textureId, value: value)
 }
 
-// source: nitro_camera.native.dart:354
+// source: nitro_camera.native.dart:401
 @_cdecl("_nitro_camera_call_setFlash")
 public func _nitro_camera_call_setFlash(_ textureId: Int64, _ mode: Int64) -> Void {
     NitroCameraRegistry.impl?.setFlash(textureId: textureId, mode: mode)
 }
 
-// source: nitro_camera.native.dart:357
+// source: nitro_camera.native.dart:404
 @_cdecl("_nitro_camera_call_setTorch")
 public func _nitro_camera_call_setTorch(_ textureId: Int64, _ enabled: Int64) -> Void {
     NitroCameraRegistry.impl?.setTorch(textureId: textureId, enabled: enabled)
 }
 
-// source: nitro_camera.native.dart:361
+// source: nitro_camera.native.dart:408
 @_cdecl("_nitro_camera_call_setWhiteBalance")
 public func _nitro_camera_call_setWhiteBalance(_ textureId: Int64, _ temperature: Int64) -> Void {
     NitroCameraRegistry.impl?.setWhiteBalance(textureId: textureId, temperature: temperature)
 }
 
-// source: nitro_camera.native.dart:364
+// source: nitro_camera.native.dart:411
 @_cdecl("_nitro_camera_call_setHdr")
 public func _nitro_camera_call_setHdr(_ textureId: Int64, _ enabled: Int64) -> Void {
     NitroCameraRegistry.impl?.setHdr(textureId: textureId, enabled: enabled)
 }
 
-// source: nitro_camera.native.dart:369
+// source: nitro_camera.native.dart:416
 @_cdecl("_nitro_camera_call_takePhoto")
 public func _nitro_camera_call_takePhoto(_ textureId: Int64) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
@@ -1202,15 +1284,15 @@ public func _nitro_camera_call_takePhoto(_ textureId: Int64) -> UnsafeMutableRaw
     return result?.toNative().map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:374
+// source: nitro_camera.native.dart:421
 @_cdecl("_nitro_camera_call_startVideoRecording")
-public func _nitro_camera_call_startVideoRecording(_ textureId: Int64, _ outputPath: UnsafePointer<CChar>?) -> Void {
+public func _nitro_camera_call_startVideoRecording(_ textureId: Int64, _ outputPath: UnsafePointer<CChar>?, _ options: UnsafeRawPointer?) -> Void {
     let outputPathStr = _nitroStringFromCString(outputPath)
     guard let impl = NitroCameraRegistry.impl else { return }
     let sema = DispatchSemaphore(value: 0)
     var _thrownError: Error? = nil
     Task.detached {
-        do { try await impl.startVideoRecording(textureId: textureId, outputPath: outputPathStr) }
+        do { try await impl.startVideoRecording(textureId: textureId, outputPath: outputPathStr, options: options!.assumingMemoryBound(to: _RecordingOptionsC.self).pointee.toSwift()) }
         catch { _thrownError = error }
         sema.signal()
     }
@@ -1222,7 +1304,7 @@ public func _nitro_camera_call_startVideoRecording(_ textureId: Int64, _ outputP
     }
 }
 
-// source: nitro_camera.native.dart:377
+// source: nitro_camera.native.dart:428
 @_cdecl("_nitro_camera_call_stopVideoRecording")
 public func _nitro_camera_call_stopVideoRecording(_ textureId: Int64) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
@@ -1236,57 +1318,57 @@ public func _nitro_camera_call_stopVideoRecording(_ textureId: Int64) -> UnsafeM
     return result?.toNative().map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:380
+// source: nitro_camera.native.dart:431
 @_cdecl("_nitro_camera_call_pauseRecording")
 public func _nitro_camera_call_pauseRecording(_ textureId: Int64) -> Void {
     NitroCameraRegistry.impl?.pauseRecording(textureId: textureId)
 }
 
-// source: nitro_camera.native.dart:383
+// source: nitro_camera.native.dart:434
 @_cdecl("_nitro_camera_call_resumeRecording")
 public func _nitro_camera_call_resumeRecording(_ textureId: Int64) -> Void {
     NitroCameraRegistry.impl?.resumeRecording(textureId: textureId)
 }
 
-// source: nitro_camera.native.dart:386
+// source: nitro_camera.native.dart:437
 @_cdecl("_nitro_camera_call_cancelRecording")
 public func _nitro_camera_call_cancelRecording(_ textureId: Int64) -> Void {
     NitroCameraRegistry.impl?.cancelRecording(textureId: textureId)
 }
 
-// source: nitro_camera.native.dart:396
+// source: nitro_camera.native.dart:447
 @_cdecl("_nitro_camera_call_enableFrameProcessing")
 public func _nitro_camera_call_enableFrameProcessing(_ textureId: Int64, _ enabled: Int64) -> Void {
     NitroCameraRegistry.impl?.enableFrameProcessing(textureId: textureId, enabled: enabled)
 }
 
-// source: nitro_camera.native.dart:400
+// source: nitro_camera.native.dart:451
 @_cdecl("_nitro_camera_call_setFrameFormat")
 public func _nitro_camera_call_setFrameFormat(_ textureId: Int64, _ format: Int64) -> Void {
     NitroCameraRegistry.impl?.setFrameFormat(textureId: textureId, format: format)
 }
 
-// source: nitro_camera.native.dart:404
+// source: nitro_camera.native.dart:455
 @_cdecl("_nitro_camera_call_setSamplingRate")
 public func _nitro_camera_call_setSamplingRate(_ textureId: Int64, _ samplingRate: Int64) -> Void {
     NitroCameraRegistry.impl?.setSamplingRate(textureId: textureId, samplingRate: samplingRate)
 }
 
-// source: nitro_camera.native.dart:411
+// source: nitro_camera.native.dart:462
 @_cdecl("_nitro_camera_call_setFilterShader")
 public func _nitro_camera_call_setFilterShader(_ textureId: Int64, _ shaderSource: UnsafePointer<CChar>?) -> Void {
     let shaderSourceStr = _nitroStringFromCString(shaderSource)
     NitroCameraRegistry.impl?.setFilterShader(textureId: textureId, shaderSource: shaderSourceStr)
 }
 
-// source: nitro_camera.native.dart:416
+// source: nitro_camera.native.dart:467
 @_cdecl("_nitro_camera_call_updateOverlay")
 public func _nitro_camera_call_updateOverlay(_ textureId: Int64, _ overlayData: UnsafeMutablePointer<UInt8>?, _ overlayData_length: Int64) -> Void {
     let overlayDataArr = overlayData.map { Data(bytes: $0, count: Int(overlayData_length)) } ?? Data()
     NitroCameraRegistry.impl?.updateOverlay(textureId: textureId, overlayData: overlayDataArr)
 }
 
-// source: nitro_camera.native.dart:429
+// source: nitro_camera.native.dart:480
 @_cdecl("_nitro_camera_call_configure")
 public func _nitro_camera_call_configure(_ textureId: Int64, _ config: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
@@ -1303,55 +1385,55 @@ public func _nitro_camera_call_configure(_ textureId: Int64, _ config: UnsafeRaw
     return UnsafeMutableRawPointer(ptr)
 }
 
-// source: nitro_camera.native.dart:433
+// source: nitro_camera.native.dart:484
 @_cdecl("_nitro_camera_call_getSessionStateJson")
 public func _nitro_camera_call_getSessionStateJson(_ textureId: Int64) -> UnsafeMutablePointer<CChar>? {
     return _nitroStringToCString(NitroCameraRegistry.impl?.getSessionStateJson(textureId: textureId) ?? "")
 }
 
-// source: nitro_camera.native.dart:436
+// source: nitro_camera.native.dart:487
 @_cdecl("_nitro_camera_call_setVideoStabilization")
 public func _nitro_camera_call_setVideoStabilization(_ textureId: Int64, _ mode: Int64) -> Void {
     NitroCameraRegistry.impl?.setVideoStabilization(textureId: textureId, mode: mode)
 }
 
-// source: nitro_camera.native.dart:439
+// source: nitro_camera.native.dart:490
 @_cdecl("_nitro_camera_call_setLowLightBoost")
 public func _nitro_camera_call_setLowLightBoost(_ textureId: Int64, _ enabled: Int64) -> Void {
     NitroCameraRegistry.impl?.setLowLightBoost(textureId: textureId, enabled: enabled)
 }
 
-// source: nitro_camera.native.dart:442
+// source: nitro_camera.native.dart:493
 @_cdecl("_nitro_camera_call_setTorchLevel")
 public func _nitro_camera_call_setTorchLevel(_ textureId: Int64, _ level: Double) -> Void {
     NitroCameraRegistry.impl?.setTorchLevel(textureId: textureId, level: level)
 }
 
-// source: nitro_camera.native.dart:445
+// source: nitro_camera.native.dart:496
 @_cdecl("_nitro_camera_call_lockExposure")
 public func _nitro_camera_call_lockExposure(_ textureId: Int64, _ locked: Int64) -> Void {
     NitroCameraRegistry.impl?.lockExposure(textureId: textureId, locked: locked)
 }
 
-// source: nitro_camera.native.dart:448
+// source: nitro_camera.native.dart:499
 @_cdecl("_nitro_camera_call_lockFocus")
 public func _nitro_camera_call_lockFocus(_ textureId: Int64, _ locked: Int64) -> Void {
     NitroCameraRegistry.impl?.lockFocus(textureId: textureId, locked: locked)
 }
 
-// source: nitro_camera.native.dart:451
+// source: nitro_camera.native.dart:502
 @_cdecl("_nitro_camera_call_lockWhiteBalance")
 public func _nitro_camera_call_lockWhiteBalance(_ textureId: Int64, _ locked: Int64) -> Void {
     NitroCameraRegistry.impl?.lockWhiteBalance(textureId: textureId, locked: locked)
 }
 
-// source: nitro_camera.native.dart:454
+// source: nitro_camera.native.dart:505
 @_cdecl("_nitro_camera_call_setTargetOrientation")
 public func _nitro_camera_call_setTargetOrientation(_ textureId: Int64, _ degrees: Int64) -> Void {
     NitroCameraRegistry.impl?.setTargetOrientation(textureId: textureId, degrees: degrees)
 }
 
-// source: nitro_camera.native.dart:458
+// source: nitro_camera.native.dart:509
 @_cdecl("_nitro_camera_call_takePhotoWithOptions")
 public func _nitro_camera_call_takePhotoWithOptions(_ textureId: Int64, _ options: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
@@ -1365,7 +1447,7 @@ public func _nitro_camera_call_takePhotoWithOptions(_ textureId: Int64, _ option
     return result?.toNative().map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:463
+// source: nitro_camera.native.dart:514
 @_cdecl("_nitro_camera_call_takeSnapshot")
 public func _nitro_camera_call_takeSnapshot(_ textureId: Int64) -> UnsafeMutableRawPointer? {
     guard let impl = NitroCameraRegistry.impl else { return nil }
@@ -1379,7 +1461,7 @@ public func _nitro_camera_call_takeSnapshot(_ textureId: Int64) -> UnsafeMutable
     return result?.toNative().map { UnsafeMutableRawPointer($0) }
 }
 
-// source: nitro_camera.native.dart:468
+// source: nitro_camera.native.dart:519
 @_cdecl("_nitro_camera_call_reset")
 public func _nitro_camera_call_reset() -> Void {
     NitroCameraRegistry.impl?.reset()

@@ -173,6 +173,9 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                     width: cameraStore.width.value,
                     height: cameraStore.height.value,
                     fps: cameraStore.fps.value,
+                    resizeMode: cameraStore.resizeCover.value
+                        ? PreviewResizeMode.cover
+                        : PreviewResizeMode.contain,
                     settleDelay: const Duration(milliseconds: 200),
                     loading: const ColoredBox(
                       color: Colors.black,
@@ -326,10 +329,35 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
             const BottomControls(),
 
             // 6. Global Overlays (Capture Flash, Rec status)
+            // Flash at the *native* shutter moment (photoCaptureShutter event).
             Watch((context) {
-              final trigger = cameraStore.photoTrigger.value;
+              final trigger = cameraStore.shutterFlash.value;
               if (trigger == 0) return const SizedBox.shrink();
-              return _FlashOverlay(key: ValueKey(trigger));
+              return _FlashOverlay(key: ValueKey('shutter_$trigger'));
+            }),
+
+            // Fast preview thumbnail (photoThumbnail event) — shown instantly,
+            // before the full-res JPEG is written.
+            Watch((context) {
+              final path = cameraStore.lastThumbnailPath.value;
+              if (path == null) return const SizedBox.shrink();
+              return Positioned(
+                left: 16,
+                bottom: 200,
+                child: _ThumbnailBadge(key: ValueKey(path), path: path),
+              );
+            }),
+
+            // Dev FPS graph (vision-camera enableFpsGraph).
+            Watch((context) {
+              if (!cameraStore.showFpsGraph.value) {
+                return const SizedBox.shrink();
+              }
+              return Positioned(
+                right: 16,
+                bottom: 200,
+                child: CameraFpsGraph(targetFps: cameraStore.fps.value.toDouble()),
+              );
             }),
 
             Watch((context) {
@@ -653,6 +681,55 @@ class _FocusIndicatorState extends State<_FocusIndicator>
 }
 
 /// Error state for [CameraView] — mirrors the previous preview's retry UI.
+/// The fast preview thumbnail delivered by the `photoThumbnail` event; auto-
+/// dismisses after a couple seconds.
+class _ThumbnailBadge extends StatefulWidget {
+  final String path;
+  const _ThumbnailBadge({super.key, required this.path});
+  @override
+  State<_ThumbnailBadge> createState() => _ThumbnailBadgeState();
+}
+
+class _ThumbnailBadgeState extends State<_ThumbnailBadge> {
+  bool _visible = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!File(widget.path).existsSync()) return const SizedBox.shrink();
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 300),
+      opacity: _visible ? 1 : 0,
+      child: Container(
+        width: 54,
+        height: 54,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.cyanAccent, width: 1.5),
+          image: DecorationImage(
+            image: FileImage(File(widget.path)),
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Applies the selected preview filter as a Flutter-layer effect on iOS (Android
 /// filters run in the native GL renderer). Four filters are pure per-pixel color
 /// transforms (expressible as a [ColorFilter.matrix]); VIGNETTE is a radial

@@ -38,6 +38,14 @@ enum VideoStabilizationMode {
 @HybridEnum()
 enum QualityPrioritization { speed, balanced, quality }
 
+/// Video compression codec for recording.
+@HybridEnum()
+enum VideoCodec { h264, hevc }
+
+/// Container/file type for recorded video.
+@HybridEnum()
+enum VideoFileType { mp4, mov }
+
 /// Kind of [CameraEvent] delivered on [NitroCamera.eventStream].
 @HybridEnum()
 enum CameraEventType {
@@ -47,6 +55,9 @@ enum CameraEventType {
   interruptionStarted,
   interruptionEnded,
   frameDropped,
+  photoCaptureBegan, // onWillBeginCapture — exposure/metering has started
+  photoCaptureShutter, // onWillCapturePhoto — the shutter moment (flash UI)
+  photoThumbnail, // onPreviewImageAvailable — fast thumbnail path in `message`
 }
 
 /// Why the camera session was interrupted (mirrors AVFoundation reasons).
@@ -238,6 +249,11 @@ class PhotoOptions {
   final int enableShutterSound; // 0 / 1
   final int skipMetadata; // 0 / 1
   final int enableAutoRedEyeReduction; // 0 / 1
+  // GPS geotag written into the photo's EXIF when [hasLocation] == 1.
+  final double latitude;
+  final double longitude;
+  final double altitude;
+  final int hasLocation; // 0 / 1
 
   const PhotoOptions({
     required this.flash,
@@ -245,6 +261,37 @@ class PhotoOptions {
     required this.enableShutterSound,
     required this.skipMetadata,
     required this.enableAutoRedEyeReduction,
+    this.latitude = 0,
+    this.longitude = 0,
+    this.altitude = 0,
+    this.hasLocation = 0,
+  });
+}
+
+/// Per-recording options for [NitroCamera.startVideoRecording].
+@HybridStruct()
+class RecordingOptions {
+  final int codec; // VideoCodec index (0 = h264, 1 = hevc)
+  final int fileType; // VideoFileType index (0 = mp4, 1 = mov)
+  final int bitRate; // target bits/sec; 0 = encoder default
+  final int maxDurationMs; // auto-stop after this many ms; 0 = unlimited
+  final int maxFileSizeBytes; // auto-stop after this size; 0 = unlimited
+  // GPS geotag written into the movie metadata when [hasLocation] == 1.
+  final double latitude;
+  final double longitude;
+  final double altitude;
+  final int hasLocation; // 0 / 1
+
+  const RecordingOptions({
+    this.codec = 0,
+    this.fileType = 0,
+    this.bitRate = 0,
+    this.maxDurationMs = 0,
+    this.maxFileSizeBytes = 0,
+    this.latitude = 0,
+    this.longitude = 0,
+    this.altitude = 0,
+    this.hasLocation = 0,
   });
 }
 
@@ -371,7 +418,11 @@ abstract class NitroCamera extends HybridObject {
   // ---- Video recording ----
 
   @nitroAsync
-  Future<void> startVideoRecording(int textureId, String outputPath);
+  Future<void> startVideoRecording(
+    int textureId,
+    String outputPath,
+    RecordingOptions options,
+  );
 
   @nitroAsync
   Future<RecordingResult> stopVideoRecording(int textureId);

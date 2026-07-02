@@ -97,13 +97,36 @@ enum class QualityPrioritization(val nativeValue: Long) {
 }
 
 @Keep
+enum class VideoCodec(val nativeValue: Long) {
+  H264(0),
+  HEVC(1);
+
+  companion object {
+    fun fromNative(v: Long): VideoCodec = values().first { it.nativeValue == v }
+  }
+}
+
+@Keep
+enum class VideoFileType(val nativeValue: Long) {
+  MP4(0),
+  MOV(1);
+
+  companion object {
+    fun fromNative(v: Long): VideoFileType = values().first { it.nativeValue == v }
+  }
+}
+
+@Keep
 enum class CameraEventType(val nativeValue: Long) {
   STARTED(0),
   STOPPED(1),
   ERROR(2),
   INTERRUPTIONSTARTED(3),
   INTERRUPTIONENDED(4),
-  FRAMEDROPPED(5);
+  FRAMEDROPPED(5),
+  PHOTOCAPTUREBEGAN(6),
+  PHOTOCAPTURESHUTTER(7),
+  PHOTOTHUMBNAIL(8);
 
   companion object {
     fun fromNative(v: Long): CameraEventType = values().first { it.nativeValue == v }
@@ -273,7 +296,7 @@ data class ResolvedConfig(val width: Long, val height: Long, val fps: Long, val 
 }
 
 @androidx.annotation.Keep
-data class PhotoOptions(val flash: Long, val qualityPrioritization: Long, val enableShutterSound: Long, val skipMetadata: Long, val enableAutoRedEyeReduction: Long) {
+data class PhotoOptions(val flash: Long, val qualityPrioritization: Long, val enableShutterSound: Long, val skipMetadata: Long, val enableAutoRedEyeReduction: Long, val latitude: Double, val longitude: Double, val altitude: Double, val hasLocation: Long) {
     companion object {
         @JvmStatic fun decodeFrom(buf: java.nio.ByteBuffer): PhotoOptions {
             val flash = buf.long
@@ -281,7 +304,11 @@ data class PhotoOptions(val flash: Long, val qualityPrioritization: Long, val en
             val enableShutterSound = buf.long
             val skipMetadata = buf.long
             val enableAutoRedEyeReduction = buf.long
-            return PhotoOptions(flash, qualityPrioritization, enableShutterSound, skipMetadata, enableAutoRedEyeReduction)
+            val latitude = buf.double
+            val longitude = buf.double
+            val altitude = buf.double
+            val hasLocation = buf.long
+            return PhotoOptions(flash, qualityPrioritization, enableShutterSound, skipMetadata, enableAutoRedEyeReduction, latitude, longitude, altitude, hasLocation)
         }
         @JvmStatic fun decode(bytes: ByteArray): PhotoOptions {
             val buf = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -300,10 +327,60 @@ data class PhotoOptions(val flash: Long, val qualityPrioritization: Long, val en
         writeInt(enableShutterSound)
         writeInt(skipMetadata)
         writeInt(enableAutoRedEyeReduction)
+        writeDouble(latitude)
+        writeDouble(longitude)
+        writeDouble(altitude)
+        writeInt(hasLocation)
     }
 
     fun encode(): ByteArray {
-        val out = java.io.ByteArrayOutputStream(40)
+        val out = java.io.ByteArrayOutputStream(72)
+        val buf = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        writeFieldsTo(out, buf)
+        return out.toByteArray()
+    }
+}
+
+@androidx.annotation.Keep
+data class RecordingOptions(val codec: Long, val fileType: Long, val bitRate: Long, val maxDurationMs: Long, val maxFileSizeBytes: Long, val latitude: Double, val longitude: Double, val altitude: Double, val hasLocation: Long) {
+    companion object {
+        @JvmStatic fun decodeFrom(buf: java.nio.ByteBuffer): RecordingOptions {
+            val codec = buf.long
+            val fileType = buf.long
+            val bitRate = buf.long
+            val maxDurationMs = buf.long
+            val maxFileSizeBytes = buf.long
+            val latitude = buf.double
+            val longitude = buf.double
+            val altitude = buf.double
+            val hasLocation = buf.long
+            return RecordingOptions(codec, fileType, bitRate, maxDurationMs, maxFileSizeBytes, latitude, longitude, altitude, hasLocation)
+        }
+        @JvmStatic fun decode(bytes: ByteArray): RecordingOptions {
+            val buf = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            return decodeFrom(buf)
+        }
+    }
+
+    fun writeFieldsTo(out: java.io.ByteArrayOutputStream, buf: java.nio.ByteBuffer) {
+        fun writeInt(v: Long) { buf.clear(); buf.putLong(v); out.write(buf.array()) }
+        @Suppress("UNUSED_PARAMETER") fun writeInt32(v: Int) { buf.clear(); buf.putInt(v); out.write(buf.array(), 0, 4) }
+        fun writeDouble(v: Double) { buf.clear(); buf.putDouble(v); out.write(buf.array()) }
+        fun writeBool(v: Boolean) { out.write(if (v) 1 else 0) }
+        fun writeString(v: String) { val b = v.toByteArray(Charsets.UTF_8); writeInt32(b.size); out.write(b) }
+        writeInt(codec)
+        writeInt(fileType)
+        writeInt(bitRate)
+        writeInt(maxDurationMs)
+        writeInt(maxFileSizeBytes)
+        writeDouble(latitude)
+        writeDouble(longitude)
+        writeDouble(altitude)
+        writeInt(hasLocation)
+    }
+
+    fun encode(): ByteArray {
+        val out = java.io.ByteArrayOutputStream(72)
         val buf = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         writeFieldsTo(out, buf)
         return out.toByteArray()
@@ -868,91 +945,91 @@ interface HybridNitroCameraSpec {
     fun onActivityAttached(activity: Activity) {}
     fun onActivityDetached() {}
 
-    // source: nitro_camera.native.dart:283
+    // source: nitro_camera.native.dart:330
     suspend fun requestCameraPermission(): Long
-    // source: nitro_camera.native.dart:286
+    // source: nitro_camera.native.dart:333
     fun getCameraPermissionStatus(): Long
-    // source: nitro_camera.native.dart:291
+    // source: nitro_camera.native.dart:338
     suspend fun requestMicrophonePermission(): Long
-    // source: nitro_camera.native.dart:294
+    // source: nitro_camera.native.dart:341
     fun getMicrophonePermissionStatus(): Long
-    // source: nitro_camera.native.dart:299
+    // source: nitro_camera.native.dart:346
     suspend fun getAvailableCameraDevicesJson(): String
-    // source: nitro_camera.native.dart:302
+    // source: nitro_camera.native.dart:349
     fun getAvailableCameraDevices(): List<CameraDevice>
-    // source: nitro_camera.native.dart:305
+    // source: nitro_camera.native.dart:352
     fun getDeviceCount(): Long
-    // source: nitro_camera.native.dart:306
+    // source: nitro_camera.native.dart:353
     fun getDevice(index: Long): CameraDevice
-    // source: nitro_camera.native.dart:322
-    suspend fun openCamera(deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long
-    // source: nitro_camera.native.dart:331
-    suspend fun closeCamera(textureId: Long): Unit
-    // source: nitro_camera.native.dart:334
-    fun startPreview(textureId: Long): Unit
-    // source: nitro_camera.native.dart:337
-    fun stopPreview(textureId: Long): Unit
-    // source: nitro_camera.native.dart:342
-    fun setZoom(textureId: Long, zoom: Double): Unit
-    // source: nitro_camera.native.dart:345
-    fun setFocusPoint(textureId: Long, x: Double, y: Double): Unit
-    // source: nitro_camera.native.dart:348
-    fun setAutoFocus(textureId: Long, mode: Long): Unit
-    // source: nitro_camera.native.dart:351
-    fun setExposure(textureId: Long, value: Double): Unit
-    // source: nitro_camera.native.dart:354
-    fun setFlash(textureId: Long, mode: Long): Unit
-    // source: nitro_camera.native.dart:357
-    fun setTorch(textureId: Long, enabled: Long): Unit
-    // source: nitro_camera.native.dart:361
-    fun setWhiteBalance(textureId: Long, temperature: Long): Unit
-    // source: nitro_camera.native.dart:364
-    fun setHdr(textureId: Long, enabled: Long): Unit
     // source: nitro_camera.native.dart:369
-    suspend fun takePhoto(textureId: Long): PhotoResult
-    // source: nitro_camera.native.dart:374
-    suspend fun startVideoRecording(textureId: Long, outputPath: String): Unit
-    // source: nitro_camera.native.dart:377
-    suspend fun stopVideoRecording(textureId: Long): RecordingResult
-    // source: nitro_camera.native.dart:380
-    fun pauseRecording(textureId: Long): Unit
-    // source: nitro_camera.native.dart:383
-    fun resumeRecording(textureId: Long): Unit
-    // source: nitro_camera.native.dart:386
-    fun cancelRecording(textureId: Long): Unit
-    // source: nitro_camera.native.dart:396
-    fun enableFrameProcessing(textureId: Long, enabled: Long): Unit
-    // source: nitro_camera.native.dart:400
-    fun setFrameFormat(textureId: Long, format: Long): Unit
+    suspend fun openCamera(deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long
+    // source: nitro_camera.native.dart:378
+    suspend fun closeCamera(textureId: Long): Unit
+    // source: nitro_camera.native.dart:381
+    fun startPreview(textureId: Long): Unit
+    // source: nitro_camera.native.dart:384
+    fun stopPreview(textureId: Long): Unit
+    // source: nitro_camera.native.dart:389
+    fun setZoom(textureId: Long, zoom: Double): Unit
+    // source: nitro_camera.native.dart:392
+    fun setFocusPoint(textureId: Long, x: Double, y: Double): Unit
+    // source: nitro_camera.native.dart:395
+    fun setAutoFocus(textureId: Long, mode: Long): Unit
+    // source: nitro_camera.native.dart:398
+    fun setExposure(textureId: Long, value: Double): Unit
+    // source: nitro_camera.native.dart:401
+    fun setFlash(textureId: Long, mode: Long): Unit
     // source: nitro_camera.native.dart:404
-    fun setSamplingRate(textureId: Long, samplingRate: Long): Unit
+    fun setTorch(textureId: Long, enabled: Long): Unit
+    // source: nitro_camera.native.dart:408
+    fun setWhiteBalance(textureId: Long, temperature: Long): Unit
     // source: nitro_camera.native.dart:411
-    fun setFilterShader(textureId: Long, shaderSource: String): Unit
+    fun setHdr(textureId: Long, enabled: Long): Unit
     // source: nitro_camera.native.dart:416
-    fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer): Unit
-    // source: nitro_camera.native.dart:429
-    suspend fun configure(textureId: Long, config: CameraConfig): ResolvedConfig
-    // source: nitro_camera.native.dart:433
-    fun getSessionStateJson(textureId: Long): String
-    // source: nitro_camera.native.dart:436
-    fun setVideoStabilization(textureId: Long, mode: Long): Unit
-    // source: nitro_camera.native.dart:439
-    fun setLowLightBoost(textureId: Long, enabled: Long): Unit
-    // source: nitro_camera.native.dart:442
-    fun setTorchLevel(textureId: Long, level: Double): Unit
-    // source: nitro_camera.native.dart:445
-    fun lockExposure(textureId: Long, locked: Long): Unit
-    // source: nitro_camera.native.dart:448
-    fun lockFocus(textureId: Long, locked: Long): Unit
+    suspend fun takePhoto(textureId: Long): PhotoResult
+    // source: nitro_camera.native.dart:421
+    suspend fun startVideoRecording(textureId: Long, outputPath: String, options: RecordingOptions): Unit
+    // source: nitro_camera.native.dart:428
+    suspend fun stopVideoRecording(textureId: Long): RecordingResult
+    // source: nitro_camera.native.dart:431
+    fun pauseRecording(textureId: Long): Unit
+    // source: nitro_camera.native.dart:434
+    fun resumeRecording(textureId: Long): Unit
+    // source: nitro_camera.native.dart:437
+    fun cancelRecording(textureId: Long): Unit
+    // source: nitro_camera.native.dart:447
+    fun enableFrameProcessing(textureId: Long, enabled: Long): Unit
     // source: nitro_camera.native.dart:451
+    fun setFrameFormat(textureId: Long, format: Long): Unit
+    // source: nitro_camera.native.dart:455
+    fun setSamplingRate(textureId: Long, samplingRate: Long): Unit
+    // source: nitro_camera.native.dart:462
+    fun setFilterShader(textureId: Long, shaderSource: String): Unit
+    // source: nitro_camera.native.dart:467
+    fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer): Unit
+    // source: nitro_camera.native.dart:480
+    suspend fun configure(textureId: Long, config: CameraConfig): ResolvedConfig
+    // source: nitro_camera.native.dart:484
+    fun getSessionStateJson(textureId: Long): String
+    // source: nitro_camera.native.dart:487
+    fun setVideoStabilization(textureId: Long, mode: Long): Unit
+    // source: nitro_camera.native.dart:490
+    fun setLowLightBoost(textureId: Long, enabled: Long): Unit
+    // source: nitro_camera.native.dart:493
+    fun setTorchLevel(textureId: Long, level: Double): Unit
+    // source: nitro_camera.native.dart:496
+    fun lockExposure(textureId: Long, locked: Long): Unit
+    // source: nitro_camera.native.dart:499
+    fun lockFocus(textureId: Long, locked: Long): Unit
+    // source: nitro_camera.native.dart:502
     fun lockWhiteBalance(textureId: Long, locked: Long): Unit
-    // source: nitro_camera.native.dart:454
+    // source: nitro_camera.native.dart:505
     fun setTargetOrientation(textureId: Long, degrees: Long): Unit
-    // source: nitro_camera.native.dart:458
+    // source: nitro_camera.native.dart:509
     suspend fun takePhotoWithOptions(textureId: Long, options: PhotoOptions): PhotoResult
-    // source: nitro_camera.native.dart:463
+    // source: nitro_camera.native.dart:514
     suspend fun takeSnapshot(textureId: Long): PhotoResult
-    // source: nitro_camera.native.dart:468
+    // source: nitro_camera.native.dart:519
     fun reset(): Unit
     val frameStream: Flow<CameraFrame>
     val eventStream: Flow<CameraEvent>
@@ -1005,38 +1082,38 @@ object NitroCameraJniBridge {
         _implementations.values.forEach { it.onActivityDetached() }
     }
 
-    // source: nitro_camera.native.dart:283
+    // source: nitro_camera.native.dart:330
     @JvmStatic fun requestCameraPermission_call(instanceId: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.requestCameraPermission() }
         }).get()
     }
-    // source: nitro_camera.native.dart:286
+    // source: nitro_camera.native.dart:333
     @JvmStatic fun getCameraPermissionStatus_call(instanceId: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return impl.getCameraPermissionStatus()
     }
-    // source: nitro_camera.native.dart:291
+    // source: nitro_camera.native.dart:338
     @JvmStatic fun requestMicrophonePermission_call(instanceId: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.requestMicrophonePermission() }
         }).get()
     }
-    // source: nitro_camera.native.dart:294
+    // source: nitro_camera.native.dart:341
     @JvmStatic fun getMicrophonePermissionStatus_call(instanceId: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return impl.getMicrophonePermissionStatus()
     }
-    // source: nitro_camera.native.dart:299
+    // source: nitro_camera.native.dart:346
     @JvmStatic fun getAvailableCameraDevicesJson_call(instanceId: Long): String {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.getAvailableCameraDevicesJson() }
         }).get()
     }
-    // source: nitro_camera.native.dart:302
+    // source: nitro_camera.native.dart:349
     @JvmStatic fun getAvailableCameraDevices_call(instanceId: Long): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = impl.getAvailableCameraDevices()
@@ -1060,200 +1137,200 @@ object NitroCameraJniBridge {
         lenBuf.putInt(payload.size)
         return lenBuf.array() + payload
     }
-    // source: nitro_camera.native.dart:305
+    // source: nitro_camera.native.dart:352
     @JvmStatic fun getDeviceCount_call(instanceId: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return impl.getDeviceCount()
     }
-    // source: nitro_camera.native.dart:306
+    // source: nitro_camera.native.dart:353
     @JvmStatic fun getDevice_call(instanceId: Long, index: Long): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = impl.getDevice(index)
         return result.encode()
     }
-    // source: nitro_camera.native.dart:322
+    // source: nitro_camera.native.dart:369
     @JvmStatic fun openCamera_call(instanceId: Long, deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long): Long {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.openCamera(deviceId, width, height, fps, enableAudio) }
         }).get()
     }
-    // source: nitro_camera.native.dart:331
+    // source: nitro_camera.native.dart:378
     @JvmStatic fun closeCamera_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.closeCamera(textureId) }
         }).get()
     }
-    // source: nitro_camera.native.dart:334
+    // source: nitro_camera.native.dart:381
     @JvmStatic fun startPreview_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.startPreview(textureId)
     }
-    // source: nitro_camera.native.dart:337
+    // source: nitro_camera.native.dart:384
     @JvmStatic fun stopPreview_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.stopPreview(textureId)
     }
-    // source: nitro_camera.native.dart:342
+    // source: nitro_camera.native.dart:389
     @JvmStatic fun setZoom_call(instanceId: Long, textureId: Long, zoom: Double): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setZoom(textureId, zoom)
     }
-    // source: nitro_camera.native.dart:345
+    // source: nitro_camera.native.dart:392
     @JvmStatic fun setFocusPoint_call(instanceId: Long, textureId: Long, x: Double, y: Double): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setFocusPoint(textureId, x, y)
     }
-    // source: nitro_camera.native.dart:348
+    // source: nitro_camera.native.dart:395
     @JvmStatic fun setAutoFocus_call(instanceId: Long, textureId: Long, mode: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setAutoFocus(textureId, mode)
     }
-    // source: nitro_camera.native.dart:351
+    // source: nitro_camera.native.dart:398
     @JvmStatic fun setExposure_call(instanceId: Long, textureId: Long, value: Double): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setExposure(textureId, value)
     }
-    // source: nitro_camera.native.dart:354
+    // source: nitro_camera.native.dart:401
     @JvmStatic fun setFlash_call(instanceId: Long, textureId: Long, mode: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setFlash(textureId, mode)
     }
-    // source: nitro_camera.native.dart:357
+    // source: nitro_camera.native.dart:404
     @JvmStatic fun setTorch_call(instanceId: Long, textureId: Long, enabled: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setTorch(textureId, enabled)
     }
-    // source: nitro_camera.native.dart:361
+    // source: nitro_camera.native.dart:408
     @JvmStatic fun setWhiteBalance_call(instanceId: Long, textureId: Long, temperature: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setWhiteBalance(textureId, temperature)
     }
-    // source: nitro_camera.native.dart:364
+    // source: nitro_camera.native.dart:411
     @JvmStatic fun setHdr_call(instanceId: Long, textureId: Long, enabled: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setHdr(textureId, enabled)
     }
-    // source: nitro_camera.native.dart:369
+    // source: nitro_camera.native.dart:416
     @JvmStatic fun takePhoto_call(instanceId: Long, textureId: Long): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.takePhoto(textureId) } }).get()
         return result.encode()
     }
-    // source: nitro_camera.native.dart:374
-    @JvmStatic fun startVideoRecording_call(instanceId: Long, textureId: Long, outputPath: String): Unit {
+    // source: nitro_camera.native.dart:421
+    @JvmStatic fun startVideoRecording_call(instanceId: Long, textureId: Long, outputPath: String, options: RecordingOptions): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
-            runBlocking { impl.startVideoRecording(textureId, outputPath) }
+            runBlocking { impl.startVideoRecording(textureId, outputPath, options) }
         }).get()
     }
-    // source: nitro_camera.native.dart:377
+    // source: nitro_camera.native.dart:428
     @JvmStatic fun stopVideoRecording_call(instanceId: Long, textureId: Long): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.stopVideoRecording(textureId) } }).get()
         return result.encode()
     }
-    // source: nitro_camera.native.dart:380
+    // source: nitro_camera.native.dart:431
     @JvmStatic fun pauseRecording_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.pauseRecording(textureId)
     }
-    // source: nitro_camera.native.dart:383
+    // source: nitro_camera.native.dart:434
     @JvmStatic fun resumeRecording_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.resumeRecording(textureId)
     }
-    // source: nitro_camera.native.dart:386
+    // source: nitro_camera.native.dart:437
     @JvmStatic fun cancelRecording_call(instanceId: Long, textureId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.cancelRecording(textureId)
     }
-    // source: nitro_camera.native.dart:396
+    // source: nitro_camera.native.dart:447
     @JvmStatic fun enableFrameProcessing_call(instanceId: Long, textureId: Long, enabled: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.enableFrameProcessing(textureId, enabled)
     }
-    // source: nitro_camera.native.dart:400
+    // source: nitro_camera.native.dart:451
     @JvmStatic fun setFrameFormat_call(instanceId: Long, textureId: Long, format: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setFrameFormat(textureId, format)
     }
-    // source: nitro_camera.native.dart:404
+    // source: nitro_camera.native.dart:455
     @JvmStatic fun setSamplingRate_call(instanceId: Long, textureId: Long, samplingRate: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setSamplingRate(textureId, samplingRate)
     }
-    // source: nitro_camera.native.dart:411
+    // source: nitro_camera.native.dart:462
     @JvmStatic fun setFilterShader_call(instanceId: Long, textureId: Long, shaderSource: String): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setFilterShader(textureId, shaderSource)
     }
-    // source: nitro_camera.native.dart:416
+    // source: nitro_camera.native.dart:467
     @JvmStatic fun updateOverlay_call(instanceId: Long, textureId: Long, overlayData: java.nio.ByteBuffer): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.updateOverlay(textureId, overlayData)
     }
-    // source: nitro_camera.native.dart:429
+    // source: nitro_camera.native.dart:480
     @JvmStatic fun configure_call(instanceId: Long, textureId: Long, config: CameraConfig): ResolvedConfig {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return _asyncExecutor.submit(java.util.concurrent.Callable {
             runBlocking { impl.configure(textureId, config) }
         }).get()
     }
-    // source: nitro_camera.native.dart:433
+    // source: nitro_camera.native.dart:484
     @JvmStatic fun getSessionStateJson_call(instanceId: Long, textureId: Long): String {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         return impl.getSessionStateJson(textureId)
     }
-    // source: nitro_camera.native.dart:436
+    // source: nitro_camera.native.dart:487
     @JvmStatic fun setVideoStabilization_call(instanceId: Long, textureId: Long, mode: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setVideoStabilization(textureId, mode)
     }
-    // source: nitro_camera.native.dart:439
+    // source: nitro_camera.native.dart:490
     @JvmStatic fun setLowLightBoost_call(instanceId: Long, textureId: Long, enabled: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setLowLightBoost(textureId, enabled)
     }
-    // source: nitro_camera.native.dart:442
+    // source: nitro_camera.native.dart:493
     @JvmStatic fun setTorchLevel_call(instanceId: Long, textureId: Long, level: Double): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setTorchLevel(textureId, level)
     }
-    // source: nitro_camera.native.dart:445
+    // source: nitro_camera.native.dart:496
     @JvmStatic fun lockExposure_call(instanceId: Long, textureId: Long, locked: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.lockExposure(textureId, locked)
     }
-    // source: nitro_camera.native.dart:448
+    // source: nitro_camera.native.dart:499
     @JvmStatic fun lockFocus_call(instanceId: Long, textureId: Long, locked: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.lockFocus(textureId, locked)
     }
-    // source: nitro_camera.native.dart:451
+    // source: nitro_camera.native.dart:502
     @JvmStatic fun lockWhiteBalance_call(instanceId: Long, textureId: Long, locked: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.lockWhiteBalance(textureId, locked)
     }
-    // source: nitro_camera.native.dart:454
+    // source: nitro_camera.native.dart:505
     @JvmStatic fun setTargetOrientation_call(instanceId: Long, textureId: Long, degrees: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.setTargetOrientation(textureId, degrees)
     }
-    // source: nitro_camera.native.dart:458
+    // source: nitro_camera.native.dart:509
     @JvmStatic fun takePhotoWithOptions_call(instanceId: Long, textureId: Long, options: PhotoOptions): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.takePhotoWithOptions(textureId, options) } }).get()
         return result.encode()
     }
-    // source: nitro_camera.native.dart:463
+    // source: nitro_camera.native.dart:514
     @JvmStatic fun takeSnapshot_call(instanceId: Long, textureId: Long): ByteArray {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         val result = _asyncExecutor.submit(java.util.concurrent.Callable { runBlocking { impl.takeSnapshot(textureId) } }).get()
         return result.encode()
     }
-    // source: nitro_camera.native.dart:468
+    // source: nitro_camera.native.dart:519
     @JvmStatic fun reset_call(instanceId: Long): Unit {
         val impl = _implementations[instanceId] ?: throw IllegalStateException("NitroCamera instance $instanceId not registered")
         impl.reset()

@@ -31,3 +31,4 @@ export 'src/processing/frame_processor.dart';
 // Widgets.
 export 'src/widgets/camera_preview.dart';
 export 'src/widgets/camera_view.dart';
+export 'src/widgets/fps_graph.dart';
