@@ -54,24 +54,18 @@ class NitraCameraSession(
             ?: throw IllegalStateException("No stream configuration map")
         val sizes = map.getOutputSizes(SurfaceTexture::class.java)
 
-        // Camera output sizes are LANDSCAPE; the requested width/height are the
-        // (portrait) screen dims. Compare orientation-independently (long/short)
-        // and CAP the preview to ~1080p. Picking the multi-MP photo size for the
-        // preview (the old bug) tanked GL/preview perf AND, being 4:3, stretched a
-        // 16:9-ish screen.
-        val targetLong = maxOf(width, height).toDouble()
-        val targetShort = maxOf(1, minOf(width, height)).toDouble()
-        val targetAspect = targetLong / targetShort
-        val maxPreviewDim = 1920
+        // Find size that matches requested aspect ratio best, or closest matching size.
+        // (The preview STRETCH is fixed on the Flutter side — the native GL renderer
+        // already center-crops — so we keep this proven selection to avoid breaking
+        // the device's supported stream combination.)
+        val targetAspect = width.toFloat() / height.toFloat()
 
-        (sizes.filter { maxOf(it.width, it.height) <= maxPreviewDim }
-            .ifEmpty { sizes.toList() })
-            .minByOrNull { s ->
-                val aspect = maxOf(s.width, s.height).toDouble() / minOf(s.width, s.height)
-                val aspectDiff = Math.abs(aspect - targetAspect)
-                // Aspect dominates; among equal aspects prefer the largest.
-                aspectDiff * 1_000_000.0 - (s.width.toLong() * s.height)
-            } ?: sizes[0]
+        sizes.minByOrNull { s ->
+            val aspect = s.width.toFloat() / s.height.toFloat()
+            val aspectDiff = Math.abs(aspect - targetAspect)
+            val areaDiff = Math.abs(s.width * s.height - width * height)
+            aspectDiff * 1000000 + areaDiff
+        } ?: sizes[0]
     }
 
     private val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
