@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
@@ -9,9 +10,10 @@ import '../sheets/settings_sheet.dart';
 
 /// Quick-settings dropdown anchored under the top icon strip (opened by the
 /// tune icon or the config caption): segmented rows for RESOLUTION
-/// (720P/1080P + 4K when the sensor has a UHD format), FPS (30/60) and ASPECT
-/// (FULL/16:9/4:3/1:1), plus the ALL SETTINGS entry that used to float as a
-/// separate pill.
+/// (720P/1080P + 4K when the sensor has a UHD format), FPS (30/60), ASPECT
+/// (FULL/16:9/4:3/1:1) and the promoted high-value settings (white-balance
+/// presets, HDR, stabilization, geotag, video codec), plus the ALL SETTINGS
+/// entry that used to float as a separate pill.
 class QuickPanel extends StatelessWidget {
   const QuickPanel({super.key});
 
@@ -54,10 +56,17 @@ class QuickPanel extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+            // Cap the panel height so the promoted rows can never overflow a
+            // small screen — the panel scrolls instead of jumping the layout.
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.55,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                 // RESOLUTION — options derive from the active device's formats.
                 Watch((context) {
                   final w = cameraStore.width.value;
@@ -97,77 +106,195 @@ class QuickPanel extends StatelessWidget {
                   );
                 }),
 
-                // ASPECT ratio of the preview viewport.
-                Watch((context) {
-                  final ar = cameraStore.selectedAspectRatio.value;
-                  bool near(double v) => ar != null && (ar - v).abs() < 0.01;
-                  return _PanelRow(
-                    label: 'ASPECT',
-                    segments: [
-                      (
-                        'FULL',
-                        ar == null,
-                        () => cameraStore.selectedAspectRatio.value = null,
-                      ),
-                      (
-                        '16:9',
-                        near(16 / 9),
-                        () => cameraStore.selectedAspectRatio.value = 16 / 9,
-                      ),
-                      (
-                        '4:3',
-                        near(4 / 3),
-                        () => cameraStore.selectedAspectRatio.value = 4 / 3,
-                      ),
-                      (
-                        '1:1',
-                        near(1.0),
-                        () => cameraStore.selectedAspectRatio.value = 1.0,
-                      ),
-                    ],
-                  );
-                }),
-
-                const SizedBox(height: 4),
-                Divider(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  height: 12,
-                ),
-
-                // ALL SETTINGS — the full PRO/CONFIG sheet, relocated here from
-                // the old floating pill.
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    cameraStore.quickSettingsOpen.value = false;
-                    SettingsSheet.show(context);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.settings_rounded,
-                          color: Colors.cyanAccent,
-                          size: 15,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'ALL SETTINGS',
-                          style: TextStyle(
-                            color: Colors.cyanAccent.withValues(alpha: 0.95),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.6,
+                    // ASPECT ratio of the preview viewport.
+                    Watch((context) {
+                      final ar = cameraStore.selectedAspectRatio.value;
+                      bool near(double v) =>
+                          ar != null && (ar - v).abs() < 0.01;
+                      return _PanelRow(
+                        label: 'ASPECT',
+                        segments: [
+                          (
+                            'FULL',
+                            ar == null,
+                            () => cameraStore.selectedAspectRatio.value = null,
                           ),
-                        ),
-                      ],
+                          (
+                            '16:9',
+                            near(16 / 9),
+                            () =>
+                                cameraStore.selectedAspectRatio.value = 16 / 9,
+                          ),
+                          (
+                            '4:3',
+                            near(4 / 3),
+                            () => cameraStore.selectedAspectRatio.value = 4 / 3,
+                          ),
+                          (
+                            '1:1',
+                            near(1.0),
+                            () => cameraStore.selectedAspectRatio.value = 1.0,
+                          ),
+                        ],
+                      );
+                    }),
+
+                    Divider(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      height: 12,
                     ),
-                  ),
+
+                    // ── Promoted settings (also available in ALL SETTINGS) ──
+
+                    // WHITE BALANCE presets via kelvin values (0 = auto).
+                    Watch((context) {
+                      final k = cameraStore.whiteBalanceKelvin.value;
+                      bool near(int v) => (k - v).abs() < 200;
+                      return _PanelRow(
+                        label: 'WHITE BAL',
+                        segments: [
+                          ('AUTO', k == 0, () => cameraStore.setWhiteBalance(0)),
+                          (
+                            'INCAND',
+                            near(3000),
+                            () => cameraStore.setWhiteBalance(3000),
+                          ),
+                          (
+                            'DAYLIGHT',
+                            near(5500),
+                            () => cameraStore.setWhiteBalance(5500),
+                          ),
+                          (
+                            'CLOUDY',
+                            near(6500),
+                            () => cameraStore.setWhiteBalance(6500),
+                          ),
+                        ],
+                      );
+                    }),
+
+                    // HDR.
+                    Watch((context) {
+                      final on = cameraStore.hdrEnabled.value;
+                      return _PanelRow(
+                        label: 'HDR',
+                        segments: [
+                          ('OFF', !on, () => cameraStore.setHdr(false)),
+                          ('ON', on, () => cameraStore.setHdr(true)),
+                        ],
+                      );
+                    }),
+
+                    // VIDEO STABILIZATION.
+                    Watch((context) {
+                      final v = cameraStore.videoStabilization.value;
+                      return _PanelRow(
+                        label: 'STABILIZE',
+                        segments: [
+                          (
+                            'OFF',
+                            v == 0,
+                            () => cameraStore.setVideoStabilization(0),
+                          ),
+                          (
+                            'STD',
+                            v == 1,
+                            () => cameraStore.setVideoStabilization(1),
+                          ),
+                          (
+                            'CINE',
+                            v == 2,
+                            () => cameraStore.setVideoStabilization(2),
+                          ),
+                        ],
+                      );
+                    }),
+
+                    // GEOTAG captured media.
+                    Watch((context) {
+                      final on = cameraStore.geotagEnabled.value;
+                      return _PanelRow(
+                        label: 'GEOTAG',
+                        segments: [
+                          (
+                            'OFF',
+                            !on,
+                            () => cameraStore.geotagEnabled.value = false,
+                          ),
+                          (
+                            'ON',
+                            on,
+                            () => cameraStore.geotagEnabled.value = true,
+                          ),
+                        ],
+                      );
+                    }),
+
+                    // VIDEO CODEC.
+                    Watch((context) {
+                      final codec = cameraStore.videoCodec.value;
+                      return _PanelRow(
+                        label: 'CODEC',
+                        segments: [
+                          (
+                            'H.264',
+                            codec == VideoCodec.h264,
+                            () =>
+                                cameraStore.videoCodec.value = VideoCodec.h264,
+                          ),
+                          (
+                            'H.265',
+                            codec == VideoCodec.hevc,
+                            () =>
+                                cameraStore.videoCodec.value = VideoCodec.hevc,
+                          ),
+                        ],
+                      );
+                    }),
+
+                    const SizedBox(height: 4),
+                    Divider(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      height: 12,
+                    ),
+
+                    // ALL SETTINGS — the full PRO/CONFIG sheet, relocated here
+                    // from the old floating pill.
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        cameraStore.quickSettingsOpen.value = false;
+                        SettingsSheet.show(context);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.settings_rounded,
+                              color: Colors.cyanAccent,
+                              size: 15,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'ALL SETTINGS',
+                              style: TextStyle(
+                                color:
+                                    Colors.cyanAccent.withValues(alpha: 0.95),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

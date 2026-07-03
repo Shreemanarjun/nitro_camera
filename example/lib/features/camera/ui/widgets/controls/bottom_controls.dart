@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:io';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import '../../../../gallery/ui/gallery_screen.dart';
 import '../../../state/camera_store.dart';
+import '../common/glass_tooltip.dart';
 
 class BottomControls extends StatelessWidget {
   const BottomControls({super.key});
@@ -116,75 +116,88 @@ class BottomControls extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    GestureDetector(
-                      onTap: () => _showGallery(context),
-                      child: Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.white10,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white24, width: 2),
-                          image:
-                              lastCapturedPath != null &&
-                                  !isLastCapturedVideo &&
-                                  !lastCapturedPath.toLowerCase().endsWith(
-                                    ".mp4",
-                                  )
-                              ? DecorationImage(
-                                  image: FileImage(File(lastCapturedPath)),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                        ),
-                        child: lastCapturedPath != null && isLastCapturedVideo
-                            ? const Icon(
-                                Icons.play_circle_fill,
-                                color: Colors.white,
-                                size: 28,
-                              )
-                            : (lastCapturedPath == null
-                                  ? const Icon(
-                                      Icons.photo_library_outlined,
-                                      color: Colors.white12,
-                                      size: 24,
+                    GlassTooltip(
+                      message: 'Gallery',
+                      preferBelow: false,
+                      child: GestureDetector(
+                        onTap: () => openGallery(context),
+                        child: Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white24, width: 2),
+                            image:
+                                lastCapturedPath != null &&
+                                    !isLastCapturedVideo &&
+                                    !lastCapturedPath.toLowerCase().endsWith(
+                                      ".mp4",
                                     )
-                                  : null),
+                                ? DecorationImage(
+                                    image: FileImage(File(lastCapturedPath)),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                          ),
+                          child:
+                              lastCapturedPath != null && isLastCapturedVideo
+                              ? const Icon(
+                                  Icons.play_circle_fill,
+                                  color: Colors.white,
+                                  size: 28,
+                                )
+                              : (lastCapturedPath == null
+                                    ? const Icon(
+                                        Icons.photo_library_outlined,
+                                        color: Colors.white12,
+                                        size: 24,
+                                      )
+                                    : null),
+                        ),
                       ),
                     ),
 
-                    GestureDetector(
-                      onTap: isRunning
-                          ? () {
-                              HapticFeedback.mediumImpact();
-                              if (mode == 'PHOTO' || mode == 'SCANNER') {
-                                cameraStore.takePhoto();
-                              } else if (mode == 'VIDEO') {
-                                cameraStore.toggleRecording();
+                    GlassTooltip(
+                      message: mode == 'VIDEO'
+                          ? (isRecording ? 'Stop recording' : 'Record video')
+                          : 'Take photo',
+                      preferBelow: false,
+                      child: GestureDetector(
+                        onTap: isRunning
+                            ? () {
+                                HapticFeedback.mediumImpact();
+                                if (mode == 'PHOTO' || mode == 'SCANNER') {
+                                  cameraStore.takePhoto();
+                                } else if (mode == 'VIDEO') {
+                                  cameraStore.toggleRecording();
+                                }
                               }
-                            }
-                          : null,
-                      child: Container(
-                        width: 82,
-                        height: 82,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isRecording ? Colors.redAccent.withValues(alpha: 0.3) : Colors.white,
-                            width: 4,
-                          ),
-                        ),
-                        child: Center(
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            width: isRecording ? 30 : 64,
-                            height: isRecording ? 30 : 64,
-                            decoration: BoxDecoration(
-                              color: (mode == 'VIDEO' || isRecording)
-                                  ? Colors.redAccent
+                            : null,
+                        child: Container(
+                          width: 82,
+                          height: 82,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isRecording
+                                  ? Colors.redAccent.withValues(alpha: 0.3)
                                   : Colors.white,
-                              borderRadius: BorderRadius.circular(
-                                isRecording ? 8 : 40,
+                              width: 4,
+                            ),
+                          ),
+                          child: Center(
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              width: isRecording ? 30 : 64,
+                              height: isRecording ? 30 : 64,
+                              decoration: BoxDecoration(
+                                color: (mode == 'VIDEO' || isRecording)
+                                    ? Colors.redAccent
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(
+                                  isRecording ? 8 : 40,
+                                ),
                               ),
                             ),
                           ),
@@ -208,14 +221,6 @@ class BottomControls extends StatelessWidget {
     final s = (seconds % 60).toString().padLeft(2, '0');
     return "$m:$s";
   }
-
-  void _showGallery(BuildContext context) {
-    showGeneralDialog(
-      context: context,
-      barrierColor: Colors.black,
-      pageBuilder: (ctx, _, _) => _GalleryView(),
-    );
-  }
 }
 
 /// Camera-flip control: each tap spins the glyph a half turn in sync with the
@@ -234,190 +239,39 @@ class _FlipCameraButtonState extends State<_FlipCameraButton> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.enabled
-          ? () {
-              HapticFeedback.lightImpact();
-              setState(() => _turns += 0.5);
-              cameraStore.toggleCamera();
-            }
-          : null,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 200),
-        opacity: widget.enabled ? 1.0 : 0.55,
-        child: Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: AnimatedRotation(
-            turns: _turns,
-            duration: const Duration(milliseconds: 550),
-            curve: Curves.easeInOutCubic,
-            child: const Icon(
-              Icons.sync_rounded,
-              color: Colors.white,
-              size: 28,
+    return GlassTooltip(
+      message: 'Switch camera',
+      preferBelow: false,
+      child: GestureDetector(
+        onTap: widget.enabled
+            ? () {
+                HapticFeedback.lightImpact();
+                setState(() => _turns += 0.5);
+                cameraStore.toggleCamera();
+              }
+            : null,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 200),
+          opacity: widget.enabled ? 1.0 : 0.55,
+          child: Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GalleryView extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Watch((context) {
-      final items = cameraStore.capturedMedia.value.reversed.toList();
-
-      return Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.close, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-          ),
-          title: const Text(
-            "GALLERY",
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-            ),
-          ),
-        ),
-        body: items.isEmpty
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.photo_library_rounded,
-                      color: Colors.white12,
-                      size: 60,
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      "NO MEDIA YET",
-                      style: TextStyle(color: Colors.white24, fontSize: 13),
-                    ),
-                  ],
-                ),
-              )
-            : GridView.builder(
-                padding: const EdgeInsets.all(2),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 2,
-                  mainAxisSpacing: 2,
-                ),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return GestureDetector(
-                    onTap: () => _openMedia(context, item),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        item.isVideo || item.path.toLowerCase().endsWith(".mp4")
-                            ? Container(
-                                color: Colors.white10,
-                                child: const Icon(
-                                  Icons.videocam,
-                                  color: Colors.white24,
-                                ),
-                              )
-                            : Image.file(File(item.path), fit: BoxFit.cover),
-                        if (item.isVideo)
-                          const Center(
-                            child: Icon(
-                              Icons.play_circle_outline,
-                              color: Colors.white70,
-                              size: 30,
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
+            child: AnimatedRotation(
+              turns: _turns,
+              duration: const Duration(milliseconds: 550),
+              curve: Curves.easeInOutCubic,
+              child: const Icon(
+                Icons.sync_rounded,
+                color: Colors.white,
+                size: 28,
               ),
-      );
-    });
-  }
-
-  void _openMedia(BuildContext context, ({String path, bool isVideo}) item) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => _FullscreenView(item: item)),
-    );
-  }
-}
-
-class _FullscreenView extends StatefulWidget {
-  final ({String path, bool isVideo}) item;
-  const _FullscreenView({required this.item});
-
-  @override
-  State<_FullscreenView> createState() => _FullscreenViewState();
-}
-
-class _FullscreenViewState extends State<_FullscreenView> {
-  Player? _player;
-  VideoController? _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    // Guard against empty / missing files so a failed capture can't crash the
-    // player with a FileNotFound on "/".
-    if (widget.item.isVideo &&
-        widget.item.path.isNotEmpty &&
-        File(widget.item.path).existsSync()) {
-      final player = Player();
-      _player = player;
-      _controller = VideoController(player);
-      player
-        ..setPlaylistMode(PlaylistMode.loop)
-        ..open(Media(widget.item.path));
-    }
-  }
-
-  @override
-  void dispose() {
-    _player?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.white,
+            ),
           ),
-          onPressed: () => Navigator.pop(context),
         ),
-      ),
-      body: Center(
-        child:
-            (widget.item.isVideo ||
-                widget.item.path.toLowerCase().endsWith(".mp4"))
-            ? (_controller != null
-                  ? Video(controller: _controller!, fit: BoxFit.contain)
-                  : const CircularProgressIndicator(color: Colors.cyanAccent))
-            : Image.file(File(widget.item.path)),
       ),
     );
   }

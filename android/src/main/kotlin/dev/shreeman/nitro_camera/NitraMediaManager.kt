@@ -142,6 +142,24 @@ class NitraMediaManager(
         if (options?.enableShutterSound == 1L) playShutterSound()
         try {
             session.capture(request, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    session: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult,
+                ) {
+                    // Evidence trail for flash debugging: FLASH_STATE_FIRED proves
+                    // the unit actually fired for this still.
+                    val flashState = when (result.get(android.hardware.camera2.CaptureResult.FLASH_STATE)) {
+                        android.hardware.camera2.CaptureResult.FLASH_STATE_FIRED -> "FIRED"
+                        android.hardware.camera2.CaptureResult.FLASH_STATE_PARTIAL -> "PARTIAL"
+                        android.hardware.camera2.CaptureResult.FLASH_STATE_READY -> "READY"
+                        android.hardware.camera2.CaptureResult.FLASH_STATE_CHARGING -> "CHARGING"
+                        android.hardware.camera2.CaptureResult.FLASH_STATE_UNAVAILABLE -> "UNAVAILABLE"
+                        else -> "?"
+                    }
+                    val aeState = result.get(android.hardware.camera2.CaptureResult.CONTROL_AE_STATE)
+                    Log.i("NitroCamera",
+                        "Still capture completed: flashState=$flashState aeState=$aeState " +
+                        "aeMode=${r.get(CaptureRequest.CONTROL_AE_MODE)} flashMode=${r.get(CaptureRequest.FLASH_MODE)}")
+                }
                 override fun onCaptureFailed(session: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
                     Log.e("NitroCamera", "Capture failed: ${f.reason}")
                     onComplete?.invoke() // Fail-safe resumption

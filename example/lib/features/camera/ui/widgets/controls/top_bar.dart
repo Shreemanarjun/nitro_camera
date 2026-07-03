@@ -6,6 +6,7 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
+import '../common/glass_tooltip.dart';
 import 'quick_panel.dart';
 
 /// Top control strip — a single compact, non-scrolling row of icon toggles
@@ -67,6 +68,7 @@ class TopBar extends StatelessWidget {
                   color: color,
                   active: flash != FlashMode.off,
                   activeColor: color,
+                  tooltip: 'Flash: ${flash.name}',
                   onTap: () {
                     final modes = FlashMode.values;
                     cameraStore
@@ -81,6 +83,7 @@ class TopBar extends StatelessWidget {
                 return _StripIcon(
                   icon: Icons.auto_awesome,
                   active: show,
+                  tooltip: 'Filters',
                   onTap: () => cameraStore.showFilters.value = !show,
                 );
               }),
@@ -92,6 +95,7 @@ class TopBar extends StatelessWidget {
                 return _StripIcon(
                   icon: Icons.layers_rounded,
                   active: isPv,
+                  tooltip: 'Preview engine',
                   onTap: () => cameraStore.setPreviewMode(
                     isPv ? PreviewMode.texture : PreviewMode.platformView,
                   ),
@@ -108,6 +112,7 @@ class TopBar extends StatelessWidget {
                 return _StripBadge(
                   label: 'RAW',
                   active: raw,
+                  tooltip: 'RAW capture (DNG)',
                   onTap: () => cameraStore.rawPhoto.value = !raw,
                 );
               }),
@@ -119,6 +124,7 @@ class TopBar extends StatelessWidget {
                 return _StripIcon(
                   icon: Icons.face_retouching_natural,
                   active: on,
+                  tooltip: 'Face detection',
                   onTap: () =>
                       cameraStore.setNativeDetectorMode(on ? '' : 'face'),
                 );
@@ -138,6 +144,7 @@ class TopBar extends StatelessWidget {
                 return _StripIcon(
                   icon: Icons.tune_rounded,
                   active: open,
+                  tooltip: 'Quick settings',
                   onTap: () => cameraStore.quickSettingsOpen.value = !open,
                 );
               }),
@@ -157,32 +164,35 @@ class TopBar extends StatelessWidget {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => cameraStore.quickSettingsOpen.value = !open,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$res · $fps',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.62),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.6,
+        child: GlassTooltip(
+          message: 'Stream configuration',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$res · $fps',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.62),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.6,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 2),
-              AnimatedRotation(
-                turns: open ? 0.5 : 0,
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeOutCubic,
-                child: Icon(
-                  Icons.expand_more_rounded,
-                  size: 13,
-                  color: Colors.white.withValues(alpha: 0.45),
+                const SizedBox(width: 2),
+                AnimatedRotation(
+                  turns: open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  child: Icon(
+                    Icons.expand_more_rounded,
+                    size: 13,
+                    color: Colors.white.withValues(alpha: 0.45),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -196,11 +206,13 @@ class _StripIcon extends StatelessWidget {
   final IconData icon;
   final bool active;
   final VoidCallback onTap;
+  final String tooltip;
   final Color? color;
   final Color? activeColor;
   const _StripIcon({
     required this.icon,
     required this.onTap,
+    required this.tooltip,
     this.active = false,
     this.color,
     this.activeColor,
@@ -209,26 +221,29 @@ class _StripIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = activeColor ?? Colors.cyanAccent;
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active
-              ? accent.withValues(alpha: 0.16)
-              : Colors.transparent,
-        ),
-        child: Icon(
-          icon,
-          size: 20,
-          color: active ? accent : (color ?? Colors.white70),
+    return GlassTooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: active
+                ? accent.withValues(alpha: 0.16)
+                : Colors.transparent,
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: active ? accent : (color ?? Colors.white70),
+          ),
         ),
       ),
     );
@@ -240,46 +255,51 @@ class _StripBadge extends StatelessWidget {
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final String tooltip;
   const _StripBadge({
     required this.label,
     required this.active,
     required this.onTap,
+    required this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 40,
-        height: 40,
-        child: Center(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: active
-                  ? Colors.cyanAccent.withValues(alpha: 0.16)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
+    return GlassTooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
                 color: active
-                    ? Colors.cyanAccent
-                    : Colors.white.withValues(alpha: 0.45),
-                width: 1,
+                    ? Colors.cyanAccent.withValues(alpha: 0.16)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: active
+                      ? Colors.cyanAccent
+                      : Colors.white.withValues(alpha: 0.45),
+                  width: 1,
+                ),
               ),
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: active ? Colors.cyanAccent : Colors.white70,
-                fontSize: 8,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.8,
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: active ? Colors.cyanAccent : Colors.white70,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
               ),
             ),
           ),

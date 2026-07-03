@@ -6,6 +6,8 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
+import '../../gallery/services/media_services.dart';
+
 enum CameraStatus { closed, opening, closing, running, error }
 
 /// Central reactive store for the demo, built on `signals`.
@@ -269,6 +271,7 @@ class CameraStore {
 
   Future<void> init() async {
     await Future.microtask(() {});
+    unawaited(hydrateGallery());
     try {
       if (loading.value && devices.value.isNotEmpty) return;
       loading.value = true;
@@ -486,12 +489,15 @@ class CameraStore {
       photoTrigger.value++;
       HapticFeedback.mediumImpact();
       final result = await run();
+      // Move the JPEG/DNG out of the cache dir into the permanent library
+      // (byte-preserving, EXIF/GPS intact) before publishing the path.
+      final storedPath = await _persistCapture(result.path, isVideo: false);
       batch(() {
-        lastCapturedPath.value = result.path;
+        lastCapturedPath.value = storedPath;
         isLastCapturedVideo.value = false;
         capturedMedia.value = [
           ...capturedMedia.value,
-          (path: result.path, isVideo: false),
+          (path: storedPath, isVideo: false),
         ];
       });
       HapticFeedback.lightImpact();
@@ -580,13 +586,76 @@ class CameraStore {
     batch(() {
       isRecording.value = false;
       recordingDuration.value = 0;
-      lastCapturedPath.value = path;
+    });
+    unawaited(_finishVideo(path));
+  }
+
+  Future<void> _finishVideo(String path) async {
+    final storedPath = await _persistCapture(path, isVideo: true);
+    batch(() {
+      lastCapturedPath.value = storedPath;
       isLastCapturedVideo.value = true;
       capturedMedia.value = [
         ...capturedMedia.value,
-        (path: path, isVideo: true),
+        (path: storedPath, isVideo: true),
       ];
     });
+  }
+
+  // ── Media library ──────────────────────────────────────────────────────────
+
+  bool _galleryHydrated = false;
+
+  /// Rebuilds [capturedMedia] from the on-disk captures library so the gallery
+  /// persists across app launches. Runs once per process.
+  Future<void> hydrateGallery() async {
+    if (_galleryHydrated) return;
+    _galleryHydrated = true;
+    try {
+      final items = await MediaServices.storage.loadAll(); // newest first
+      if (items.isEmpty) return;
+      batch(() {
+        // The store keeps capture order (oldest → newest); UIs reverse it.
+        capturedMedia.value = [...items.reversed];
+        lastCapturedPath.value = items.first.path;
+        isLastCapturedVideo.value = items.first.isVideo;
+      });
+    } catch (e) {
+      debugPrint('Gallery hydration failed: $e');
+    }
+  }
+
+  /// Moves a finished capture into the permanent library (rename/copy — bytes
+  /// and EXIF untouched) and mirrors it to the system gallery, best-effort.
+  Future<String> _persistCapture(String rawPath, {required bool isVideo}) async {
+    var path = rawPath;
+    try {
+      path = await MediaServices.storage
+          .persist(rawPath, capturedAt: DateTime.now());
+    } catch (e) {
+      debugPrint('Capture persist failed (keeping cache path): $e');
+    }
+    unawaited(MediaServices.systemGallery.trySave(path, isVideo: isVideo));
+    return path;
+  }
+
+  /// Deletes a gallery item: store entry, file, and cached video artifacts.
+  Future<void> removeMedia(String path) async {
+    final wasVideo =
+        capturedMedia.value.any((m) => m.path == path && m.isVideo);
+    batch(() {
+      capturedMedia.value = [
+        for (final m in capturedMedia.value)
+          if (m.path != path) m,
+      ];
+      if (lastCapturedPath.value == path) {
+        final last = capturedMedia.value.lastOrNull;
+        lastCapturedPath.value = last?.path;
+        isLastCapturedVideo.value = last?.isVideo ?? false;
+      }
+    });
+    await MediaServices.storage.delete(path);
+    if (wasVideo) await MediaServices.thumbnails.evict(path);
   }
 }
 

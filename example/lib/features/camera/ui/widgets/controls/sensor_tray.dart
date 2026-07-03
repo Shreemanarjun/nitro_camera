@@ -5,6 +5,7 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
+import '../common/glass_tooltip.dart';
 
 /// FRONT/BACK category selector + per-side lens circles (vision-camera-style
 /// device categories with relative-zoom labels).
@@ -92,6 +93,9 @@ class SensorTray extends StatelessWidget {
 
                       return _LensChip(
                         label: label,
+                        tooltip: d.position == 0
+                            ? 'Selfie camera'
+                            : 'Lens $label',
                         selected: isSelected,
                         onTap: () {
                           if (currentDevice?.id == d.id) {
@@ -111,6 +115,7 @@ class SensorTray extends StatelessWidget {
                     if (!isFront && backCameras.isNotEmpty)
                       _LensChip(
                         label: "2.0×",
+                        tooltip: '2× digital zoom',
                         selected: digital2xActive,
                         onTap: () async {
                           await cameraStore.selectDevice(baselineLens);
@@ -131,48 +136,54 @@ class SensorTray extends StatelessWidget {
 /// One circular lens/zoom chip (physical lens or digital crop).
 class _LensChip extends StatelessWidget {
   final String label;
+  final String tooltip;
   final bool selected;
   final VoidCallback onTap;
   const _LensChip({
     required this.label,
+    required this.tooltip,
     required this.selected,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: selected ? 54 : 44,
-        height: selected ? 54 : 44,
-        margin: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: selected ? Colors.amberAccent : Colors.black45,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected ? Colors.white : Colors.white24,
-            width: selected ? 2 : 1,
+    return GlassTooltip(
+      message: tooltip,
+      preferBelow: false,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: selected ? 54 : 44,
+          height: selected ? 54 : 44,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: selected ? Colors.amberAccent : Colors.black45,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? Colors.white : Colors.white24,
+              width: selected ? 2 : 1,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: Colors.amberAccent.withValues(alpha: 0.4),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : [],
           ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: Colors.amberAccent.withValues(alpha: 0.4),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                  ),
-                ]
-              : [],
-        ),
-        child: Center(
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: selected ? Colors.black : Colors.white70,
-              fontSize: selected ? 11 : 9,
-              fontWeight: FontWeight.w900,
+          child: Center(
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected ? Colors.black : Colors.white70,
+                fontSize: selected ? 11 : 9,
+                fontWeight: FontWeight.w900,
+              ),
             ),
           ),
         ),
@@ -208,8 +219,10 @@ class _CategoryTabs extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _tab('BACK', Icons.camera_rear, !isFront, onBack),
-              _tab('FRONT', Icons.camera_front, isFront, onFront),
+              _tab('BACK', Icons.camera_rear, !isFront, onBack,
+                  'Back cameras'),
+              _tab('FRONT', Icons.camera_front, isFront, onFront,
+                  'Front cameras'),
             ],
           ),
         ),
@@ -217,32 +230,43 @@ class _CategoryTabs extends StatelessWidget {
     );
   }
 
-  Widget _tab(String label, IconData icon, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? Colors.cyanAccent : Colors.transparent,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: selected ? Colors.black : Colors.white60),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: selected ? Colors.black : Colors.white60,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1,
+  Widget _tab(
+    String label,
+    IconData icon,
+    bool selected,
+    VoidCallback onTap,
+    String tooltip,
+  ) {
+    return GlassTooltip(
+      message: tooltip,
+      preferBelow: false,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? Colors.cyanAccent : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 13, color: selected ? Colors.black : Colors.white60),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.black : Colors.white60,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

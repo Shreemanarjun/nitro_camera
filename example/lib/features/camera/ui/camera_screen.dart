@@ -3,12 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../../gallery/ui/media_viewer_screen.dart';
 import '../state/camera_store.dart';
 import 'widgets/common/pill_button.dart';
 import 'widgets/controls/bottom_controls.dart';
-import 'widgets/controls/filter_selector.dart';
-import 'widgets/controls/sensor_tray.dart';
 import 'widgets/controls/top_bar.dart';
+import 'widgets/controls/tray_layer.dart';
 import 'widgets/overlays/camera_status_widgets.dart';
 import 'widgets/overlays/capture_overlays.dart';
 import 'widgets/overlays/detection_overlay.dart';
@@ -65,6 +65,18 @@ class _CameraScreenState extends State<CameraScreen>
         cameraStore.setMode(modes[currentIndex - 1]);
       }
     }
+  }
+
+  /// Jumps into the media viewer on the most recent capture (corner
+  /// thumbnail tap). Falls back to the newest item if the fresh capture
+  /// hasn't landed in the library yet.
+  void _openLastCapture(BuildContext context) {
+    final items = cameraStore.capturedMedia.value.reversed.toList();
+    if (items.isEmpty) return;
+    final last = cameraStore.lastCapturedPath.value;
+    var index = items.indexWhere((m) => m.path == last);
+    if (index < 0) index = 0;
+    openMediaViewer(context, initialIndex: index);
   }
 
   void _handleTapToFocus(TapUpDetails details, BuildContext context) {
@@ -233,34 +245,9 @@ class _CameraScreenState extends State<CameraScreen>
             // SETTINGS entry lives inside the quick panel now).
             const TopBar(),
 
-            // 4. Sensor tray (front/back categories + lenses).
-            const Positioned(
-              bottom: 200,
-              left: 0,
-              right: 0,
-              child: SensorTray(),
-            ),
-
-            // 4b. Collapsible filter tray.
-            Watch((context) {
-              final show = cameraStore.showFilters.value;
-              return AnimatedPositioned(
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeOutQuart,
-                bottom: show ? 260 : 180,
-                left: 0,
-                right: 0,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 300),
-                  opacity: show ? 1.0 : 0.0,
-                  curve: Curves.easeIn,
-                  child: IgnorePointer(
-                    ignoring: !show,
-                    child: const FilterSelector(),
-                  ),
-                ),
-              );
-            }),
+            // 4. Tray layer: sensor tray (front/back categories + lenses) and
+            // the collapsible filter tray — mutually exclusive, never overlap.
+            const Positioned.fill(child: TrayLayer()),
 
             // 5. Scanner overlay (QR / 1D / 2D / ALL).
             Watch((context) {
@@ -300,14 +287,19 @@ class _CameraScreenState extends State<CameraScreen>
             }),
 
             // Fast preview thumbnail (photoThumbnail event) — shown instantly,
-            // before the full-res JPEG is written.
+            // before the full-res JPEG is written. Tapping it opens the media
+            // viewer directly on the fresh capture.
             Watch((context) {
               final path = cameraStore.lastThumbnailPath.value;
               if (path == null) return const SizedBox.shrink();
               return Positioned(
                 left: 16,
                 bottom: 200,
-                child: ThumbnailBadge(key: ValueKey(path), path: path),
+                child: ThumbnailBadge(
+                  key: ValueKey(path),
+                  path: path,
+                  onTap: () => _openLastCapture(context),
+                ),
               );
             }),
 

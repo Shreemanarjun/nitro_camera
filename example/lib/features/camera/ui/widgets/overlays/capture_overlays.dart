@@ -215,10 +215,12 @@ class _FocusIndicatorState extends State<FocusIndicator>
 }
 
 /// The fast preview thumbnail delivered by the `photoThumbnail` event;
-/// auto-dismisses after a couple seconds.
+/// auto-dismisses after a couple seconds. Tapping it jumps straight into the
+/// media viewer on the freshly captured item.
 class ThumbnailBadge extends StatefulWidget {
   final String path;
-  const ThumbnailBadge({super.key, required this.path});
+  final VoidCallback? onTap;
+  const ThumbnailBadge({super.key, required this.path, this.onTap});
   @override
   State<ThumbnailBadge> createState() => _ThumbnailBadgeState();
 }
@@ -244,18 +246,25 @@ class _ThumbnailBadgeState extends State<ThumbnailBadge> {
   @override
   Widget build(BuildContext context) {
     if (!File(widget.path).existsSync()) return const SizedBox.shrink();
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 300),
-      opacity: _visible ? 1 : 0,
-      child: Container(
-        width: 54,
-        height: 54,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.cyanAccent, width: 1.5),
-          image: DecorationImage(
-            image: FileImage(File(widget.path)),
-            fit: BoxFit.cover,
+    return IgnorePointer(
+      // Once faded out it must not swallow taps meant for the preview.
+      ignoring: !_visible,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 300),
+        opacity: _visible ? 1 : 0,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.cyanAccent, width: 1.5),
+              image: DecorationImage(
+                image: FileImage(File(widget.path)),
+                fit: BoxFit.cover,
+              ),
+            ),
           ),
         ),
       ),

@@ -22,9 +22,11 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import nitro.nitro_camera_module.*
 import java.nio.ByteBuffer
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -174,6 +176,23 @@ class NitraCameraSession(
     // Active native ML detector ("barcode" / "face" / "" = off).
     @Volatile private var nativeDetector: String = ""
 
+    // Whether this camera has a physical flash unit (front sensors usually
+    // don't). Gates every FLASH_MODE / AE-flash-mode request — flash-less HALs
+    // ignore or reject them — and routes flash≠off captures to the screen-fill
+    // path in doCapture instead.
+    private val hasFlashUnit: Boolean =
+        characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+
+    private companion object {
+        /// Max wait for the AE precapture sequence to settle before capturing anyway.
+        const val PRECAPTURE_TIMEOUT_MS = 1_500L
+
+        /// Screen-fill flash (flash-less front cameras): time given to the white
+        /// overlay + max-brightness window to actually light the subject (and AE
+        /// to react) before the exposure starts.
+        const val SCREEN_FLASH_ILLUMINATION_MS = 350L
+    }
+
     // --- Read-back accessors (used by configure()/getSessionStateJson) ---
     val streamWidth: Int get() = resolvedSize.width
     val streamHeight: Int get() = resolvedSize.height
@@ -279,7 +298,50 @@ class NitraCameraSession(
     @Volatile private var pixelFormat: Long = 1
     @Volatile private var samplingRate: Long = 1
     private var frameCounter: Long = 0
-    private val frameReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 2)
+
+    // Frame-processing (scanner) YUV stream size — MUST be a size the camera
+    // actually advertises for YUV_420_888, otherwise the HAL may accept the
+    // session and then never deliver a single buffer. Prefers the requested
+    // size when supported, else the closest supported size by area.
+    private val frameReaderSize: android.util.Size = run {
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val yuvSizes = map?.getOutputSizes(ImageFormat.YUV_420_888)
+        when {
+            yuvSizes == null || yuvSizes.isEmpty() -> android.util.Size(width, height)
+            yuvSizes.any { it.width == width && it.height == height } ->
+                android.util.Size(width, height)
+            else -> yuvSizes.minByOrNull {
+                Math.abs(it.width.toLong() * it.height - width.toLong() * height)
+            }!!
+        }
+    }
+    private val frameReader = ImageReader.newInstance(
+        frameReaderSize.width, frameReaderSize.height, ImageFormat.YUV_420_888, 2)
+
+    /**
+     * Whether the persistent recorder surface may be pre-wired into the capture
+     * session as a 4th stream (PRIV preview + JPEG photo + YUV frameReader +
+     * PRIV recorder). That combination is NOT in any guaranteed
+     * stream-combination table — even LEVEL_3 only guarantees the second PRIV
+     * stream at VGA — so it only works by OEM grace. Some HALs accept it at
+     * configure time and then silently STARVE one stream: on the OnePlus
+     * CPH2447 front camera the session configures, the preview runs, but the
+     * YUV frameReader never receives a single buffer (scanner stuck at
+     * 0 FPS; dumpsys shows "Frames produced: 0" with all HAL buffers dequeued
+     * and every in-flight request stuck at "buffers left: 1").
+     *
+     * So the recorder surface is only pre-wired where it is known-good: BACK
+     * cameras on FULL/LEVEL_3 hardware. Front and limited cameras record via
+     * the GL-pipeline fallback instead (slightly slower start, still works),
+     * and the frameReader is ALWAYS part of the session.
+     */
+    private val canPreWireRecorderSurface: Boolean = run {
+        val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
+            CameraCharacteristics.LENS_FACING_FRONT
+        val level = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+        !isFront && (level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL ||
+            level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3)
+    }
     private var directBuffer: ByteBuffer? = null
     private var lastRawShader: String = ""
 
@@ -383,12 +445,21 @@ class NitraCameraSession(
         // Pre-wire the persistent recorder surface into the session so recordings
         // start instantly (no session reconfiguration at record time). It is NOT
         // added as a repeating-request target until a recording actually starts —
-        // targeting a consumer-less surface would stall the pipeline. If the device
-        // rejects the extra stream we retry without it (GL recording fallback).
+        // targeting a consumer-less surface would stall the pipeline. Only done
+        // where the 4-stream combo is known-good (see canPreWireRecorderSurface);
+        // if the device still rejects the extra stream we retry without it
+        // (GL recording fallback).
         val recorderSurface =
-            if (persistentSurfaceUnusable) null else mediaManager.acquirePersistentRecorderSurface()
+            if (persistentSurfaceUnusable || !canPreWireRecorderSurface) null
+            else mediaManager.acquirePersistentRecorderSurface()
         if (recorderSurface != null) surfaces.add(recorderSurface)
         val includesRecorder = recorderSurface != null
+
+        Log.i("NitroCamera", "createCaptureSession($deviceId): " +
+            "preview(PRIV)=${resolvedSize.width}x${resolvedSize.height} " +
+            "photo(JPEG) frame(YUV)=${frameReaderSize.width}x${frameReaderSize.height} " +
+            "recorder(PRIV)=${if (includesRecorder) "pre-wired" else "off (GL record fallback)"} " +
+            "fpsRange=${bestFpsRange()}")
 
         try {
             cameraDevice.createCaptureSession(
@@ -555,14 +626,20 @@ class NitraCameraSession(
         }
         builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, stab)
 
-        // Handle Flash/Torch logic
-        if (torchEnabled) {
+        // Handle Flash/Torch logic — gated on FLASH_INFO_AVAILABLE: cameras
+        // without a flash unit (typically the front sensor) ignore or reject
+        // FLASH_MODE / AE flash modes, so they get plain AE. Front "flash" is
+        // implemented as a screen-fill in doCapture instead.
+        if (!hasFlashUnit) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+        } else if (torchEnabled) {
             builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         } else {
             val availableAeModes = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
             var ae = CaptureRequest.CONTROL_AE_MODE_ON
-            
+
             when (flashMode) {
                 1L -> { // FLASH ON
                     if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
@@ -577,21 +654,21 @@ class NitraCameraSession(
                     if (availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
                         ae = CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH
                         builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF) // AE handles it
+                    } else {
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                     }
                 }
                 else -> { // FLASH OFF
                     ae = CaptureRequest.CONTROL_AE_MODE_ON
                     builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                    // Ensure we reset any pending precapture sequences that might hold the flash
-                    builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL)
                 }
             }
             builder.set(CaptureRequest.CONTROL_AE_MODE, ae)
         }
-        // Always reset trigger to idle in repeating request after cancel/start if we don't want it to keep firing
-        // However, setting it to NULL or not setting it is better for repeating requests.
-        // Actually, we should only set it in the capture(builder.build()) for one-shot.
-        // So I'll ensure it's IDLE here for the repeating preview.
+        // Keep the precapture trigger IDLE on every request built here — the
+        // still-capture path drives the AE precapture sequence explicitly with
+        // a one-shot TRIGGER_START frame (see runFlashPrecapture). IDLE means
+        // "no change"; it does NOT cancel a running sequence.
         builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
 
 
@@ -877,6 +954,7 @@ class NitraCameraSession(
 
 
     suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult {
+        onEvent?.invoke(CameraEventType.PHOTOCAPTUREBEGAN, InterruptionReason.NONE, "")
         // The scene-mode HDR still request is what some HALs (e.g. Oplus at full
         // res) reject with REASON_ERROR — and a failed-then-retried capture is the
         // "slow photo". So DON'T use it on the primary request: the common path now
@@ -889,6 +967,128 @@ class NitraCameraSession(
         }
     }
 
+    /**
+     * Runs the standard Camera2 AE PRECAPTURE metering sequence on the live
+     * repeating preview stream and waits (bounded, [PRECAPTURE_TIMEOUT_MS]) for
+     * AE to settle. Without this, a still request carrying
+     * AE_MODE_ON_ALWAYS_FLASH / ON_AUTO_FLASH captures its frame before the
+     * flash is armed, so the flash never visibly fires on most HALs — that was
+     * exactly the "flash doesn't fire on the back camera" bug (the old code set
+     * TRIGGER_START on the still request itself, AFTER stopRepeating(), so the
+     * sequence had no frames to run on). Never throws: on any failure or
+     * timeout the still capture proceeds anyway.
+     */
+    private suspend fun runFlashPrecapture(session: CameraCaptureSession) {
+        val pSurface = previewSurface ?: return
+        if (!pSurface.isValid) return
+        val settled = CompletableDeferred<Unit>()
+        // Camera2Basic-style two-phase wait:
+        //   1) AE enters PRECAPTURE (or immediately reports FLASH_REQUIRED),
+        //   2) AE leaves PRECAPTURE → CONVERGED / FLASH_REQUIRED (flash armed).
+        var precaptureSeen = false
+        val callback = object : CameraCaptureSession.CaptureCallback() {
+            private fun handle(result: CaptureResult) {
+                val ae = result.get(CaptureResult.CONTROL_AE_STATE)
+                if (ae == null) { settled.complete(Unit); return } // LEGACY HAL: no AE state
+                if (!precaptureSeen) {
+                    when (ae) {
+                        CaptureResult.CONTROL_AE_STATE_PRECAPTURE,
+                        CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> precaptureSeen = true
+                        // Some HALs skip the PRECAPTURE state entirely.
+                        CaptureResult.CONTROL_AE_STATE_CONVERGED -> settled.complete(Unit)
+                    }
+                }
+                if (precaptureSeen && ae != CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
+                    settled.complete(Unit)
+                }
+            }
+            override fun onCaptureProgressed(
+                s: CameraCaptureSession, r: CaptureRequest, partial: CaptureResult,
+            ) = handle(partial)
+            override fun onCaptureCompleted(
+                s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult,
+            ) = handle(result)
+        }
+        try {
+            // Watch AE states on the repeating preview stream… (fresh builder —
+            // currentRequestBuilder is owned by the camera thread). Mirror the
+            // normal repeating targets so neither a scanner/detector nor an
+            // active persistent-surface recording stalls meanwhile.
+            val recordSurface = recordingViaSessionSurface
+            val repeating = cameraDevice.createCaptureRequest(
+                if (recordSurface != null) android.hardware.camera2.CameraDevice.TEMPLATE_RECORD
+                else android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+            repeating.addTarget(pSurface)
+            if (recordSurface != null) repeating.addTarget(recordSurface)
+            if (frameProcessingEnabled || nativeDetector.isNotEmpty()) {
+                repeating.addTarget(frameReader.surface)
+            }
+            applySessionSettings(repeating)
+            session.setRepeatingRequest(repeating.build(), callback, cameraHandler)
+
+            // …and kick the metering sequence with a single triggered frame.
+            val trigger = cameraDevice.createCaptureRequest(
+                android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
+            trigger.addTarget(pSurface)
+            applySessionSettings(trigger)
+            trigger.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
+            session.capture(trigger.build(), callback, cameraHandler)
+
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            val outcome = withTimeoutOrNull(PRECAPTURE_TIMEOUT_MS) { settled.await() }
+            Log.i("NitroCamera", "Flash precapture " +
+                (if (outcome != null) "settled" else "TIMED OUT (capturing anyway)") +
+                " in ${android.os.SystemClock.elapsedRealtime() - t0}ms (flashMode=$flashMode)")
+        } catch (e: Exception) {
+            Log.w("NitroCamera", "Flash precapture failed (${e.message}); capturing anyway")
+        }
+    }
+
+    /**
+     * Screen-fill flash for flash-less (front) cameras: boosts the activity
+     * window to max brightness so the Dart-side white overlay actually lights
+     * the subject. Returns the previous screenBrightness override for
+     * [restoreWindowBrightness]; null when no activity is attached.
+     */
+    private fun boostWindowBrightness(): Float? {
+        val act = NitroCameraJniBridge.activity ?: run {
+            Log.w("NitroCamera", "Screen-flash: no activity attached; skipping brightness boost")
+            return null
+        }
+        return try {
+            val previous = act.window.attributes.screenBrightness
+            act.runOnUiThread {
+                try {
+                    val lp = act.window.attributes
+                    lp.screenBrightness = 1.0f
+                    act.window.attributes = lp
+                } catch (e: Exception) {
+                    Log.w("NitroCamera", "Screen-flash brightness boost failed: ${e.message}")
+                }
+            }
+            Log.i("NitroCamera", "Screen-flash: window brightness boosted to 1.0 (was $previous)")
+            previous
+        } catch (e: Exception) {
+            Log.w("NitroCamera", "Screen-flash brightness boost failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Restores the pre-boost window brightness ([previous]; null → system default). */
+    private fun restoreWindowBrightness(previous: Float?) {
+        val act = NitroCameraJniBridge.activity ?: return
+        act.runOnUiThread {
+            try {
+                val lp = act.window.attributes
+                lp.screenBrightness = previous
+                    ?: android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                act.window.attributes = lp
+                Log.i("NitroCamera", "Screen-flash: window brightness restored to ${lp.screenBrightness}")
+            } catch (_: Exception) {}
+        }
+    }
+
     private suspend fun doCapture(
         useHdr: Boolean,
         minimal: Boolean,
@@ -896,69 +1096,100 @@ class NitraCameraSession(
     ): PhotoResult {
         val session = captureSession ?: throw Exception("No active session")
 
-        // Stop the preview repeating request to prepare for the still capture.
-        try { session.stopRepeating() } catch (_: Exception) {}
+        val wantsFlash = !minimal && !torchEnabled && (flashMode == 1L || flashMode == 2L)
 
-        val builder = cameraDevice.createCaptureRequest(
-            android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
-        builder.addTarget(mediaManager.photoReader.surface)
-
-        val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
-
-        // PhotoOptions.qualityPrioritization → JPEG compression level
-        // (0 = speed, 1 = balanced, 2 = quality).
-        if (options != null) {
-            val quality: Byte = when (options.qualityPrioritization) {
-                0L -> 85
-                2L -> 100
-                else -> 92
-            }
-            builder.set(CaptureRequest.JPEG_QUALITY, quality)
+        // Flash-equipped camera (back): run the AE PRECAPTURE sequence on the
+        // LIVE repeating stream BEFORE stopping it — this is what actually arms
+        // the flash for the still (both flash=on and flash=auto need it).
+        if (wantsFlash && hasFlashUnit) {
+            runFlashPrecapture(session)
         }
 
-        if (minimal) {
-            builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        } else {
-            applySessionSettings(builder)
-            // HDR still (scene mode) when requested + supported.
-            if (useHdr) {
-                val sceneModes = characteristics.get(
-                    CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES) ?: intArrayOf()
-                if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
-                    builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
-                    builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
-                }
-            }
-            // Auto red-eye reduction — only meaningful with auto-flash, and only
-            // when the device advertises the REDEYE AE mode.
-            if (options?.enableAutoRedEyeReduction == 1L && flashMode == 2L) {
-                val aeModes = characteristics.get(
-                    CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
-                if (aeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)) {
-                    builder.set(CaptureRequest.CONTROL_AE_MODE,
-                        CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                }
-            }
-            // Manual Flash 'ON' → AE precapture so the flash fires.
-            if (flashMode == 1L) {
-                builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-            }
+        // Flash-less camera (front): "flash" = screen fill. Emit the shutter
+        // event EARLY so the app's white FlashOverlay is up during exposure,
+        // boost the window to max brightness, and give the display + AE a
+        // moment to light the subject. Brightness restored in the finally.
+        val screenFlash = wantsFlash && !hasFlashUnit
+        var previousBrightness: Float? = null
+        if (screenFlash) {
+            Log.i("NitroCamera", "Screen-flash capture: flashMode=$flashMode (no flash unit)")
+            onEvent?.invoke(CameraEventType.PHOTOCAPTURESHUTTER, InterruptionReason.NONE, "")
+            previousBrightness = boostWindowBrightness()
+            delay(SCREEN_FLASH_ILLUMINATION_MS)
         }
 
-        return mediaManager.takePhotoWithRequest(
-            session = session,
-            request = builder.build(),
-            renderer = renderer,
-            shader = lastRawShader ?: "",
-            options = options,
-        ) {
-            // Resume the preview repeating request after capture.
-            cameraHandler.post { triggerUpdate() }
+        try {
+            // Stop the preview repeating request to prepare for the still capture.
+            try { session.stopRepeating() } catch (_: Exception) {}
+
+            val builder = cameraDevice.createCaptureRequest(
+                android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
+            builder.addTarget(mediaManager.photoReader.surface)
+
+            val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+            builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
+
+            // PhotoOptions.qualityPrioritization → JPEG compression level
+            // (0 = speed, 1 = balanced, 2 = quality).
+            if (options != null) {
+                val quality: Byte = when (options.qualityPrioritization) {
+                    0L -> 85
+                    2L -> 100
+                    else -> 92
+                }
+                builder.set(CaptureRequest.JPEG_QUALITY, quality)
+            }
+
+            if (minimal) {
+                builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            } else {
+                // Sets AE_MODE_ON_ALWAYS_FLASH (on) / ON_AUTO_FLASH (auto) — with
+                // STILL_CAPTURE intent + the completed precapture above, the HAL
+                // fires the flash for this frame. (No TRIGGER_START here: the old
+                // trigger-on-the-still bug captured the frame before the flash.)
+                applySessionSettings(builder)
+                // HDR still (scene mode) when requested + supported.
+                if (useHdr) {
+                    val sceneModes = characteristics.get(
+                        CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES) ?: intArrayOf()
+                    if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
+                        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
+                        builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
+                    }
+                }
+                // Auto red-eye reduction — only meaningful with auto-flash on a
+                // flash-equipped camera advertising the REDEYE AE mode.
+                if (options?.enableAutoRedEyeReduction == 1L && flashMode == 2L && hasFlashUnit) {
+                    val aeModes = characteristics.get(
+                        CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
+                    if (aeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)) {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE,
+                            CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    }
+                }
+            }
+
+            // The shutter moment (drives the app's shutter-flash animation).
+            // The screen-flash path already emitted it before the illumination delay.
+            if (!screenFlash) {
+                onEvent?.invoke(CameraEventType.PHOTOCAPTURESHUTTER, InterruptionReason.NONE, "")
+            }
+
+            return mediaManager.takePhotoWithRequest(
+                session = session,
+                request = builder.build(),
+                renderer = renderer,
+                shader = lastRawShader ?: "",
+                options = options,
+            ) {
+                // Resume the preview repeating request after capture.
+                cameraHandler.post { triggerUpdate() }
+            }
+        } finally {
+            if (screenFlash) restoreWindowBrightness(previousBrightness)
         }
     }
 

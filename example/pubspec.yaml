@@ -52,6 +52,12 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.5
   media_kit_libs_video: ^1.0.5
+  gal: ^2.3.2
+  share_plus: ^13.2.0
+  image: ^4.8.0
+  exif: ^3.3.0
+  path: ^1.9.1
+  get_thumbnail_video: ^0.7.3
 
 dev_dependencies:
   flutter_test:

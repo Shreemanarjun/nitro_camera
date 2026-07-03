@@ -5,6 +5,7 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';
+import '../common/glass_tooltip.dart';
 
 class FrameOverlay extends StatefulWidget {
   final bool isProcessing;
@@ -380,30 +381,33 @@ class _FrameOverlayState extends State<FrameOverlay> {
             padding: const EdgeInsets.only(top: 168, right: 16),
             child: Watch((_) {
               final oneShot = cameraStore.scanOneShot.value;
-              return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  cameraStore.scanOneShot.value = !oneShot;
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: oneShot
-                        ? Colors.cyanAccent
-                        : Colors.black.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(16),
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                  ),
-                  child: Text(
-                    oneShot ? 'ONE-SHOT' : 'CONTINUOUS',
-                    style: TextStyle(
-                      color: oneShot ? Colors.black : Colors.white60,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
+              return GlassTooltip(
+                message: 'Scan mode: one-shot / continuous',
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    cameraStore.scanOneShot.value = !oneShot;
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: oneShot
+                          ? Colors.cyanAccent
+                          : Colors.black.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.15)),
+                    ),
+                    child: Text(
+                      oneShot ? 'ONE-SHOT' : 'CONTINUOUS',
+                      style: TextStyle(
+                        color: oneShot ? Colors.black : Colors.white60,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2,
+                      ),
                     ),
                   ),
                 ),
@@ -628,32 +632,36 @@ class _ZoomChips extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final z in const [1.0, 2.0, 3.0])
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onChanged(z);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    width: 40,
-                    height: 40,
-                    margin: const EdgeInsets.symmetric(vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (current - z).abs() < 0.35
-                          ? Colors.cyanAccent
-                          : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        '${z.toInt()}×',
-                        style: TextStyle(
-                          color: (current - z).abs() < 0.35
-                              ? Colors.black
-                              : Colors.white70,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
+                GlassTooltip(
+                  message: 'Zoom ${z.toInt()}×',
+                  preferBelow: false,
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onChanged(z);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      decoration: BoxDecoration(
+                        color: (current - z).abs() < 0.35
+                            ? Colors.cyanAccent
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${z.toInt()}×',
+                          style: TextStyle(
+                            color: (current - z).abs() < 0.35
+                                ? Colors.black
+                                : Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
                     ),
@@ -690,29 +698,40 @@ class _ScanKindChips extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final kind in CodeScanKind.values)
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onChanged(kind);
+                GlassTooltip(
+                  message: switch (kind) {
+                    CodeScanKind.qr => 'QR codes only',
+                    CodeScanKind.oneD => 'Linear (1D) barcodes',
+                    CodeScanKind.twoD => 'Matrix (2D) codes',
+                    CodeScanKind.postal => 'Postal codes',
+                    CodeScanKind.pharma => 'Pharmacode',
+                    CodeScanKind.all => 'All code formats',
                   },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: kind == selected
-                          ? Colors.cyanAccent
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      kind.label,
-                      style: TextStyle(
-                        color: kind == selected ? Colors.black : Colors.white70,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1,
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onChanged(kind);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOut,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: kind == selected
+                            ? Colors.cyanAccent
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        kind.label,
+                        style: TextStyle(
+                          color:
+                              kind == selected ? Colors.black : Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
+                        ),
                       ),
                     ),
                   ),
