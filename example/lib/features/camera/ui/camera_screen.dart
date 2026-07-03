@@ -11,8 +11,8 @@ import 'widgets/controls/top_bar.dart';
 import 'widgets/controls/tray_layer.dart';
 import 'widgets/overlays/camera_status_widgets.dart';
 import 'widgets/overlays/capture_overlays.dart';
-import 'widgets/overlays/detection_overlay.dart';
 import 'widgets/overlays/filtered_preview.dart';
+import 'widgets/overlays/processor_badge.dart';
 import 'widgets/overlays/frame_overlay.dart';
 import 'widgets/transitions/camera_switch_loader.dart';
 import 'widgets/transitions/switch_dim_overlay.dart';
@@ -265,15 +265,15 @@ class _CameraScreenState extends State<CameraScreen>
               );
             }),
 
-            // 5b. Native ML Kit detection boxes (FACE chip in the top bar).
+            // 5b. Custom frame-processor readout (PROC chip in the top bar):
+            // the demo LUMA processor publishes mean scene luminance through
+            // a signal; this badge renders it live — the visible end of the
+            // user-pluggable FrameProcessor pipeline.
             Watch((context) {
-              final det = cameraStore.nativeDetector.value;
-              // Key on the controller so the overlay re-subscribes after a
-              // camera switch (new controller instance = new detections
-              // stream).
-              final ctrl = cameraStore.activeController.value;
-              if (det.isEmpty || ctrl == null) return const SizedBox.shrink();
-              return DetectionOverlay(key: ValueKey('det_${ctrl.textureId}'));
+              if (cameraStore.frameProcessor.value == null) {
+                return const SizedBox.shrink();
+              }
+              return const ProcessorBadge();
             }),
 
             // 6. Bottom main controls.

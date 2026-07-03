@@ -5,13 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
+import '../../../processors/luminance_processor.dart';
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
 import 'quick_panel.dart';
 
 /// Top control strip — a single compact, non-scrolling row of icon toggles
-/// (stock-camera style): flash · filters · preview path · RAW · face detect ·
-/// quick settings. Below it, a tiny "1080P · 60" caption reflects the active
+/// (stock-camera style): flash · filters · preview path · RAW · frame
+/// processor · quick settings. Below it, a tiny "1080P · 60" caption reflects the active
 /// stream config; tapping either the tune icon or the caption drops down the
 /// [QuickPanel] with the resolution / fps / aspect segments and the SETTINGS
 /// entry point.
@@ -117,16 +118,17 @@ class TopBar extends StatelessWidget {
                 );
               }),
 
-              // NATIVE ML KIT FACE DETECTION.
+              // CUSTOM FRAME PROCESSOR — toggles the demo LUMA processor, the
+              // reference implementation of the user-pluggable
+              // [FrameProcessor] interface (bring your own pipeline).
               Watch((context) {
-                final det = cameraStore.nativeDetector.value;
-                final on = det == 'face';
+                final on = cameraStore.frameProcessor.value != null;
                 return _StripIcon(
-                  icon: Icons.face_retouching_natural,
+                  icon: Icons.memory_rounded,
                   active: on,
-                  tooltip: 'Face detection',
-                  onTap: () =>
-                      cameraStore.setNativeDetectorMode(on ? '' : 'face'),
+                  tooltip: 'Frame processor (demo)',
+                  onTap: () => cameraStore
+                      .setFrameProcessor(on ? null : luminanceProcessor),
                 );
               }),
 

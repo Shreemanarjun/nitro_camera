@@ -3,14 +3,18 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import 'filter_selector.dart';
+import 'pro_strip.dart';
 import 'sensor_tray.dart';
 
-/// The bottom tray region above the main controls: the sensor tray
-/// (BACK/FRONT category tabs + lens chips) and the collapsible filter tray.
+/// The bottom tray region above the main controls: the mode-aware PRO strip
+/// (contextual pro-setting pills, directly above the mode tabs), the sensor
+/// tray (BACK/FRONT category tabs + lens chips) and the collapsible filter
+/// tray.
 ///
-/// The two trays are mutually exclusive — opening the filter tray slides the
-/// sensor tray down and out of the layout (and vice versa), so their
-/// interactive controls can never overlap in any mode (PHOTO/VIDEO/SCANNER).
+/// The trays are mutually exclusive with the filter tray — opening it slides
+/// the sensor tray down and out of the layout and hides the PRO strip, so
+/// their interactive controls can never overlap in any mode
+/// (PHOTO/VIDEO/SCANNER).
 class TrayLayer extends StatelessWidget {
   const TrayLayer({super.key});
 
@@ -19,6 +23,10 @@ class TrayLayer extends StatelessWidget {
 
   /// Bottom inset of the tray region (just above the bottom controls).
   static const double kTrayBottom = 200;
+
+  /// Vertical room reserved for the PRO strip (pill row + breathing space);
+  /// the sensor tray sits above it so the two never overlap.
+  static const double kProStripSlot = ProStrip.kPillHeight + 12;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +40,7 @@ class TrayLayer extends StatelessWidget {
           AnimatedPositioned(
             duration: _kAnim,
             curve: _kCurve,
-            bottom: showFilters ? -180 : kTrayBottom,
+            bottom: showFilters ? -180 : kTrayBottom + kProStripSlot,
             left: 0,
             right: 0,
             child: AnimatedOpacity(
@@ -42,6 +50,26 @@ class TrayLayer extends StatelessWidget {
               child: IgnorePointer(
                 ignoring: showFilters,
                 child: const SensorTray(),
+              ),
+            ),
+          ),
+
+          // PRO strip — mode-aware pro-setting pills directly above the mode
+          // tabs. Slides down + fades while the filter tray is open (real
+          // layout offset + IgnorePointer, same recipe as the sensor tray).
+          AnimatedPositioned(
+            duration: _kAnim,
+            curve: _kCurve,
+            bottom: showFilters ? -60 : kTrayBottom,
+            left: 0,
+            right: 0,
+            child: AnimatedOpacity(
+              duration: _kAnim,
+              curve: _kCurve,
+              opacity: showFilters ? 0.0 : 1.0,
+              child: IgnorePointer(
+                ignoring: showFilters,
+                child: const ProStrip(),
               ),
             ),
           ),

@@ -16,7 +16,7 @@ void main() {
       expect(find.byTooltip('Flash: off'), findsOneWidget);
       expect(find.byTooltip('Filters'), findsOneWidget);
       expect(find.byTooltip('Preview engine'), findsOneWidget);
-      expect(find.byTooltip('Face detection'), findsOneWidget);
+      expect(find.byTooltip('Frame processor (demo)'), findsOneWidget);
       expect(find.byTooltip('Quick settings'), findsOneWidget);
       expect(find.byTooltip('Stream configuration'), findsOneWidget);
     });

@@ -54,7 +54,15 @@ class _SettingsSheetState extends State<SettingsSheet> {
             top: true,
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              // Keep the last controls clear of the gesture-nav bar / home
+              // indicator: extend the fixed bottom padding by the device's
+              // bottom safe inset (32 stays the floor on inset-less devices).
+              padding: EdgeInsets.fromLTRB(
+                20,
+                12,
+                20,
+                32 + MediaQuery.viewPaddingOf(context).bottom,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,

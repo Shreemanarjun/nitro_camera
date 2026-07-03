@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
 import '../../gallery/services/media_services.dart';
+import '../processors/frame_processor.dart';
 
 enum CameraStatus { closed, opening, closing, running, error }
 
@@ -69,25 +70,98 @@ class CameraStore {
   final geotagEnabled = signal(false);
   // RAW (DNG) photo capture — only offered when the device supports it.
   final rawPhoto = signal(false);
-  // Native ML Kit detector ('' = off, 'face', 'barcode').
-  final nativeDetector = signal('');
+  // ── User-pluggable frame processor ──────────────────────────────────────────
+  // No native ML Kit here: detection/analysis is a Dart-side concern. Apps
+  // implement [FrameProcessor] with their own pipeline and plug it in below;
+  // the store owns the session plumbing (frame delivery, reattach on reopen).
 
-  /// Detector parked while SCANNER mode is active (restored on exit). The
-  /// Dart-side scanner and the native ML Kit detectors are mutually exclusive:
-  /// both consume the same native frame reader, and running them together
-  /// starves the capture session (stuck preview/scanner).
-  String _detectorBeforeScanner = '';
+  /// The active user-supplied frame processor (null = none).
+  final frameProcessor = signal<FrameProcessor?>(null);
+  StreamSubscription<CameraFrame>? _processorSub;
 
-  void setNativeDetectorMode(String detector) {
-    if (mode.value == 'SCANNER') {
-      // Scanner owns frame delivery — defer the request until SCANNER exits
-      // (last request wins; '' cancels a parked detector).
-      _detectorBeforeScanner = detector;
-      return;
-    }
-    nativeDetector.value = detector;
-    activeController.value?.setNativeDetector(detector);
+  /// Live profiling of the active processor (vision-camera's "profile your
+  /// frame processor" guidance): processed frames per second and mean
+  /// [FrameProcessor.processFrame] cost, refreshed once per second.
+  final processorFps = signal(0.0);
+  final processorAvgMs = signal(0.0);
+  int _statFrames = 0;
+  double _statMs = 0;
+  int _statWindowStartTs = 0;
+
+  void _resetProcessorStats() {
+    _statFrames = 0;
+    _statMs = 0;
+    _statWindowStartTs = 0;
+    processorFps.value = 0.0;
+    processorAvgMs.value = 0.0;
   }
+
+  /// Installs (or, with `null`, clears) a custom [FrameProcessor]. The
+  /// previous processor gets [FrameProcessor.onDetach]; the new one is
+  /// attached to the running session immediately and re-attached automatically
+  /// after every camera/format switch. Coexists with SCANNER mode — both are
+  /// plain listeners on the same broadcast frame stream.
+  void setFrameProcessor(FrameProcessor? processor) {
+    final old = frameProcessor.value;
+    if (identical(old, processor)) return;
+    _processorSub?.cancel();
+    _processorSub = null;
+    old?.onDetach();
+    _resetProcessorStats();
+    frameProcessor.value = processor;
+    final ctrl = activeController.value;
+    if (processor != null && ctrl != null && ctrl.isInitialized) {
+      _attachProcessor(processor, ctrl);
+    }
+    _syncFrameDelivery();
+  }
+
+  /// Convenience for `setFrameProcessor(null)`.
+  void clearFrameProcessor() => setFrameProcessor(null);
+
+  void _attachProcessor(FrameProcessor processor, CameraController ctrl) {
+    processor.onAttach(ctrl);
+    _processorSub = ctrl.frameStream.listen(handleFrame);
+  }
+
+  /// Routes one delivered frame to the active processor. A throwing processor
+  /// must never take down the frame listener (frames keep flowing to the
+  /// scanner and future frames to the processor itself).
+  @visibleForTesting
+  void handleFrame(CameraFrame frame) {
+    final p = frameProcessor.value;
+    if (p == null) return;
+    final sw = Stopwatch()..start();
+    try {
+      p.processFrame(frame);
+    } catch (e) {
+      debugPrint('FrameProcessor "${p.name}" failed: $e');
+    }
+    sw.stop();
+
+    // Profiling window keyed on the frame's own capture timestamp (ms) so
+    // the numbers describe the stream, not the wall clock.
+    _statFrames++;
+    _statMs += sw.elapsedMicroseconds / 1000.0;
+    _statWindowStartTs =
+        _statWindowStartTs == 0 ? frame.timestamp : _statWindowStartTs;
+    final span = frame.timestamp - _statWindowStartTs;
+    if (span >= 1000) {
+      processorFps.value = _statFrames * 1000 / span;
+      processorAvgMs.value = _statMs / _statFrames;
+      _statFrames = 0;
+      _statMs = 0;
+      _statWindowStartTs = frame.timestamp;
+    }
+  }
+
+  /// Native frame delivery is on when anyone consumes frames: the SCANNER
+  /// pipeline and/or a custom [frameProcessor].
+  bool get _frameDeliveryNeeded =>
+      isProcessingFrames.value || frameProcessor.value != null;
+
+  void _syncFrameDelivery() =>
+      activeController.value?.setFrameProcessing(enabled: _frameDeliveryNeeded);
   final showFpsGraph = signal(false);
   final resizeCover = signal(true); // cover vs contain
   final shutterFlash = signal(0); // bump to trigger a shutter flash animation
@@ -226,6 +300,10 @@ class CameraStore {
   void onSessionClosing() {
     _eventSub?.cancel();
     _eventSub = null;
+    // Pause processor frame routing; it re-attaches on the next session
+    // (reapplyCurrentSettings). The processor itself stays installed.
+    _processorSub?.cancel();
+    _processorSub = null;
     activeController.value = null;
     // A resolution/fps change reopens the session without going through
     // [selectDevice]; reflect the teardown in [status] so the switch overlay
@@ -256,8 +334,14 @@ class CameraStore {
         ..setLowLightBoost(enabled: lowLightBoost.value)
         ..setAutoFocus(autoFocusMode.value)
         ..setTargetOrientation(targetOrientation.value)
-        ..setFrameProcessing(enabled: mode.value == 'SCANNER')
-        ..setNativeDetector(nativeDetector.value);
+        ..setFrameProcessing(enabled: _frameDeliveryNeeded);
+      // Fresh native session — re-adopt the custom processor (new controller,
+      // new frame subscription).
+      final p = frameProcessor.value;
+      if (p != null) {
+        _processorSub?.cancel();
+        _attachProcessor(p, ctrl);
+      }
     } catch (e) {
       debugPrint('reapplyCurrentSettings: $e');
     }
@@ -319,34 +403,21 @@ class CameraStore {
 
   Future<void> setMode(String m) async {
     if (mode.value == m) return;
-    final wasScanning = mode.value == 'SCANNER';
     mode.value = m;
     final scanning = m == 'SCANNER';
     isProcessingFrames.value = scanning;
-    if (scanning && nativeDetector.value.isNotEmpty) {
-      // Entering SCANNER: park the native detector FIRST (before frame
-      // processing starts) — native ML Kit detection and the Dart scanner
-      // are mutually exclusive; both fight over the shared frame reader and
-      // stall the session. It is restored when SCANNER mode is left.
-      _detectorBeforeScanner = nativeDetector.value;
-      nativeDetector.value = '';
-      activeController.value?.setNativeDetector('');
-    }
     // The barcode scanner decodes the luma plane, which only exists in YUV;
     // BGRA bytes decode as noise. Switch pixel format together with the mode.
+    // (A custom [frameProcessor] must handle both — see FrameProcessor docs.)
     setPixelFormat(scanning ? 0 /* YUV */ : 1 /* BGRA */);
-    activeController.value?.setFrameProcessing(enabled: scanning);
-    if (wasScanning && !scanning && _detectorBeforeScanner.isNotEmpty) {
-      // Leaving SCANNER: restore the detector that was parked on entry.
-      final restore = _detectorBeforeScanner;
-      _detectorBeforeScanner = '';
-      setNativeDetectorMode(restore);
-    }
+    // Frame delivery stays on if a custom processor is installed, even
+    // outside SCANNER — both are plain listeners on the broadcast stream.
+    _syncFrameDelivery();
   }
 
   void toggleProcessing(bool val) {
-    activeController.value?.setFrameProcessing(enabled: val);
     isProcessingFrames.value = val;
+    _syncFrameDelivery();
   }
 
   void setResolution(int w, int h) {

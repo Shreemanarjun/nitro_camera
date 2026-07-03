@@ -62,7 +62,7 @@ void resetStore() {
   cameraStore.showFilters.value = false;
   cameraStore.quickSettingsOpen.value = false;
   cameraStore.rawPhoto.value = false;
-  cameraStore.nativeDetector.value = '';
+  cameraStore.setFrameProcessor(null);
   cameraStore.mode.value = 'PHOTO';
   cameraStore.width.value = 1920;
   cameraStore.height.value = 1080;

@@ -19,6 +19,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:nitro/nitro.dart';
 
+import 'package:nitro_camera_example/features/camera/processors/luminance_processor.dart';
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 import 'package:nitro_camera_example/features/camera/ui/camera_screen.dart';
 
@@ -143,38 +144,42 @@ void main() {
     expect(cameraStore.errorMessage.value, isNull);
   });
 
-  testWidgets('3. scanner mode round-trip parks and restores the native detector',
-      (tester) async {
+  testWidgets('3. custom frame processor receives frames and survives a '
+      'SCANNER round-trip', (tester) async {
     await bootApp(tester);
 
-    // Enable the native ML Kit face detector in PHOTO mode.
-    cameraStore.setNativeDetectorMode('face');
-    await pumpFor(tester, const Duration(seconds: 2));
-    expect(cameraStore.nativeDetector.value, 'face');
+    // Install the demo LUMA processor (user-pluggable FrameProcessor).
+    cameraStore.setFrameProcessor(luminanceProcessor);
+    await pumpFor(tester, const Duration(seconds: 3));
+    expect(cameraStore.frameProcessor.value, isNotNull);
+    expect(luminanceProcessor.attached.value, isTrue,
+        reason: 'processor is adopted by the live session');
+    expect(luminanceProcessor.luminance.value, greaterThan(0.0),
+        reason: 'frames flowed through the custom processor');
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull,
-        reason: 'enabling the face detector must not error');
+        reason: 'enabling a custom processor must not error');
 
-    // Enter SCANNER: the Dart scanner owns frame delivery, so the native
-    // detector must be parked (mutually exclusive frame consumers).
+    // Enter SCANNER: the Dart scanner and the custom processor coexist as
+    // listeners on the same broadcast frame stream.
     await cameraStore.setMode('SCANNER');
     await pumpFor(tester, const Duration(seconds: 2));
     expect(cameraStore.mode.value, 'SCANNER');
-    expect(cameraStore.nativeDetector.value, '',
-        reason: 'native detector is parked while SCANNER owns the frames');
+    expect(cameraStore.frameProcessor.value, isNotNull,
+        reason: 'custom processor stays installed during SCANNER');
     expect(cameraStore.status.value, CameraStatus.running);
 
-    // Leave SCANNER: the parked detector must be restored, with no error.
+    // Leave SCANNER: the processor keeps running, with no error.
     await cameraStore.setMode('PHOTO');
     await pumpFor(tester, const Duration(seconds: 2));
     expect(cameraStore.mode.value, 'PHOTO');
-    expect(cameraStore.nativeDetector.value, 'face',
-        reason: 'parked detector restored when SCANNER exits');
+    expect(cameraStore.frameProcessor.value, isNotNull);
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
 
     // Cleanup for the following tests.
-    cameraStore.setNativeDetectorMode('');
+    cameraStore.clearFrameProcessor();
+    expect(luminanceProcessor.attached.value, isFalse);
     await pumpFor(tester, const Duration(milliseconds: 500));
   });
 
