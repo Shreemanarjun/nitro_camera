@@ -9,6 +9,67 @@ class ControlPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Material(
+      type: MaterialType.transparency,
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 400),
+          margin: const EdgeInsets.symmetric(horizontal: 24),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(40),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+              child: Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(40),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    width: 1.5,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const _PanelHeader(
+                          icon: Icons.settings_input_component,
+                          title: "CONFIG",
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white24,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const ConfigBody(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The CONFIG content — embeddable in any container (used by the merged
+/// [SettingsSheet] as well as the standalone [ControlPanel] route).
+class ConfigBody extends StatelessWidget {
+  const ConfigBody({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     return Watch((context) {
       final status = cameraStore.status.value;
       final isProcessing = cameraStore.isProcessingFrames.value;
@@ -25,195 +86,270 @@ class ControlPanel extends StatelessWidget {
       final resizeCover = cameraStore.resizeCover.value;
 
       final isRunning = status == CameraStatus.running;
-      final isChanging = status == CameraStatus.opening || status == CameraStatus.closing;
+      final isChanging =
+          status == CameraStatus.opening || status == CameraStatus.closing;
 
-      return Material(
-        type: MaterialType.transparency,
-        child: Center(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 400),
-            margin: const EdgeInsets.symmetric(horizontal: 24),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(40),
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                child: Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(40),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1.5),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 1. Devices
+          const _PanelHeader(icon: Icons.sensors, title: "HARDWARE SENSORS"),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: devices.map((d) {
+                final isSelected = selectedDevice?.id == d.id;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _PremiumChip(
+                    label: d.name,
+                    isSelected: isSelected,
+                    onPressed: isChanging
+                        ? null
+                        : () => cameraStore.selectDevice(d),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const _PanelHeader(icon: Icons.settings_input_component, title: "CONFIG"),
-                          IconButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close, color: Colors.white24, size: 20),
-                          )
-                        ],
-                      ),
-                      const SizedBox(height: 20),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 24),
 
-                      // 1. Devices
-                      const _PanelHeader(icon: Icons.sensors, title: "HARDWARE SENSORS"),
-                      const SizedBox(height: 12),
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: devices.map((d) {
-                            final isSelected = selectedDevice?.id == d.id;
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: _PremiumChip(
-                                label: d.name,
-                                isSelected: isSelected,
-                                onPressed: isChanging ? null : () => cameraStore.selectDevice(d),
-                              ),
-                            );
-                          }).toList(),
+          // 2. Format & Performance
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _PanelHeader(
+                      icon: Icons.hd_outlined,
+                      title: "QUALITY",
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ChoiceBtn(
+                          label: '720',
+                          isSelected: selectedWidth == 1280,
+                          onTap: () => cameraStore.setResolution(1280, 720),
                         ),
+                        _ChoiceBtn(
+                          label: '1080',
+                          isSelected: selectedWidth == 1920,
+                          onTap: () => cameraStore.setResolution(1920, 1080),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _PanelHeader(icon: Icons.speed, title: "FPS"),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ChoiceBtn(
+                          label: '30',
+                          isSelected: selectedFps == 30,
+                          onTap: () => cameraStore.setFps(30),
+                        ),
+                        _ChoiceBtn(
+                          label: '60',
+                          isSelected: selectedFps == 60,
+                          onTap: () => cameraStore.setFps(60),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 3. Stream Controls
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _PanelHeader(
+                      icon: Icons.hub_outlined,
+                      title: "NITRO ENGINE",
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        _ChoiceBtn(
+                          label: 'YUV',
+                          isSelected: pixelFormat == 0,
+                          onTap: () => cameraStore.setPixelFormat(0),
+                        ),
+                        _ChoiceBtn(
+                          label: 'BGRA',
+                          isSelected: pixelFormat == 1,
+                          onTap: () => cameraStore.setPixelFormat(1),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              _StreamToggle(
+                isActive: isProcessing,
+                onChanged: isRunning ? cameraStore.toggleProcessing : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 4. Sampling Rate
+          const _PanelHeader(icon: Icons.alt_route, title: "ANALYSIS SAMPLING"),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Watch(
+                  (context) => SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 2,
+                      activeTrackColor: Colors.cyanAccent,
+                      inactiveTrackColor: Colors.white10,
+                      thumbColor: Colors.cyanAccent,
+                      overlayColor: Colors.cyanAccent.withValues(alpha: 0.1),
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
                       ),
-                      const SizedBox(height: 24),
-
-                      // 2. Format & Performance
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const _PanelHeader(icon: Icons.hd_outlined, title: "QUALITY"),
-                                const SizedBox(height: 12),
-                                Wrap(spacing: 8, runSpacing: 8, children: [
-                                  _ChoiceBtn(label: '720', isSelected: selectedWidth == 1280, onTap: () => cameraStore.setResolution(1280, 720)),
-                                  _ChoiceBtn(label: '1080', isSelected: selectedWidth == 1920, onTap: () => cameraStore.setResolution(1920, 1080)),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const _PanelHeader(icon: Icons.speed, title: "FPS"),
-                                const SizedBox(height: 12),
-                                Wrap(spacing: 8, runSpacing: 8, children: [
-                                  _ChoiceBtn(label: '30', isSelected: selectedFps == 30, onTap: () => cameraStore.setFps(30)),
-                                  _ChoiceBtn(label: '60', isSelected: selectedFps == 60, onTap: () => cameraStore.setFps(60)),
-                                ]),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // 3. Stream Controls
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const _PanelHeader(icon: Icons.hub_outlined, title: "NITRO ENGINE"),
-                                const SizedBox(height: 12),
-                                Wrap(spacing: 8, children: [
-                                  _ChoiceBtn(label: 'YUV', isSelected: pixelFormat == 0, onTap: () => cameraStore.setPixelFormat(0)),
-                                  _ChoiceBtn(label: 'BGRA', isSelected: pixelFormat == 1, onTap: () => cameraStore.setPixelFormat(1)),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          _StreamToggle(
-                            isActive: isProcessing,
-                            onChanged: isRunning ? cameraStore.toggleProcessing : null,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // 4. Sampling Rate
-                      const _PanelHeader(icon: Icons.alt_route, title: "ANALYSIS SAMPLING"),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Watch((context) => SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 2,
-                                activeTrackColor: Colors.cyanAccent,
-                                inactiveTrackColor: Colors.white10,
-                                thumbColor: Colors.cyanAccent,
-                                overlayColor: Colors.cyanAccent.withValues(alpha: 0.1),
-                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              ),
-                              child: Slider(
-                                value: samplingRate.toDouble(),
-                                min: 1,
-                                max: 30,
-                                divisions: 29,
-                                onChanged: isRunning ? (v) => cameraStore.setSamplingRate(v.toInt()) : null,
-                              ),
-                            )),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            "EVERY $samplingRate'th FRAME",
-                            style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w900, fontFamily: 'monospace'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // 5. Video stabilization (new nitro API)
-                      const _PanelHeader(icon: Icons.vibration, title: "STABILIZATION"),
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        _ChoiceBtn(label: 'OFF', isSelected: videoStab == 0, onTap: () => cameraStore.setVideoStabilization(0)),
-                        _ChoiceBtn(label: 'STANDARD', isSelected: videoStab == 1, onTap: () => cameraStore.setVideoStabilization(1)),
-                        _ChoiceBtn(label: 'CINEMATIC', isSelected: videoStab == 2, onTap: () => cameraStore.setVideoStabilization(2)),
-                      ]),
-                      const SizedBox(height: 24),
-
-                      // 6. Video codec (H.264 / HEVC)
-                      const _PanelHeader(icon: Icons.movie_creation_outlined, title: "VIDEO CODEC"),
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        _ChoiceBtn(label: 'H.264', isSelected: videoCodec == VideoCodec.h264, onTap: () => cameraStore.videoCodec.value = VideoCodec.h264),
-                        _ChoiceBtn(label: 'HEVC', isSelected: videoCodec == VideoCodec.hevc, onTap: () => cameraStore.videoCodec.value = VideoCodec.hevc),
-                      ]),
-                      const SizedBox(height: 24),
-
-                      // 7. Preview fit (resizeMode)
-                      const _PanelHeader(icon: Icons.crop_free, title: "PREVIEW FIT"),
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        _ChoiceBtn(label: 'COVER', isSelected: resizeCover, onTap: () => cameraStore.resizeCover.value = true),
-                        _ChoiceBtn(label: 'CONTAIN', isSelected: !resizeCover, onTap: () => cameraStore.resizeCover.value = false),
-                      ]),
-                      const SizedBox(height: 24),
-
-                      // 8. Capture toggles (geotag / FPS graph)
-                      const _PanelHeader(icon: Icons.tune, title: "CAPTURE"),
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, children: [
-                        _ChoiceBtn(label: 'GEOTAG', isSelected: geotag, onTap: () => cameraStore.geotagEnabled.value = !geotag),
-                        _ChoiceBtn(label: 'FPS GRAPH', isSelected: showFps, onTap: () => cameraStore.showFpsGraph.value = !showFps),
-                      ]),
-                    ],
+                    ),
+                    child: Slider(
+                      value: samplingRate.toDouble(),
+                      min: 1,
+                      max: 30,
+                      divisions: 29,
+                      onChanged: isRunning
+                          ? (v) => cameraStore.setSamplingRate(v.toInt())
+                          : null,
+                    ),
                   ),
                 ),
               ),
-            ),
+              const SizedBox(width: 12),
+              Text(
+                "EVERY $samplingRate'th FRAME",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ),
-        ),
+          const SizedBox(height: 24),
+
+          // 5. Video stabilization (new nitro API)
+          const _PanelHeader(icon: Icons.vibration, title: "STABILIZATION"),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChoiceBtn(
+                label: 'OFF',
+                isSelected: videoStab == 0,
+                onTap: () => cameraStore.setVideoStabilization(0),
+              ),
+              _ChoiceBtn(
+                label: 'STANDARD',
+                isSelected: videoStab == 1,
+                onTap: () => cameraStore.setVideoStabilization(1),
+              ),
+              _ChoiceBtn(
+                label: 'CINEMATIC',
+                isSelected: videoStab == 2,
+                onTap: () => cameraStore.setVideoStabilization(2),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 6. Video codec (H.264 / HEVC)
+          const _PanelHeader(
+            icon: Icons.movie_creation_outlined,
+            title: "VIDEO CODEC",
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChoiceBtn(
+                label: 'H.264',
+                isSelected: videoCodec == VideoCodec.h264,
+                onTap: () => cameraStore.videoCodec.value = VideoCodec.h264,
+              ),
+              _ChoiceBtn(
+                label: 'HEVC',
+                isSelected: videoCodec == VideoCodec.hevc,
+                onTap: () => cameraStore.videoCodec.value = VideoCodec.hevc,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 7. Preview fit (resizeMode)
+          const _PanelHeader(icon: Icons.crop_free, title: "PREVIEW FIT"),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChoiceBtn(
+                label: 'COVER',
+                isSelected: resizeCover,
+                onTap: () => cameraStore.resizeCover.value = true,
+              ),
+              _ChoiceBtn(
+                label: 'CONTAIN',
+                isSelected: !resizeCover,
+                onTap: () => cameraStore.resizeCover.value = false,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // 8. Capture toggles (geotag / FPS graph)
+          const _PanelHeader(icon: Icons.tune, title: "CAPTURE"),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChoiceBtn(
+                label: 'GEOTAG',
+                isSelected: geotag,
+                onTap: () => cameraStore.geotagEnabled.value = !geotag,
+              ),
+              _ChoiceBtn(
+                label: 'FPS GRAPH',
+                isSelected: showFps,
+                onTap: () => cameraStore.showFpsGraph.value = !showFps,
+              ),
+            ],
+          ),
+        ],
       );
     });
   }
@@ -246,7 +382,11 @@ class _PremiumChip extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback? onPressed;
-  const _PremiumChip({required this.label, required this.isSelected, this.onPressed});
+  const _PremiumChip({
+    required this.label,
+    required this.isSelected,
+    this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -256,9 +396,15 @@ class _PremiumChip extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.cyanAccent : Colors.white.withValues(alpha: 0.05),
+          color: isSelected
+              ? Colors.cyanAccent
+              : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isSelected ? Colors.cyanAccent : Colors.white.withValues(alpha: 0.1)),
+          border: Border.all(
+            color: isSelected
+                ? Colors.cyanAccent
+                : Colors.white.withValues(alpha: 0.1),
+          ),
         ),
         child: Text(
           label.toUpperCase(),
@@ -277,7 +423,11 @@ class _ChoiceBtn extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
-  const _ChoiceBtn({required this.label, required this.isSelected, required this.onTap});
+  const _ChoiceBtn({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -287,9 +437,15 @@ class _ChoiceBtn extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.cyanAccent.withValues(alpha: 0.1) : Colors.transparent,
+          color: isSelected
+              ? Colors.cyanAccent.withValues(alpha: 0.1)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSelected ? Colors.cyanAccent : Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(
+            color: isSelected
+                ? Colors.cyanAccent
+                : Colors.white.withValues(alpha: 0.05),
+          ),
         ),
         child: Text(
           label,

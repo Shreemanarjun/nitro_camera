@@ -28,6 +28,9 @@ export 'src/controller/camera_controller.dart';
 // Frame processing.
 export 'src/processing/frame_processor.dart';
 
+// Code scanning (1D / 2D / QR — selectable per frame).
+export 'src/scanner/code_scanner.dart';
+
 // Widgets.
 export 'src/widgets/camera_preview.dart';
 export 'src/widgets/camera_view.dart';

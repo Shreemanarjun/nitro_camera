@@ -370,6 +370,9 @@ class CameraStore {
   /// -1 = AUTO (follow device rotation); 0/90/180/270 = locked.
   final targetOrientation = signal(-1);
 
+  /// Which code family the scanner looks for (QR / 1D / 2D / ALL).
+  final scanKind = signal<CodeScanKind>(CodeScanKind.all);
+
   void setTargetOrientation(int degrees) {
     targetOrientation.value = degrees;
     activeController.value?.setTargetOrientation(degrees);

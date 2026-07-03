@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
+import 'package:signals_flutter/signals_flutter.dart';
 import 'dart:ui' as ui;
-import '../../../scanner/barcode_scanner.dart';
+import '../../../state/camera_store.dart';
 
 class FrameOverlay extends StatefulWidget {
   final bool isProcessing;
@@ -17,22 +18,28 @@ class _FrameOverlayState extends State<FrameOverlay> {
   final ui.Image? _image = null; // reserved (debug preview)
   final _fpsCounter = ValueNotifier<double>(0);
   final _frameCount = ValueNotifier<int>(0);
-  String? _lastResult;
+  CodeResult? _lastResult;
   Timer? _resultClearTimer;
 
-  DartBarcodeScanner? _scanner;
-  StreamSubscription<BarcodeResult>? _resultSub;
+  CodeScanner? _scanner;
+  StreamSubscription<CodeResult>? _resultSub;
+  late final void Function() _kindWatchDispose;
 
   @override
   void initState() {
     super.initState();
-    _initScanner();
+    _initScanner(cameraStore.scanKind.value);
+    // Restart the worker with the new format family when the user switches
+    // the QR / 1D / 2D / ALL chips.
+    _kindWatchDispose = cameraStore.scanKind.subscribe((kind) {
+      _restartScanner(kind);
+    });
   }
 
-  /// Spawns a persistent scanning isolate and consumes the frame stream with
-  /// zero-copy hand-off + drop-latest backpressure (see [DartBarcodeScanner]).
-  Future<void> _initScanner() async {
-    final scanner = DartBarcodeScanner();
+  /// Spawns a persistent scanning isolate for [kind] and consumes the frame
+  /// stream with zero-copy hand-off + drop-latest backpressure ([CodeScanner]).
+  Future<void> _initScanner(CodeScanKind kind) async {
+    final scanner = CodeScanner(kind: kind);
     await scanner.start(NitroCamera.instance.frameStream);
     if (!mounted) {
       await scanner.dispose();
@@ -42,7 +49,15 @@ class _FrameOverlayState extends State<FrameOverlay> {
     _resultSub = scanner.results.listen(_onResult);
   }
 
-  void _onResult(BarcodeResult r) {
+  Future<void> _restartScanner(CodeScanKind kind) async {
+    await _resultSub?.cancel();
+    await _scanner?.dispose();
+    _scanner = null;
+    if (!mounted) return;
+    await _initScanner(kind);
+  }
+
+  void _onResult(CodeResult r) {
     if (!mounted || !widget.isProcessing) return;
     _frameCount.value++;
     if (_lastResult == null) {
@@ -50,7 +65,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
       HapticFeedback.selectionClick();
     }
     setState(() {
-      _lastResult = r.value;
+      _lastResult = r;
       _resultClearTimer?.cancel();
       _resultClearTimer = Timer(const Duration(seconds: 2), () {
         if (mounted) setState(() => _lastResult = null);
@@ -60,6 +75,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
 
   @override
   void dispose() {
+    _kindWatchDispose();
     _resultSub?.cancel();
     _scanner?.dispose();
     _image?.dispose();
@@ -73,69 +89,217 @@ class _FrameOverlayState extends State<FrameOverlay> {
   Widget build(BuildContext context) {
     if (!widget.isProcessing) return const SizedBox.shrink();
 
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          // 0. Dimmed Background with Scanner Cutout
-          const Positioned.fill(child: _TacticalScannerOverlay()),
+    return Stack(
+      children: [
+        IgnorePointer(
+          child: Stack(
+            children: [
+              // 0. Dimmed Background with Scanner Cutout
+              const Positioned.fill(child: _TacticalScannerOverlay()),
 
-          // 1. Stats Dashboard (Top Left)
-          Positioned(
-            left: 20,
-            top: 100,
-            child: _AnimatedStatsCard(
-              fpsCounter: _fpsCounter,
-              frameCount: _frameCount,
-              lastResult: _lastResult,
-            ),
-          ),
+              // 1. Stats Dashboard (Top Left)
+              Positioned(
+                left: 20,
+                top: 100,
+                child: _AnimatedStatsCard(
+                  fpsCounter: _fpsCounter,
+                  frameCount: _frameCount,
+                  lastResult: _lastResult?.text,
+                ),
+              ),
 
-          // 2. Corner Debug View (Small Preview)
-          if (_image != null)
-            Positioned(
-              right: 20,
-              top: 80,
-              child: Container(
-                width: 90,
-                height: 120,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.cyanAccent.withValues(alpha: 0.1),
-                      blurRadius: 10,
-                    )
-                  ],
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                    width: 1,
+              // 2. Corner Debug View (Small Preview)
+              if (_image != null)
+                Positioned(
+                  right: 20,
+                  top: 80,
+                  child: Container(
+                    width: 90,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.cyanAccent.withValues(alpha: 0.1),
+                          blurRadius: 10,
+                        )
+                      ],
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        width: 1,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: RawImage(image: _image, fit: BoxFit.cover),
+                    ),
                   ),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: RawImage(image: _image, fit: BoxFit.cover),
+
+              // 3. QR Viewfinder (Premium Design)
+              Center(
+                child: _PremiumViewfinder(
+                  isScanning: widget.isProcessing,
+                  hasResult: _lastResult != null,
                 ),
               ),
-            ),
 
-          // 3. QR Viewfinder (Premium Design)
-          Center(
-            child: _PremiumViewfinder(
-              isScanning: widget.isProcessing,
-              hasResult: _lastResult != null,
-            ),
+              // 4. Detected Result (Floating Glass Card)
+              if (_lastResult != null)
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 280),
+                    child: _QRResultCard(result: _lastResult!),
+                  ),
+                ),
+            ],
           ),
+        ),
 
-          // 4. Detected Result (Floating Glass Card)
-          if (_lastResult != null)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 280),
-                child: _QRResultCard(result: _lastResult!),
-              ),
-            ),
-        ],
+        // 5. Format family selector (QR / 1D / 2D / ALL) — tappable.
+        Align(
+          alignment: Alignment.center,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 400),
+            child: Watch((_) => _ScanKindChips(
+                  selected: cameraStore.scanKind.value,
+                  onChanged: (k) => cameraStore.scanKind.value = k,
+                )),
+          ),
+        ),
+
+        // 6. Quick zoom (small/far codes) — tappable, right of the window.
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 14),
+            child: Watch((_) => _ZoomChips(
+                  current: cameraStore.currentZoom.value,
+                  onChanged: cameraStore.setZoom,
+                )),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Vertical 1× / 2× / 3× quick-zoom chips for the scanner.
+class _ZoomChips extends StatelessWidget {
+  final double current;
+  final ValueChanged<double> onChanged;
+  const _ZoomChips({required this.current, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final z in const [1.0, 2.0, 3.0])
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onChanged(z);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    width: 40,
+                    height: 40,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (current - z).abs() < 0.35
+                          ? Colors.cyanAccent
+                          : Colors.transparent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${z.toInt()}×',
+                        style: TextStyle(
+                          color: (current - z).abs() < 0.35
+                              ? Colors.black
+                              : Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// QR / 1D / 2D / ALL selector chips shown under the viewfinder.
+class _ScanKindChips extends StatelessWidget {
+  final CodeScanKind selected;
+  final ValueChanged<CodeScanKind> onChanged;
+  const _ScanKindChips({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final kind in CodeScanKind.values)
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onChanged(kind);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: kind == selected
+                          ? Colors.cyanAccent
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      kind.label,
+                      style: TextStyle(
+                        color: kind == selected ? Colors.black : Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -440,7 +604,7 @@ class _ScannerHolePainter extends CustomPainter {
 }
 
 class _QRResultCard extends StatelessWidget {
-  final String result;
+  final CodeResult result;
   const _QRResultCard({required this.result});
 
   @override
@@ -482,9 +646,13 @@ class _QRResultCard extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          "SCAN SUCCESS",
-                          style: TextStyle(
+                        Text(
+                          [
+                            result.format.name.toUpperCase(),
+                            if (result.isGs1) 'GS1',
+                            if (result.isbn != null) 'ISBN',
+                          ].join('  ·  '),
+                          style: const TextStyle(
                             color: Colors.greenAccent,
                             fontSize: 9,
                             fontWeight: FontWeight.w900,
@@ -493,7 +661,7 @@ class _QRResultCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          result,
+                          result.text,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -508,7 +676,8 @@ class _QRResultCard extends StatelessWidget {
                   ),
                   IconButton(
                     onPressed: () {
-                       // Placeholder for action like open URL or copy
+                      Clipboard.setData(ClipboardData(text: result.text));
+                      HapticFeedback.selectionClick();
                     },
                     icon: const Icon(Icons.copy_rounded, color: Colors.white38, size: 20),
                   ),

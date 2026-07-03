@@ -212,15 +212,31 @@ class _CameraViewState extends State<CameraView> {
       return widget.errorBuilder!(error, _retry);
     }
     final controller = _controller;
+    final Widget child;
     if (controller == null || !controller.isInitialized) {
-      return widget.loading ??
-          const Center(child: CircularProgressIndicator());
+      child = KeyedSubtree(
+        key: const ValueKey('nitra_camera_loading'),
+        child: widget.loading ??
+            const Center(child: CircularProgressIndicator()),
+      );
+    } else {
+      child = KeyedSubtree(
+        // Keyed per session so a device/format switch cross-fades from the
+        // loading state into the NEW preview instead of popping.
+        key: ValueKey('nitra_camera_${controller.textureId}'),
+        child: CameraPreview(
+          controller: controller,
+          mode: widget.previewMode,
+          resizeMode: widget.resizeMode,
+          child: widget.child,
+        ),
+      );
     }
-    return CameraPreview(
-      controller: controller,
-      mode: widget.previewMode,
-      resizeMode: widget.resizeMode,
-      child: widget.child,
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: child,
     );
   }
 }
