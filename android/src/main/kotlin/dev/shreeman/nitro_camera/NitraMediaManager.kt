@@ -159,14 +159,20 @@ class NitraMediaManager(
         // Android's MediaRecorder container is MPEG-4 for both mp4 & mov requests.
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
 
-        // Pick an ENCODER-SUPPORTED recording size closest to the requested one.
-        // Recording at arbitrary (screen-derived) dimensions is the main cause of
-        // `MediaRecorder.prepare()` failing with -2147483648 on many devices.
+        // Pick an ENCODER-SUPPORTED recording size, CAPPED at 1080p. Recording at
+        // multi-MP dimensions makes both start (encoder alloc) and, especially,
+        // stop() (moov finalise) slow — and arbitrary screen-derived sizes are the
+        // main cause of `MediaRecorder.prepare()` failing with -2147483648.
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val supported = map?.getOutputSizes(MediaRecorder::class.java)
-        val target = supported?.minByOrNull {
-            Math.abs(it.width.toLong() * it.height - width.toLong() * height)
-        } ?: android.util.Size(width, height)
+        val maxRecordDim = 1920
+        val target = supported
+            ?.filter { Math.max(it.width, it.height) <= maxRecordDim }
+            ?.maxByOrNull { it.width.toLong() * it.height } // largest ≤1080p
+            ?: supported?.minByOrNull {
+                Math.abs(it.width.toLong() * it.height - width.toLong() * height)
+            }
+            ?: android.util.Size(width, height)
         // H.264 requires even dimensions on many devices.
         val safeWidth = if (target.width % 2 == 0) target.width else target.width - 1
         val safeHeight = if (target.height % 2 == 0) target.height else target.height - 1

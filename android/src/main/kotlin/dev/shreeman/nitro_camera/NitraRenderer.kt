@@ -19,6 +19,26 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var sensorOrientation: Int = 90
     private var isFrontCamera: Boolean = false
 
+    /** Current device/display rotation in degrees (0/90/180/270). Written from the
+     *  main thread (DisplayListener), read on the GL thread — hence @Volatile. */
+    @Volatile
+    var displayRotationDegrees: Int = 0
+
+    // Lens-undistortion params (see UNDISTORT_GLSL). Set once per session from the
+    // camera calibration; 0,0,0 => passthrough (main/tele lenses).
+    @Volatile private var distK1 = 0f
+    @Volatile private var distK2 = 0f
+    @Volatile private var distK3 = 0f
+    @Volatile private var distFocal = 0.5f
+
+    /** Configure barrel-undistortion. [focalNorm] = focal length / buffer width. */
+    fun setDistortion(k1: Float, k2: Float, k3: Float, focalNorm: Float) {
+        distK1 = k1
+        distK2 = k2
+        distK3 = k3
+        distFocal = if (focalNorm > 0.01f) focalNorm else 0.5f
+    }
+
     fun setSensorOrientation(orientation: Int) {
         this.sensorOrientation = orientation
     }
@@ -45,6 +65,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var texCoordBuffer: FloatBuffer
 
     private var isFirstFrame = true
+    private var frameConsumed = false
+    private var lastDimLog = ""
     private var transformMatrix = FloatArray(16)
     private val vertexShader = "attribute vec4 position;\n" +
             "attribute vec4 texCoord;\n" +
@@ -56,13 +78,30 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             "    vTextureCoord = (uSTMatrix * texCoord).xy;\n" +
             "}\n"
 
+    // Lens (barrel) undistortion applied at the sampling step. For each output
+    // (undistorted) texel we sample the SOURCE at the distorted position — the
+    // forward Brown radial model r' = r·(1 + k1·r² + k2·r⁴ + k3·r⁶). Isotropic +
+    // centred at 0.5, so it's invariant to our rotation / crop / OES V-flip. A
+    // zero K vector is an exact passthrough (used by the main/tele lenses).
+    private val UNDISTORT_GLSL =
+        "uniform vec3 uDistK;\n" +      // k1, k2, k3 (0,0,0 => disabled)
+        "uniform float uDistFocal;\n" + // focal length / buffer width (isotropic)
+        "vec2 undistort(vec2 tc) {\n" +
+        "    if (uDistK.x == 0.0 && uDistK.y == 0.0 && uDistK.z == 0.0) return tc;\n" +
+        "    vec2 n = (tc - 0.5) / uDistFocal;\n" +
+        "    float r2 = dot(n, n);\n" +
+        "    float f = 1.0 + uDistK.x*r2 + uDistK.y*r2*r2 + uDistK.z*r2*r2*r2;\n" +
+        "    return (n * f) * uDistFocal + 0.5;\n" +
+        "}\n"
+
     private val PASSTHROUGH_FS =
         "#extension GL_OES_EGL_image_external : require\n" +
         "precision highp float;\n" +
         "varying vec2 vTextureCoord;\n" +
         "uniform samplerExternalOES sTexture;\n" +
+        UNDISTORT_GLSL +
         "void main() {\n" +
-        "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
+        "    gl_FragColor = texture2D(sTexture, undistort(vTextureCoord));\n" +
         "}\n"
 
     private var fragmentShader = PASSTHROUGH_FS
@@ -208,6 +247,29 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         }
     }
 
+    /**
+     * Rebinds the Flutter-texture output to a new producer [surface] (Flutter
+     * recreates it on rotation/layout). Call on the GL thread. This must NOT
+     * restart the camera — the camera writes to our input SurfaceTexture, not to
+     * this surface; only the EGL window binding needs to change.
+     */
+    fun setFlutterSurface(surface: Surface?) {
+        val display = eglDisplay
+        val config = eglConfig
+        if (display == EGL14.EGL_NO_DISPLAY || config == null) return
+
+        if (eglSurface != EGL14.EGL_NO_SURFACE) {
+            EGL14.eglDestroySurface(display, eglSurface)
+            eglSurface = EGL14.EGL_NO_SURFACE
+        }
+        if (surface != null && surface.isValid) {
+            eglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
+            if (eglSurface == EGL14.EGL_NO_SURFACE) {
+                Log.e("NitroCamera", "NitraRenderer: Failed to rebind Flutter surface: 0x${Integer.toHexString(EGL14.eglGetError())}")
+            }
+        }
+    }
+
     fun setRecordingSurface(surface: android.view.Surface?) {
         val display = eglDisplay
         val config = eglConfig
@@ -241,11 +303,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 "precision highp float;\n" +
                 "varying vec2 vTextureCoord;\n" +
                 "uniform samplerExternalOES sTexture;\n" +
+                UNDISTORT_GLSL +
                 "\n" +
                 "// Compatibility macros for user-friendly filter writing\n" +
                 "#define fragColor gl_FragColor\n" +
                 "#define uv vTextureCoord\n" +
-                "#define inputColor (texture2D(sTexture, vTextureCoord))\n" +
+                "#define inputColor (texture2D(sTexture, undistort(vTextureCoord)))\n" +
                 "uniform float time;\n" +
                 shader
         }
@@ -261,15 +324,25 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
 
         try {
-            // 1. Core Logic (on eglSurface - Flutter Texture)
-            renderToSurface(eglSurface)
-
-            // 2. Extra Logic (on platformEglSurface - AndroidView)
+            frameConsumed = false
             val pSurface = platformSurface
-            if (platformEglSurface != EGL14.EGL_NO_SURFACE && pSurface != null && pSurface.isValid) {
+            val pvActive = platformEglSurface != EGL14.EGL_NO_SURFACE &&
+                pSurface != null && pSurface.isValid
+
+            // 1. Flutter Texture surface. When the platform view is attached the
+            // Texture widget isn't on screen, so skip its draw+swap (halves GPU
+            // work — vision-camera renders one surface). We still need the OES
+            // frame consumed each vsync; renderToSurface(platformEglSurface)
+            // handles updateTexImage when the texture surface was skipped.
+            if (!pvActive) {
+                renderToSurface(eglSurface)
+            }
+
+            // 2. Platform view surface (AndroidView SurfaceView)
+            if (pvActive) {
                 GLES20.glFlush()
                 renderToSurface(platformEglSurface)
-            } else if (platformEglSurface != EGL14.EGL_NO_SURFACE && (pSurface == null || !pSurface.isValid)) {
+            } else if (platformEglSurface != EGL14.EGL_NO_SURFACE) {
                 detachPlatformSurface()
             }
 
@@ -296,8 +369,10 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
         val st = inputSurfaceTexture ?: return
 
-        // Only update texture ONCE per frame (on the first surface)
-        if (surface == eglSurface) {
+        // Consume the camera frame ONCE per drawFrame (on whichever surface
+        // renders first — texture surface normally, platform surface in PV mode).
+        if (!frameConsumed) {
+            frameConsumed = true
             try {
                 st.updateTexImage()
                 st.getTransformMatrix(transformMatrix)
@@ -318,48 +393,97 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // --- CENTER CROP PROJECTION ---
-        // We calculate a projection matrix that crops the input buffer to fill the output surface
-        // without stretching, providing a "Center Crop" effect directly on the GPU.
+        // --- ROTATION + CENTER-CROP (applied AFTER the camera OES transform) ---
+        // The sensor buffer is landscape; we rotate it upright + cover-crop it. The
+        // rotation must be composed AFTER the device's getTransformMatrix (which
+        // includes a V-flip) — composing before it flips the rotation direction and
+        // leaves the preview 90° off (verified vs the OnePlus stock camera).
         android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
-
-        val isRotated = sensorOrientation == 90 || sensorOrientation == 270
-        val inputW = if (isRotated) height.toFloat() else width.toFloat()
-        val inputH = if (isRotated) width.toFloat() else height.toFloat()
-
-        val inputAspect = inputW / inputH
-        val outputAspect = sw / sh
-
-        var scaleX = 1.0f
-        var scaleY = 1.0f
-
-        if (inputAspect > outputAspect) {
-            // Input is wider than output - crop horizontal edges
-            scaleX = inputAspect / outputAspect
+        // Effective rotation accounts for BOTH the sensor mount AND the current
+        // device/display rotation, so the preview stays upright in every device
+        // orientation (matches the stock camera). back: sensor - display;
+        // front: sensor + display (then mirrored below).
+        val effectiveOrientation = if (isFrontCamera) {
+            (sensorOrientation + displayRotationDegrees) % 360
         } else {
-            // Input is taller than output - crop vertical edges
-            scaleY = outputAspect / inputAspect
+            (sensorOrientation - displayRotationDegrees + 360) % 360
         }
-
-        android.opengl.Matrix.scaleM(projectionMatrix, 0, scaleX, scaleY, 1f)
-
-        // --- MIRRORING FOR FRONT CAMERA ---
-        if (isFrontCamera) {
-            // Mirror along the X axis
-            android.opengl.Matrix.scaleM(projectionMatrix, 0, -1f, 1f, 1f)
+        // The OES matrix may ALREADY contain a rotation: when the producer surface
+        // carries a display transform hint, the HAL pre-rotates the buffer and
+        // encodes it in getTransformMatrix (observed on OnePlus: oes = V-flip∘R90).
+        // Decompose it (R = F·L, F = plain V-flip) and only apply the DIFFERENCE —
+        // otherwise we double-rotate. Plain V-flip matrices give 0 → unchanged.
+        val oesRotation = run {
+            val r00 = transformMatrix[0]
+            val r10 = -transformMatrix[1]
+            val deg = Math.toDegrees(Math.atan2(r10.toDouble(), r00.toDouble()))
+            ((Math.round(deg / 90.0) * 90).toInt() % 360 + 360) % 360
         }
+        val extraRotation = ((effectiveOrientation - oesRotation) % 360 + 360) % 360
+
+        // Cover-crop for the effective (post-rotation) content aspect.
+        // EXCEPTION — the Flutter Texture surface renders the FULL upright frame
+        // (no crop): the producer surface's size is timing-dependent (Impeller
+        // sometimes resizes it to layout, sometimes keeps setSize dims), so any
+        // GL-side aspect fit would be wrong half the time. Instead Dart wraps the
+        // Texture in a FittedBox declaring the true content aspect — the buffer's
+        // arbitrary aspect cancels out exactly (same contract as the iOS path).
+        val fillWholeSurface = surface == eglSurface
+        val crop = if (fillWholeSurface) floatArrayOf(1f, 1f)
+            else NitraFrameTransform.coverCrop(
+                effectiveOrientation, width, height, sw.toInt(), sh.toInt())
+        val cropX = crop[0]
+        val cropY = crop[1]
+        val surfKind = when (surface) {
+            eglSurface -> "texture"
+            platformEglSurface -> "platformView"
+            else -> "recorder"
+        }
+        val dimKey = "$surfKind:${sw.toInt()}x${sh.toInt()}:$effectiveOrientation:$oesRotation:$sensorOrientation:$isFrontCamera:$displayRotationDegrees"
+        if (dimKey != lastDimLog) {
+            lastDimLog = dimKey
+            val m = transformMatrix
+            Log.i("NitroCamera", "renderToSurface[$surfKind] surface=${sw.toInt()}x${sh.toInt()} " +
+                "content=${width}x$height sensor=$sensorOrientation front=$isFrontCamera " +
+                "display=$displayRotationDegrees effOrient=$effectiveOrientation " +
+                "oesRot=$oesRotation extra=$extraRotation crop=($cropX,$cropY) " +
+                "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}]")
+        }
+        val texM = FloatArray(16)
+        android.opengl.Matrix.setIdentityM(texM, 0)
+        android.opengl.Matrix.translateM(texM, 0, 0.5f, 0.5f, 0f)
+        android.opengl.Matrix.scaleM(texM, 0, if (isFrontCamera) -cropX else cropX, cropY, 1f)
+        android.opengl.Matrix.rotateM(texM, 0, -extraRotation.toFloat(), 0f, 0f, 1f)
+        android.opengl.Matrix.translateM(texM, 0, -0.5f, -0.5f, 0f)
+        // combined = texM * cameraTransform  → rotation applied to the OES-mapped coords.
+        // Keep `transformMatrix` as the RAW OES matrix (only refreshed on the first
+        // surface via getTransformMatrix); each surface — Flutter texture, platform
+        // SurfaceView, recorder — re-derives its own crop into this LOCAL matrix.
+        // Overwriting the shared field double-transformed the 2nd+ surface (broke
+        // platform-view mode).
+        val stMatrix = FloatArray(16)
+        android.opengl.Matrix.multiplyMM(stMatrix, 0, texM, 0, transformMatrix, 0)
+        // Base texcoords (rotation now lives in uSTMatrix).
+        texCoordBuffer.clear()
+        texCoordBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+        texCoordBuffer.position(0)
 
         isFirstFrame = false
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
-        GLES20.glUniformMatrix4fv(mhLoc, 1, false, transformMatrix, 0)
+        GLES20.glUniformMatrix4fv(mhLoc, 1, false, stMatrix, 0)
         GLES20.glUniformMatrix4fv(upLoc, 1, false, projectionMatrix, 0)
         
         val timeLoc = GLES20.glGetUniformLocation(program, "time")
         if (timeLoc != -1) {
             GLES20.glUniform1f(timeLoc, (System.currentTimeMillis() % 1000000) / 1000f)
         }
+
+        val dkLoc = GLES20.glGetUniformLocation(program, "uDistK")
+        if (dkLoc != -1) GLES20.glUniform3f(dkLoc, distK1, distK2, distK3)
+        val dfLoc = GLES20.glGetUniformLocation(program, "uDistFocal")
+        if (dfLoc != -1) GLES20.glUniform1f(dfLoc, distFocal)
 
         GLES20.glEnableVertexAttribArray(phLoc)
         GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)

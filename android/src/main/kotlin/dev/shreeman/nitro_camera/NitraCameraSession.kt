@@ -7,6 +7,8 @@ import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
+import android.hardware.display.DisplayManager
+import android.view.Display
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
@@ -70,6 +72,80 @@ class NitraCameraSession(
 
     private val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
 
+    // Keep the preview's content rotation in sync with the device orientation so it
+    // stays upright in portrait AND landscape (like the stock camera).
+    private val displayManager =
+        context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayChanged(displayId: Int) {
+            // A manual setTargetOrientation lock wins over display-following.
+            if (targetOrientationDeg < 0) {
+                renderer.displayRotationDegrees = currentDisplayRotationDegrees()
+            }
+        }
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+    }
+
+    /**
+     * Configure GPU barrel-undistortion for this lens so the preview matches the
+     * stock camera (which undistorts the ultra-wide). Prefers the device's own
+     * LENS_DISTORTION calibration; falls back to a tuned default for uncalibrated
+     * ultra-wides (FOV > 90°); leaves normal/tele lenses untouched (K = 0).
+     */
+    private fun configureDistortion() {
+        try {
+            val preArr = characteristics.get(
+                CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE)
+            val intr = characteristics.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)
+            val dist = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                characteristics.get(CameraCharacteristics.LENS_DISTORTION) else null
+
+            // focal length / buffer width (isotropic). Prefer intrinsics, else derive
+            // from focal length + physical sensor width.
+            var focalN = 0f
+            if (intr != null && intr.isNotEmpty() && preArr != null && preArr.width() > 0) {
+                focalN = intr[0] / preArr.width().toFloat()
+            } else {
+                val focals = characteristics.get(
+                    CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                val phys = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                val f = focals?.minOrNull()
+                if (f != null && phys != null && phys.width > 0f) focalN = f / phys.width
+            }
+            if (focalN <= 0.01f) { renderer.setDistortion(0f, 0f, 0f, 0.5f); return }
+
+            val hfovDeg = Math.toDegrees(2.0 * Math.atan(1.0 / (2.0 * focalN)))
+            when {
+                dist != null && dist.size >= 3 && (dist[0] != 0f || dist[1] != 0f) ->
+                    renderer.setDistortion(dist[0], dist[1], dist[2], focalN)
+                hfovDeg > 90.0 ->
+                    // Uncalibrated ultra-wide → mild barrel correction (negative k1
+                    // pulls the bulging edges straight without over-correcting).
+                    renderer.setDistortion(-0.12f, 0.0f, 0f, focalN)
+                else ->
+                    renderer.setDistortion(0f, 0f, 0f, focalN)
+            }
+            Log.d("NitroCamera", "configureDistortion: hfov=${hfovDeg.toInt()}° focalN=$focalN dist=${dist?.joinToString()}")
+        } catch (_: Exception) {
+            renderer.setDistortion(0f, 0f, 0f, 0.5f)
+        }
+    }
+
+    private fun currentDisplayRotationDegrees(): Int {
+        val rotation = try {
+            displayManager.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+        } catch (_: Exception) {
+            Surface.ROTATION_0
+        }
+        return when (rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
     private var previewSurface: Surface? = null
     private var currentRequestBuilder: CaptureRequest.Builder? = null
 
@@ -125,16 +201,31 @@ class NitraCameraSession(
         }
         try { latch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
 
-        // Listen to SurfaceProducer lifecycle if available
+        // Seed + track device rotation for an upright preview in all orientations.
+        renderer.displayRotationDegrees = currentDisplayRotationDegrees()
+        try { displayManager.registerDisplayListener(displayListener, cameraHandler) } catch (_: Exception) {}
+
+        // Configure lens undistortion (corrects the ultra-wide's barrel distortion).
+        configureDistortion()
+
+        // Listen to SurfaceProducer lifecycle if available. Flutter recreates the
+        // producer surface on rotation/layout — that must ONLY rebind the EGL
+        // window surface, never stop/start the camera (a full preview restart on
+        // every rotation showed as the preview being "recreated").
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && surfaceProducer != null) {
             val producer = surfaceProducer as io.flutter.view.TextureRegistry.SurfaceProducer
             producer.setCallback(object : io.flutter.view.TextureRegistry.SurfaceProducer.Callback {
                 override fun onSurfaceAvailable() {
-                   glHandler.post { startPreview() }
+                    glHandler.post {
+                        renderer.setFlutterSurface(producer.getSurface())
+                        // First-ever availability may precede startPreview; keep the
+                        // original behaviour of kicking the preview if it isn't up.
+                        if (!isPreviewRunning) startPreview()
+                    }
                 }
 
                 override fun onSurfaceCleanup() {
-                    cameraHandler.post { stopPreview() }
+                    glHandler.post { renderer.setFlutterSurface(null) }
                 }
             })
         }
@@ -318,6 +409,23 @@ class NitraCameraSession(
     }
 
     private fun applySessionSettings(builder: CaptureRequest.Builder) {
+        // Lens distortion correction — WITHOUT this the ultra-wide (0.5×) shows heavy
+        // barrel distortion (straight lines bulge → looks "stretched"). Stock camera
+        // apps enable it; so do we, when the device supports it (API 28+).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val modes = characteristics.get(
+                CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES
+            ) ?: intArrayOf()
+            when {
+                modes.contains(CaptureRequest.DISTORTION_CORRECTION_MODE_HIGH_QUALITY) ->
+                    builder.set(CaptureRequest.DISTORTION_CORRECTION_MODE,
+                        CaptureRequest.DISTORTION_CORRECTION_MODE_HIGH_QUALITY)
+                modes.contains(CaptureRequest.DISTORTION_CORRECTION_MODE_FAST) ->
+                    builder.set(CaptureRequest.DISTORTION_CORRECTION_MODE,
+                        CaptureRequest.DISTORTION_CORRECTION_MODE_FAST)
+            }
+        }
+
         val af = when {
             afLocked      -> CaptureRequest.CONTROL_AF_MODE_OFF
             afMode == 0L  -> CaptureRequest.CONTROL_AF_MODE_OFF
@@ -425,6 +533,7 @@ class NitraCameraSession(
     suspend fun close() {
         if (isClosed) return
         isClosed = true
+        try { displayManager.unregisterDisplayListener(displayListener) } catch (_: Exception) {}
         onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, "")
 
         // 1. DETACH from Flutter immediately on Main thread to prevent new frames from scheduling
@@ -564,7 +673,16 @@ class NitraCameraSession(
     fun lockExposure(locked: Boolean) { aeLocked = locked; triggerUpdate() }
     fun lockWhiteBalance(locked: Boolean) { awbLocked = locked; triggerUpdate() }
     fun lockFocus(locked: Boolean) { afLocked = locked; triggerUpdate() }
-    fun setTargetOrientation(degrees: Int) { targetOrientationDeg = degrees }
+    /**
+     * Locks the preview/output rotation to [degrees] (0/90/180/270), overriding
+     * the automatic follow-the-display behaviour; -1 resumes auto. Takes effect
+     * on the next rendered frame.
+     */
+    fun setTargetOrientation(degrees: Int) {
+        targetOrientationDeg = degrees
+        renderer.displayRotationDegrees =
+            if (degrees >= 0) degrees else currentDisplayRotationDegrees()
+    }
 
     fun setTorchLevel(level: Double) {
         torchLevel = level.coerceIn(0.0, 1.0)
@@ -599,11 +717,12 @@ class NitraCameraSession(
 
 
     suspend fun takePhoto(): PhotoResult {
-        // Self-healing: the full request layers scene-mode HDR + 3A which some HALs
-        // (e.g. Oplus at full res) reject with REASON_ERROR. If it fails, retry once
-        // with a minimal, known-good request so a photo is still produced.
+        // The scene-mode HDR still request is what some HALs (e.g. Oplus at full
+        // res) reject with REASON_ERROR — and a failed-then-retried capture is the
+        // "slow photo". So DON'T use it on the primary request: the common path now
+        // succeeds first try. A minimal request is still kept as a safety retry.
         return try {
-            doCapture(useHdr = hdrEnabled, minimal = false)
+            doCapture(useHdr = false, minimal = false)
         } catch (e: Exception) {
             Log.w("NitroCamera", "takePhoto failed (${e.message}); retrying minimal request")
             doCapture(useHdr = false, minimal = true)

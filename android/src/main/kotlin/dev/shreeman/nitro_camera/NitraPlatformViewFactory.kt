@@ -22,9 +22,9 @@ class NitraPlatformViewFactory(
         return NitraPlatformView(
             context,
             viewId,
-            onAttach = { surfaceView ->
+            onAttach = { surface ->
                 Handler(Looper.getMainLooper()).post {
-                    impl.attachPlatformView(textureId, surfaceView.holder.surface)
+                    impl.attachPlatformView(textureId, surface)
                 }
             },
             onDetach = {

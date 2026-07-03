@@ -82,14 +82,11 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Sync resolution with screen aspect to avoid stretching
-    final size = MediaQuery.of(context).size;
-    final pixelRatio = MediaQuery.of(context).devicePixelRatio;
-    cameraStore.setResolution(
-      (size.width * pixelRatio).toInt(),
-      (size.height * pixelRatio).toInt(),
-    );
-
+    // NOTE: never derive the camera resolution from MediaQuery here — doing so
+    // reopened the whole camera session on every device rotation (width/height
+    // are CameraView lifecycle fields) and raced a stale platform-view binding,
+    // which showed as a squeezed/rotated preview. The stream format is fixed
+    // (quality selector); the native renderer cover-crops to any surface.
     return Scaffold(
       backgroundColor: Colors.black,
       body: Watch((context) {
@@ -174,6 +171,9 @@ class _CameraAppState extends State<CameraApp> with WidgetsBindingObserver {
                     width: cameraStore.width.value,
                     height: cameraStore.height.value,
                     fps: cameraStore.fps.value,
+                    // Switches Texture ↔ platform-view SurfaceView live (no camera
+                    // reopen — previewMode isn't a lifecycle field).
+                    previewMode: cameraStore.previewMode.value,
                     resizeMode: cameraStore.resizeCover.value
                         ? PreviewResizeMode.cover
                         : PreviewResizeMode.contain,

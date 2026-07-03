@@ -104,7 +104,7 @@ class CameraStore {
   final controlMode = signal('FILTERS');
   final selectedAspectRatio = signal<double?>(null);
   final showFilters = signal(false);
-  final previewMode = signal<PreviewMode>(PreviewMode.texture);
+  final previewMode = signal<PreviewMode>(PreviewMode.platformView);
 
   static const Map<String, String> filters = {
     'NORMAL': '',
@@ -202,6 +202,7 @@ class CameraStore {
         ..setHdr(enabled: hdrEnabled.value)
         ..setLowLightBoost(enabled: lowLightBoost.value)
         ..setAutoFocus(autoFocusMode.value)
+        ..setTargetOrientation(targetOrientation.value)
         ..setFrameProcessing(enabled: mode.value == 'SCANNER');
     } catch (e) {
       debugPrint('reapplyCurrentSettings: $e');
@@ -366,8 +367,13 @@ class CameraStore {
     activeController.value?.lockWhiteBalance(locked: locked);
   }
 
-  void setTargetOrientation(int degrees) =>
-      activeController.value?.setTargetOrientation(degrees);
+  /// -1 = AUTO (follow device rotation); 0/90/180/270 = locked.
+  final targetOrientation = signal(-1);
+
+  void setTargetOrientation(int degrees) {
+    targetOrientation.value = degrees;
+    activeController.value?.setTargetOrientation(degrees);
+  }
 
   void setFocusPoint(double x, double y) => activeController.value?.focus(x, y);
 

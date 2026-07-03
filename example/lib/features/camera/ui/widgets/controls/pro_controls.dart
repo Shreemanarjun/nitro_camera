@@ -161,13 +161,19 @@ class ProControlsSheet extends StatelessWidget {
                       onChanged: (v) => s.photoQuality.value = v,
                     )),
 
-                // Target orientation
-                _SegmentRow<int>(
-                  label: 'ORIENTATION',
-                  value: 0,
-                  options: const {0: '0°', 90: '90°', 180: '180°', 270: '270°'},
-                  onChanged: s.setTargetOrientation,
-                ),
+                // Target orientation (-1 = follow device rotation)
+                Watch((_) => _SegmentRow<int>(
+                      label: 'ORIENTATION',
+                      value: s.targetOrientation.value,
+                      options: const {
+                        -1: 'AUTO',
+                        0: '0°',
+                        90: '90°',
+                        180: '180°',
+                        270: '270°',
+                      },
+                      onChanged: s.setTargetOrientation,
+                    )),
 
                 const Divider(color: Colors.white12, height: 28),
 

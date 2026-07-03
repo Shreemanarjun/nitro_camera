@@ -33,7 +33,7 @@ class CameraPreview extends StatelessWidget {
   const CameraPreview({
     super.key,
     required this.controller,
-    this.mode = PreviewMode.texture,
+    this.mode = PreviewMode.platformView,
     this.resizeMode = PreviewResizeMode.cover,
     this.child,
   });
@@ -63,7 +63,16 @@ class CameraPreview extends StatelessWidget {
         Widget preview;
         switch (mode) {
           case PreviewMode.platformView:
+            // Plain AndroidView + a TextureView-backed native view: Flutter
+            // composites it via the Texture Layer path — correct aspect and
+            // z-order. (A SurfaceView-backed view either falls back to Virtual
+            // Display → slightly squeezed, or punches through behind Flutter
+            // under Hybrid Composition → black preview.)
+            // Key on textureId: creationParams are only sent at creation, so a
+            // session reopen (new textureId) must create a NEW platform view —
+            // otherwise the view stays bound to the dead session.
             preview = AndroidView(
+              key: ValueKey('nitra_pv_${controller.textureId}'),
               viewType: 'dev.shreeman.nitro_camera/platform_view',
               creationParams: {'textureId': controller.textureId},
               creationParamsCodec: const StandardMessageCodec(),
@@ -72,11 +81,31 @@ class CameraPreview extends StatelessWidget {
           case PreviewMode.texture:
             final texture = Texture(textureId: controller.textureId!);
             if (defaultTargetPlatform == TargetPlatform.android) {
-              // Android's native GL renderer already center-crops the camera into
-              // the output surface (sized to the view), so just fill — wrapping it
-              // in a FittedBox/SizedBox would double-transform and stretch it.
-              // (resizeMode there is effectively cover, done on the GPU.)
-              preview = SizedBox.expand(child: texture);
+              // The native GL renderer draws the FULL upright frame into the
+              // producer surface (whose size Flutter controls and may not match
+              // any aspect). Declaring the true content aspect here makes the
+              // buffer's arbitrary aspect cancel out — same contract as iOS.
+              // Content is upright, so swap stream dims when the sensor-vs-display
+              // rotation leaves it portrait.
+              final isLandscapeDisplay =
+                  MediaQuery.of(context).orientation == Orientation.landscape;
+              final sensorRotated = controller.sensorOrientation % 180 != 0;
+              final contentPortrait = sensorRotated != isLandscapeDisplay;
+              final logicalWidth =
+                  contentPortrait ? controller.height : controller.width;
+              final logicalHeight =
+                  contentPortrait ? controller.width : controller.height;
+              preview = FittedBox(
+                fit: resizeMode == PreviewResizeMode.contain
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: logicalWidth.toDouble(),
+                  height: logicalHeight.toDouble(),
+                  child: texture,
+                ),
+              );
             } else {
               // iOS delivers the raw camera buffer via the Texture, so frame it
               // here: size a box to the (orientation-corrected) stream aspect and

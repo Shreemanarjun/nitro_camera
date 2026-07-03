@@ -92,11 +92,12 @@ class TopBar extends StatelessWidget {
                         }
                         return _TacticalUnit(
                           label: label,
-                          active: mode != PreviewMode.texture,
+                          active: mode == PreviewMode.platformView,
                           onTap: () {
-                            final next =
-                                PreviewMode.values[(mode.index + 1) %
-                                    PreviewMode.values.length];
+                            // Clean 2-way switch: Texture ↔ platform view.
+                            final next = mode == PreviewMode.platformView
+                                ? PreviewMode.texture
+                                : PreviewMode.platformView;
                             cameraStore.setPreviewMode(next);
                           },
                         );
