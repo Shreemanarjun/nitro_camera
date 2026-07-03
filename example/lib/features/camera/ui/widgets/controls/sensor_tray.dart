@@ -40,6 +40,14 @@ class SensorTray extends StatelessWidget {
       );
       final baselineFocal = baselineLens.focalLength;
 
+      // Stock cameras expose 2× as a main-sensor digital crop when there is no
+      // dedicated telephoto: active when the wide back camera is selected with
+      // zoom ≈ 2.0 (see the DIGITAL chip below).
+      final zoom = cameraStore.currentZoom.value;
+      final digital2xActive = !isFront &&
+          currentDevice?.id == baselineLens.id &&
+          (zoom - 2.0).abs() < 0.1;
+
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -62,63 +70,54 @@ class SensorTray extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: activeCameras.map((d) {
-                    final isSelected = currentDevice?.id == d.id;
+                  children: [
+                    ...activeCameras.map((d) {
+                      // The physical-lens chip yields "selected" to the 2×
+                      // digital chip when the crop is active.
+                      final isSelected = currentDevice?.id == d.id &&
+                          !(digital2xActive && d.id == baselineLens.id);
 
-                    String label;
-                    if (d.position == 0) {
-                      // Front side: distinguish multiple front lenses if present.
-                      label = frontCameras.length > 1
-                          ? "${(d.focalLength / (frontCameras.first.focalLength)).toStringAsFixed(1)}×"
-                          : "SELF";
-                    } else {
-                      final relZoom = d.focalLength / baselineFocal;
-                      label = relZoom > 0.9 && relZoom < 1.1
-                          ? "1.0×"
-                          : "${relZoom.toStringAsFixed(1)}×";
-                    }
+                      String label;
+                      if (d.position == 0) {
+                        // Front side: distinguish multiple front lenses if present.
+                        label = frontCameras.length > 1
+                            ? "${(d.focalLength / (frontCameras.first.focalLength)).toStringAsFixed(1)}×"
+                            : "SELF";
+                      } else {
+                        final relZoom = d.focalLength / baselineFocal;
+                        label = relZoom > 0.9 && relZoom < 1.1
+                            ? "1.0×"
+                            : "${relZoom.toStringAsFixed(1)}×";
+                      }
 
-                    return GestureDetector(
-                      onTap: () => cameraStore.selectDevice(d),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: isSelected ? 54 : 44,
-                        height: isSelected ? 54 : 44,
-                        margin: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color:
-                              isSelected ? Colors.amberAccent : Colors.black45,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isSelected ? Colors.white : Colors.white24,
-                            width: isSelected ? 2 : 1,
-                          ),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: Colors.amberAccent
-                                        .withValues(alpha: 0.4),
-                                    blurRadius: 10,
-                                    spreadRadius: 2,
-                                  ),
-                                ]
-                              : [],
-                        ),
-                        child: Center(
-                          child: Text(
-                            label,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color:
-                                  isSelected ? Colors.black : Colors.white70,
-                              fontSize: isSelected ? 11 : 9,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
+                      return _LensChip(
+                        label: label,
+                        selected: isSelected,
+                        onTap: () {
+                          if (currentDevice?.id == d.id) {
+                            // Re-tapping the active lens resets any digital
+                            // crop back to the lens's neutral zoom.
+                            cameraStore.setZoom(d.neutralZoom);
+                          } else {
+                            cameraStore.selectDevice(d);
+                          }
+                        },
+                      );
+                    }),
+
+                    // 2× DIGITAL — main-sensor crop, like stock cameras that
+                    // have no telephoto: select the wide back camera, then
+                    // punch the zoom to 2.0.
+                    if (!isFront && backCameras.isNotEmpty)
+                      _LensChip(
+                        label: "2.0×",
+                        selected: digital2xActive,
+                        onTap: () async {
+                          await cameraStore.selectDevice(baselineLens);
+                          cameraStore.setZoom(2.0);
+                        },
                       ),
-                    );
-                  }).toList(),
+                  ],
                 ),
               ),
             ),
@@ -126,6 +125,59 @@ class SensorTray extends StatelessWidget {
         ],
       );
     });
+  }
+}
+
+/// One circular lens/zoom chip (physical lens or digital crop).
+class _LensChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _LensChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: selected ? 54 : 44,
+        height: selected ? 54 : 44,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: selected ? Colors.amberAccent : Colors.black45,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? Colors.white : Colors.white24,
+            width: selected ? 2 : 1,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.amberAccent.withValues(alpha: 0.4),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ]
+              : [],
+        ),
+        child: Center(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: selected ? Colors.black : Colors.white70,
+              fontSize: selected ? 11 : 9,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

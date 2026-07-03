@@ -42,3 +42,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Opt-in ML Kit artifacts for nitro_camera setNativeDetector (the plugin
+    // declares them compileOnly — see docs/VISION_CAMERA_PARITY.md).
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.mlkit:face-detection:16.1.7")
+}

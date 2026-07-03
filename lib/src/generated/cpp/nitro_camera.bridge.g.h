@@ -102,6 +102,10 @@ typedef enum {
   CAMERAEVENTTYPE_PHOTO_CAPTURE_BEGAN = 6,
   CAMERAEVENTTYPE_PHOTO_CAPTURE_SHUTTER = 7,
   CAMERAEVENTTYPE_PHOTO_THUMBNAIL = 8,
+  CAMERAEVENTTYPE_DEVICE_CONNECTED = 9,
+  CAMERAEVENTTYPE_DEVICE_DISCONNECTED = 10,
+  CAMERAEVENTTYPE_ORIENTATION_CHANGED = 11,
+  CAMERAEVENTTYPE_DETECTION = 12,
 } CameraEventType;
 
 typedef enum {
@@ -176,6 +180,7 @@ typedef struct {
   double longitude; 
   double altitude; 
   int64_t hasLocation; 
+  int64_t outputFormat; 
 } PhotoOptions;
 #endif // NITRO_STRUCT_PHOTOOPTIONS_DEFINED
 
@@ -249,6 +254,11 @@ NITRO_EXPORT void nitro_camera_lock_exposure(int64_t instanceId, int64_t texture
 NITRO_EXPORT void nitro_camera_lock_focus(int64_t instanceId, int64_t textureId, int64_t locked, NitroError* _nitro_err);
 NITRO_EXPORT void nitro_camera_lock_white_balance(int64_t instanceId, int64_t textureId, int64_t locked, NitroError* _nitro_err);
 NITRO_EXPORT void nitro_camera_set_target_orientation(int64_t instanceId, int64_t textureId, int64_t degrees, NitroError* _nitro_err);
+NITRO_EXPORT void nitro_camera_set_distortion_correction(int64_t instanceId, int64_t textureId, int64_t enabled, NitroError* _nitro_err);
+NITRO_EXPORT void nitro_camera_enable_orientation_events(int64_t instanceId, int64_t enabled, NitroError* _nitro_err);
+NITRO_EXPORT void nitro_camera_enable_device_availability_events(int64_t instanceId, int64_t enabled, NitroError* _nitro_err);
+NITRO_EXPORT void nitro_camera_set_native_detector(int64_t instanceId, int64_t textureId, const char* detector, NitroError* _nitro_err);
+NITRO_EXPORT const char* nitro_camera_get_concurrent_camera_ids_json(int64_t instanceId, NitroError* _nitro_err);
 NITRO_EXPORT void* nitro_camera_take_photo_with_options(int64_t instanceId, int64_t textureId, void* options);
 NITRO_EXPORT void* nitro_camera_take_snapshot(int64_t instanceId, int64_t textureId);
 NITRO_EXPORT void nitro_camera_reset(int64_t instanceId, NitroError* _nitro_err);

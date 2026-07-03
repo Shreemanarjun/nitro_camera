@@ -48,10 +48,18 @@ class FrameData {
 /// (primitives, `List`/`Map` of sendables, `TransferableTypedData`, etc.).
 typedef FrameHandler<R> = R Function(FrameData frame);
 
+/// Runs ONCE on the worker isolate before any frame is handled — the hook for
+/// setting up worker-side state (e.g. instantiating a frame-processor plugin
+/// into an isolate global). Must be a top-level or static function; [initArg]
+/// must be sendable.
+typedef WorkerInitializer = void Function(Object? initArg);
+
 class _Init<R> {
   final SendPort reply;
   final FrameHandler<R> handler;
-  const _Init(this.reply, this.handler);
+  final WorkerInitializer? workerInit;
+  final Object? workerInitArg;
+  const _Init(this.reply, this.handler, [this.workerInit, this.workerInitArg]);
 }
 
 /// Per-frame processing statistics, emitted for EVERY processed frame
@@ -112,7 +120,14 @@ class _FrameWire {
 ///    exactly once (never a second time for the isolate message).
 class CameraFrameProcessor<R> {
   final FrameHandler<R> handler;
-  CameraFrameProcessor(this.handler);
+
+  /// Optional worker-isolate bootstrap: [workerInit] runs once with
+  /// [workerInitArg] on the worker before the first frame. Both must satisfy
+  /// isolate-sendability ([workerInit] top-level/static).
+  final WorkerInitializer? workerInit;
+  final Object? workerInitArg;
+
+  CameraFrameProcessor(this.handler, {this.workerInit, this.workerInitArg});
 
   Isolate? _isolate;
   SendPort? _toWorker;
@@ -139,7 +154,8 @@ class CameraFrameProcessor<R> {
   Future<void> start() async {
     if (_disposed) throw StateError('CameraFrameProcessor already disposed');
     final rp = ReceivePort();
-    _isolate = await Isolate.spawn(_entry<R>, _Init<R>(rp.sendPort, handler));
+    _isolate = await Isolate.spawn(
+        _entry<R>, _Init<R>(rp.sendPort, handler, workerInit, workerInitArg));
     rp.listen((msg) {
       if (msg is SendPort) {
         _toWorker = msg;
@@ -229,6 +245,7 @@ class CameraFrameProcessor<R> {
   static void _entry<R>(_Init<R> init) {
     final rp = ReceivePort();
     final sw = Stopwatch();
+    init.workerInit?.call(init.workerInitArg);
     init.reply.send(rp.sendPort);
     rp.listen((msg) {
       if (msg is _FrameWire) {

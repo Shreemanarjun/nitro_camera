@@ -1,3 +1,5 @@
+import 'dart:math' show log;
+
 import '../models/camera_device.dart';
 
 /// Which capture stream a resolution constraint targets.
@@ -137,15 +139,21 @@ class ResolutionConstraint extends CameraConstraint {
         return ((area - minArea) / span).clamp(0.0, 1.0);
       case ClosestResolution(:final width, :final height):
         final targetArea = width * height;
-        if (targetArea <= 0) return 0;
-        // Aspect-aware-ish: penalise both area distance and aspect distance.
-        final areaPenalty =
-            ((area - targetArea).abs() / targetArea).clamp(0.0, 1.0);
-        final targetAspect = width / height;
-        final aspect = h == 0 ? targetAspect : w / h;
-        final aspectPenalty =
-            ((aspect - targetAspect).abs() / targetAspect).clamp(0.0, 1.0);
-        return (areaPenalty * 0.75 + aspectPenalty * 0.25).clamp(0.0, 1.0);
+        if (targetArea <= 0 || area <= 0) return 0;
+        // vision-camera v5's Size.penalty (Sizes+sortedByClosestTo.kt):
+        // scale-invariant log-pixel distance + a hard aspect-mismatch weight
+        // (aspect compared long/short so orientation doesn't matter). We
+        // normalise the open-ended sum into [0, 1] with x/(1+x) to fit the
+        // constraint contract.
+        double longShort(num a, num b) =>
+            a >= b ? a / (b == 0 ? 1 : b) : b / (a == 0 ? 1 : a);
+        final targetAr = longShort(width, height);
+        final actualAr = longShort(w, h);
+        final arDiff = (actualAr - targetAr).abs() / targetAr;
+        final aspectPenalty = arDiff < 0.02 ? 0.0 : 3.0 * arDiff;
+        final logPixelDistance = (log(area / targetArea)).abs();
+        final raw = aspectPenalty + logPixelDistance;
+        return raw / (1.0 + raw);
     }
   }
 }

@@ -22,14 +22,22 @@ export 'src/models/models.dart';
 // Declarative configuration + negotiation.
 export 'src/configuration/configuration.dart';
 
+// Device selection helpers (getCameraDevice parity).
+export 'src/devices/device_selector.dart';
+
+// Orientation manager + hot-plug device observer.
+export 'src/devices/orientation_manager.dart';
+
 // Session controller.
 export 'src/controller/camera_controller.dart';
 
 // Frame processing.
 export 'src/processing/frame_processor.dart';
+export 'src/processing/frame_processor_plugin.dart';
 
 // Code scanning (1D / 2D / QR — selectable per frame).
 export 'src/scanner/code_scanner.dart';
+export 'src/scanner/scan_codes_plugin.dart';
 
 // Widgets.
 export 'src/widgets/camera_preview.dart';

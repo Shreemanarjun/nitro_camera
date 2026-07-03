@@ -65,6 +65,27 @@ class CameraStore {
   // ── Quick-wins (vision-camera parity) ───────────────────────────────────────
   final videoCodec = signal(VideoCodec.h264);
   final geotagEnabled = signal(false);
+  // RAW (DNG) photo capture — only offered when the device supports it.
+  final rawPhoto = signal(false);
+  // Native ML Kit detector ('' = off, 'face', 'barcode').
+  final nativeDetector = signal('');
+
+  /// Detector parked while SCANNER mode is active (restored on exit). The
+  /// Dart-side scanner and the native ML Kit detectors are mutually exclusive:
+  /// both consume the same native frame reader, and running them together
+  /// starves the capture session (stuck preview/scanner).
+  String _detectorBeforeScanner = '';
+
+  void setNativeDetectorMode(String detector) {
+    if (mode.value == 'SCANNER') {
+      // Scanner owns frame delivery — defer the request until SCANNER exits
+      // (last request wins; '' cancels a parked detector).
+      _detectorBeforeScanner = detector;
+      return;
+    }
+    nativeDetector.value = detector;
+    activeController.value?.setNativeDetector(detector);
+  }
   final showFpsGraph = signal(false);
   final resizeCover = signal(true); // cover vs contain
   final shutterFlash = signal(0); // bump to trigger a shutter flash animation
@@ -104,7 +125,13 @@ class CameraStore {
   final controlMode = signal('FILTERS');
   final selectedAspectRatio = signal<double?>(null);
   final showFilters = signal(false);
-  final previewMode = signal<PreviewMode>(PreviewMode.platformView);
+  // Quick-settings dropdown (resolution / fps / aspect / settings entry)
+  // anchored under the top icon strip.
+  final quickSettingsOpen = signal(false);
+  // Texture by default: renders through Flutter's compositor, so it composes
+  // cleanly with overlays/filters on every device; the platform-view path
+  // stays opt-in via the top-bar toggle.
+  final previewMode = signal<PreviewMode>(PreviewMode.texture);
 
   static const Map<String, String> filters = {
     'NORMAL': '',
@@ -123,6 +150,24 @@ class CameraStore {
   // ── Derived (computed) ──────────────────────────────────────────────────────
   late final isRunning =
       computed(() => status.value == CameraStatus.running);
+
+  /// True while the session is being torn down / reopened (device, resolution
+  /// or fps switch) — drives the freeze-dim overlay + flip-button animation.
+  late final isSwitching = computed(() =>
+      status.value == CameraStatus.opening ||
+      status.value == CameraStatus.closing);
+
+  /// Whether the active sensor advertises a 4K (UHD) video format.
+  late final supports4K = computed(() =>
+      currentDevice.value?.formats.any((f) => f.videoWidth >= 3840) ?? false);
+
+  /// Compact label for the active stream config (e.g. "1080P").
+  late final resolutionLabel = computed(() {
+    final w = width.value;
+    if (w >= 3840) return '4K';
+    if (w >= 1920) return '1080P';
+    return '720P';
+  });
   late final canCapture =
       computed(() => activeController.value != null && !isCapturing.value);
   late final currentFormat = computed(() {
@@ -180,6 +225,12 @@ class CameraStore {
     _eventSub?.cancel();
     _eventSub = null;
     activeController.value = null;
+    // A resolution/fps change reopens the session without going through
+    // [selectDevice]; reflect the teardown in [status] so the switch overlay
+    // covers every reopen, not just device switches.
+    if (status.value == CameraStatus.running) {
+      status.value = CameraStatus.closing;
+    }
   }
 
   /// Re-applies every live setting to a freshly-opened session (needed after a
@@ -203,7 +254,8 @@ class CameraStore {
         ..setLowLightBoost(enabled: lowLightBoost.value)
         ..setAutoFocus(autoFocusMode.value)
         ..setTargetOrientation(targetOrientation.value)
-        ..setFrameProcessing(enabled: mode.value == 'SCANNER');
+        ..setFrameProcessing(enabled: mode.value == 'SCANNER')
+        ..setNativeDetector(nativeDetector.value);
     } catch (e) {
       debugPrint('reapplyCurrentSettings: $e');
     }
@@ -264,13 +316,29 @@ class CameraStore {
 
   Future<void> setMode(String m) async {
     if (mode.value == m) return;
+    final wasScanning = mode.value == 'SCANNER';
     mode.value = m;
     final scanning = m == 'SCANNER';
     isProcessingFrames.value = scanning;
+    if (scanning && nativeDetector.value.isNotEmpty) {
+      // Entering SCANNER: park the native detector FIRST (before frame
+      // processing starts) — native ML Kit detection and the Dart scanner
+      // are mutually exclusive; both fight over the shared frame reader and
+      // stall the session. It is restored when SCANNER mode is left.
+      _detectorBeforeScanner = nativeDetector.value;
+      nativeDetector.value = '';
+      activeController.value?.setNativeDetector('');
+    }
     // The barcode scanner decodes the luma plane, which only exists in YUV;
     // BGRA bytes decode as noise. Switch pixel format together with the mode.
     setPixelFormat(scanning ? 0 /* YUV */ : 1 /* BGRA */);
     activeController.value?.setFrameProcessing(enabled: scanning);
+    if (wasScanning && !scanning && _detectorBeforeScanner.isNotEmpty) {
+      // Leaving SCANNER: restore the detector that was parked on entry.
+      final restore = _detectorBeforeScanner;
+      _detectorBeforeScanner = '';
+      setNativeDetectorMode(restore);
+    }
   }
 
   void toggleProcessing(bool val) {
@@ -373,6 +441,9 @@ class CameraStore {
   /// Which code family the scanner looks for (QR / 1D / 2D / ALL).
   final scanKind = signal<CodeScanKind>(CodeScanKind.all);
 
+  /// One-shot (stop after first confirmed code) vs continuous scanning.
+  final scanOneShot = signal(false);
+
   void setTargetOrientation(int degrees) {
     targetOrientation.value = degrees;
     activeController.value?.setTargetOrientation(degrees);
@@ -398,6 +469,8 @@ class CameraStore {
             flash: flashMode.value,
             quality: photoQuality.value,
             location: geotagEnabled.value ? _demoLocation : null,
+            outputFormat:
+                rawPhoto.value ? PhotoOutputFormat.dng : PhotoOutputFormat.jpeg,
           ),
         ),
       );

@@ -11,30 +11,57 @@ class CameraSessionEvent {
   /// The session this event belongs to (0 = not session-specific).
   final int textureId;
 
-  /// Why the session was interrupted (only meaningful for interruption events).
+  /// Why the session was interrupted (only meaningful for interruption events;
+  /// [InterruptionReason.none] otherwise).
   final InterruptionReason reason;
 
-  /// Human-readable detail for [CameraEventType.error] events.
+  /// The event's raw integer payload. Interruption events store the reason
+  /// index here; [CameraEventType.orientationChanged] stores DEGREES
+  /// (0/90/180/270) — see [orientationDegrees].
+  final int rawReason;
+
+  /// Human-readable detail for [CameraEventType.error] events; the device id
+  /// for hot-plug events; the JSON payload for [CameraEventType.detection].
   final String message;
 
   const CameraSessionEvent({
     required this.type,
     required this.textureId,
     required this.reason,
+    this.rawReason = 0,
     required this.message,
   });
 
-  factory CameraSessionEvent.fromNative(CameraEvent e) => CameraSessionEvent(
-        type: CameraEventType.values[e.type],
-        textureId: e.textureId,
-        reason: InterruptionReason.values[e.reason],
-        message: e.message,
-      );
+  factory CameraSessionEvent.fromNative(CameraEvent e) {
+    final type = CameraEventType.values[e.type];
+    // `reason` doubles as a generic integer payload (e.g. orientation
+    // degrees), so only interpret it as an InterruptionReason where valid.
+    final reason = (e.reason >= 0 && e.reason < InterruptionReason.values.length)
+        ? InterruptionReason.values[e.reason]
+        : InterruptionReason.none;
+    return CameraSessionEvent(
+      type: type,
+      textureId: e.textureId,
+      reason: reason,
+      rawReason: e.reason,
+      message: e.message,
+    );
+  }
 
   bool get isError => type == CameraEventType.error;
   bool get isInterruption =>
       type == CameraEventType.interruptionStarted ||
       type == CameraEventType.interruptionEnded;
+
+  /// Degrees for [CameraEventType.orientationChanged] events, else null.
+  int? get orientationDegrees =>
+      type == CameraEventType.orientationChanged ? rawReason : null;
+
+  /// The connected/disconnected camera id for hot-plug events, else null.
+  String? get deviceId => (type == CameraEventType.deviceConnected ||
+          type == CameraEventType.deviceDisconnected)
+      ? message
+      : null;
 
   @override
   String toString() =>

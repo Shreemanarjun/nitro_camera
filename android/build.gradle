@@ -35,5 +35,12 @@ dependencies {
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"
+
+    // Optional ML Kit detectors (see NitraDetectors). compileOnly: host apps
+    // opt in by adding the matching implementation dependency themselves;
+    // availability is probed at runtime and degrades gracefully when absent.
+    compileOnly "com.google.mlkit:barcode-scanning:17.3.0"
+    compileOnly "com.google.mlkit:face-detection:16.1.7"
+
     testImplementation "junit:junit:4.13.2"
 }

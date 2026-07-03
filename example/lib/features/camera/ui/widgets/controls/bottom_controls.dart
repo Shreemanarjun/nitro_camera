@@ -192,27 +192,7 @@ class BottomControls extends StatelessWidget {
                       ),
                     ),
 
-                    GestureDetector(
-                      onTap: isRunning
-                          ? () {
-                              HapticFeedback.lightImpact();
-                              cameraStore.toggleCamera();
-                            }
-                          : null,
-                      child: Container(
-                        width: 50,
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.sync_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
+                    _FlipCameraButton(enabled: isRunning),
                   ],
                 ),
               ),
@@ -234,6 +214,56 @@ class BottomControls extends StatelessWidget {
       context: context,
       barrierColor: Colors.black,
       pageBuilder: (ctx, _, _) => _GalleryView(),
+    );
+  }
+}
+
+/// Camera-flip control: each tap spins the glyph a half turn in sync with the
+/// freeze-dim switch transition (stock-camera flip feedback instead of a
+/// loader).
+class _FlipCameraButton extends StatefulWidget {
+  final bool enabled;
+  const _FlipCameraButton({required this.enabled});
+
+  @override
+  State<_FlipCameraButton> createState() => _FlipCameraButtonState();
+}
+
+class _FlipCameraButtonState extends State<_FlipCameraButton> {
+  double _turns = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.enabled
+          ? () {
+              HapticFeedback.lightImpact();
+              setState(() => _turns += 0.5);
+              cameraStore.toggleCamera();
+            }
+          : null,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: widget.enabled ? 1.0 : 0.55,
+        child: Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: AnimatedRotation(
+            turns: _turns,
+            duration: const Duration(milliseconds: 550),
+            curve: Curves.easeInOutCubic,
+            child: const Icon(
+              Icons.sync_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

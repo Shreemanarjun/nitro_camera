@@ -50,6 +50,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     /// Session → impl event hook: (CameraEventType index, message).
     var onEvent: ((Int64, String) -> Void)?
 
+    // Native ML detector ("barcode" / "face"; "" = off). Written on `frameQueue`
+    // (via setNativeDetector) and read in captureOutput on the same queue.
+    private var nativeDetector: String = ""
+
     // Recording limits / geotag captured at start.
     private var recordingMaxDurationMs: Int64 = 0
     private var recordingMaxFileSizeBytes: Int64 = 0
@@ -152,6 +156,12 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
             device.activeVideoMinFrameDuration = dur
             device.activeVideoMaxFrameDuration = dur
         }
+        // Geometric distortion correction — default ON where supported (Android
+        // parity: the ultra-wide shows heavy barrel distortion without it).
+        // Toggleable later via setDistortionCorrection.
+        if #available(iOS 13.0, *), device.isGeometricDistortionCorrectionSupported {
+            device.isGeometricDistortionCorrectionEnabled = true
+        }
         device.unlockForConfiguration()
 
         // Deliver UPRIGHT (portrait) buffers so the Flutter Texture isn't rotated
@@ -193,6 +203,10 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         audioOutput?.setSampleBufferDelegate(nil, queue: nil)
         onFrame = nil
         frameProcessingEnabled = false
+        // Release any native-detector state (delegate is already detached, so
+        // no further captureOutput can race this).
+        nativeDetector = ""
+        NitraDetectors.stop(textureId: textureId)
         pixelLock.lock()
         latestPixelBuffer = nil
         pixelLock.unlock()
@@ -246,6 +260,21 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
 
         // Recording path — feed the AVAssetWriter (runs on this same frameQueue).
         appendVideoSample(sampleBuffer)
+
+        // Native ML detector path (Vision) — throttled + drop-while-busy inside
+        // the runner. Runs even when frame processing is off (the Android
+        // analogue adds the frame-reader target for detectors; here the video
+        // data output already delivers every frame).
+        if !nativeDetector.isEmpty {
+            NitraDetectors.process(
+                pixelBuffer: pixelBuffer,
+                textureId: textureId,
+                detector: nativeDetector
+            ) { [weak self] json in
+                guard let self = self else { return }
+                self.onEvent?(12 /* detection */, json)
+            }
+        }
 
         // CPU path — optional frame processor
         guard frameProcessingEnabled, let cb = onFrame else { return }
@@ -432,6 +461,32 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         device.unlockForConfiguration()
     }
 
+    /// Lens geometric-distortion-correction toggle (default on — set at session
+    /// setup; no-op on devices without support).
+    func setDistortionCorrection(_ enabled: Bool) {
+        guard #available(iOS 13.0, *),
+              device.isGeometricDistortionCorrectionSupported else { return }
+        try? device.lockForConfiguration()
+        device.isGeometricDistortionCorrectionEnabled = enabled
+        device.unlockForConfiguration()
+    }
+
+    /// Activates a native ML detector ("barcode" / "face"; "" = off). Results
+    /// are emitted as `detection` events (JSON payload in `message`). Unlike
+    /// Android, no capture-graph change is needed: the video data output
+    /// already delivers every frame.
+    func setNativeDetector(_ name: String) {
+        frameQueue.async { [weak self] in
+            guard let self = self else { return }
+            if name != self.nativeDetector {
+                // Off or swapped — drop the old per-texture state promptly (the
+                // runner also recycles on swap, this just frees it eagerly).
+                NitraDetectors.stop(textureId: self.textureId)
+            }
+            self.nativeDetector = name
+        }
+    }
+
     func setTorchLevel(_ level: Double) {
         guard device.hasTorch else { return }
         try? device.lockForConfiguration()
@@ -530,6 +585,70 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         }
     }
 
+    // MARK: - RAW (DNG) capture — PhotoOptions.outputFormat == 1
+
+    /// RAW (DNG) still capture.
+    ///
+    /// Prefers Apple ProRAW (iOS 14.3+) when the photo output supports it, else
+    /// falls back to the sensor's Bayer DNG format. Throws `rawNotSupported`
+    /// with a clear message when the current output offers no RAW pixel formats
+    /// (simulator, front cameras, virtual devices, some active formats).
+    ///
+    /// `skipMetadata == 1` drops the GPS geotag — the only optional metadata we
+    /// attach (the DNG's intrinsic EXIF cannot be stripped without re-encoding).
+    /// `enableShutterSound` is a no-op on iOS: the system plays the shutter
+    /// sound itself where required and offers no public mute on
+    /// AVCapturePhotoOutput (we deliberately do NOT hack audio sessions).
+    func takeDngPhoto(options: PhotoOptions) async throws -> PhotoResult {
+        // ProRAW must be enabled on the OUTPUT before building per-shot
+        // settings — only then do ProRAW pixel formats appear in the list.
+        if #available(iOS 14.3, *), photoOutput.isAppleProRAWSupported {
+            photoOutput.isAppleProRAWEnabled = true
+        }
+        let rawFormats = photoOutput.availableRawPhotoPixelFormatTypes
+        guard var rawFormat = rawFormats.first else {
+            throw NitraCameraError.rawNotSupported
+        }
+        if #available(iOS 14.3, *),
+           let proRaw = rawFormats.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) {
+            rawFormat = proRaw
+        }
+
+        let settings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat, processedFormat: nil)
+        // Flash + RAW only combine on some devices; honor the request when the
+        // output supports the mode (settings.flashMode throws otherwise).
+        let requestedFlash: AVCaptureDevice.FlashMode
+        switch options.flash {
+        case 1:  requestedFlash = .on
+        case 2:  requestedFlash = .auto
+        default: requestedFlash = .off
+        }
+        if device.hasFlash, photoOutput.supportedFlashModes.contains(requestedFlash) {
+            settings.flashMode = requestedFlash
+        }
+        // GPS geotag → photo metadata (embedded into the DNG by the output),
+        // skipped entirely when skipMetadata is set.
+        if options.hasLocation != 0, options.skipMetadata == 0 {
+            settings.metadata = [
+                kCGImagePropertyGPSDictionary as String: [
+                    kCGImagePropertyGPSLatitude as String:     abs(options.latitude),
+                    kCGImagePropertyGPSLatitudeRef as String:  options.latitude >= 0 ? "N" : "S",
+                    kCGImagePropertyGPSLongitude as String:    abs(options.longitude),
+                    kCGImagePropertyGPSLongitudeRef as String: options.longitude >= 0 ? "E" : "W",
+                    kCGImagePropertyGPSAltitude as String:     abs(options.altitude),
+                    kCGImagePropertyGPSAltitudeRef as String:  options.altitude >= 0 ? 0 : 1,
+                ],
+            ]
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            captureLock.lock()
+            photoContinuation = continuation
+            captureLock.unlock()
+            photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
     // Shutter-timing callbacks → events (vision-camera onWill{Begin,Capture}Photo).
     public func photoOutput(_ output: AVCapturePhotoOutput,
                             willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
@@ -549,6 +668,40 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
         captureLock.unlock()
         let location = pendingPhotoLocation
         pendingPhotoLocation = nil
+
+        // RAW (DNG) capture — write the file data straight out (no EXIF
+        // re-encode / thumbnail pass; the GPS geotag was already attached via
+        // `AVCapturePhotoSettings.metadata` in takeDngPhoto).
+        if photo.isRawPhoto {
+            guard let cont = maybeCont else { return }
+            if let error = error { cont.resume(throwing: error); return }
+            guard let data = photo.fileDataRepresentation() else {
+                cont.resume(throwing: NitraCameraError.captureFailed); return
+            }
+            let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            let url = cachesDir.appendingPathComponent(
+                "cap_\(Int64(Date().timeIntervalSince1970 * 1000)).dng")
+            do {
+                try data.write(to: url)
+                var dims = photo.resolvedSettings.rawPhotoDimensions
+                if dims.width == 0 || dims.height == 0 {
+                    dims = photo.resolvedSettings.photoDimensions
+                }
+                cont.resume(returning: PhotoResult(
+                    path: url.path,
+                    width: Int64(dims.width),
+                    height: Int64(dims.height),
+                    fileSize: Int64(data.count),
+                    orientation: Int64(device.position == .front ? 0 : 90),
+                    isMirrored: device.position == .front ? 1 : 0,
+                    timestamp: Int64(Date().timeIntervalSince1970 * 1000)
+                ))
+            } catch {
+                cont.resume(throwing: error)
+            }
+            return
+        }
 
         // Fast low-res thumbnail from the embedded preview buffer → event, so the
         // UI can show the shot before the full-res JPEG is written.
@@ -880,9 +1033,21 @@ public class NitraCameraSession: NSObject, FlutterTexture, AVCaptureVideoDataOut
     }
 }
 
-enum NitraCameraError: Error {
+enum NitraCameraError: Error, LocalizedError {
     case configurationFailed
     case captureFailed
     case deviceNotFound
     case permissionDenied
+    case rawNotSupported
+
+    var errorDescription: String? {
+        switch self {
+        case .configurationFailed: return "Camera session configuration failed"
+        case .captureFailed:       return "Capture failed"
+        case .deviceNotFound:      return "Camera device not found"
+        case .permissionDenied:    return "Camera permission denied"
+        case .rawNotSupported:
+            return "RAW (DNG) capture is not supported by this camera/output — no RAW pixel formats are available"
+        }
+    }
 }

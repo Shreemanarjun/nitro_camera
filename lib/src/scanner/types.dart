@@ -159,11 +159,21 @@ class CodeResult {
   /// identifier, e.g. `]C1`, `]d2`, `]Q3`, `]e0`).
   final bool isGs1;
 
+  /// Detected key points of the symbol, as flat `[x0,y0, x1,y1, …]` pairs
+  /// **normalized to the scan window as displayed** (0..1, origin top-left of
+  /// the upright viewfinder — the frame's sensor rotation and front-camera
+  /// mirror are already applied, so these paint directly over the preview).
+  /// 1D codes yield the two scanline endpoints; QR yields its finder
+  /// patterns. Null when the engine doesn't report points (postal/width
+  /// decoders).
+  final List<double>? windowPoints;
+
   const CodeResult(
     this.text,
     this.format, {
     this.timestamp = 0,
     this.isGs1 = false,
+    this.windowPoints,
   });
 
   /// The ISBN when this is a Bookland EAN-13 (978/979 prefix), else null.
@@ -182,5 +192,20 @@ class RawDecode {
   final String text;
   final CodeFormat format;
   final bool isGs1;
-  const RawDecode(this.text, this.format, {this.isGs1 = false});
+
+  /// Key points in the DECODED bitmap's pixel space (flat x,y pairs).
+  final List<double>? points;
+
+  const RawDecode(this.text, this.format, {this.isGs1 = false, this.points});
+}
+
+/// How a [CodeScanner] delivers results.
+enum ScanMode {
+  /// Keep scanning; every confirmed code is emitted (deduplicated by a
+  /// per-payload cooldown).
+  continuous,
+
+  /// Stop after the first confirmed code. Call `CodeScanner.resume()` to arm
+  /// the next scan.
+  oneShot,
 }

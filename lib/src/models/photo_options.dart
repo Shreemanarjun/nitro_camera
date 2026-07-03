@@ -1,5 +1,16 @@
 import '../nitro_camera.native.dart';
 
+/// The photo file container written by a capture.
+enum PhotoOutputFormat {
+  /// Processed JPEG (default).
+  jpeg,
+
+  /// Adobe DNG — the RAW sensor data (vision-camera's `containerFormat:
+  /// 'dng'`). Requires [CameraDeviceInfo.supportsRawCapture]; capture is
+  /// slower (the session pauses briefly to route the RAW stream).
+  dng,
+}
+
 /// Type-safe options for a single photo capture (`CameraController.takePhoto`).
 ///
 /// Wraps the FFI [PhotoOptions] struct with enums / bools.
@@ -20,6 +31,10 @@ class PhotoCaptureOptions {
   /// Optional GPS geotag written into the photo's EXIF.
   final ({double latitude, double longitude, double altitude})? location;
 
+  /// File container: processed [PhotoOutputFormat.jpeg] (default) or RAW
+  /// [PhotoOutputFormat.dng].
+  final PhotoOutputFormat outputFormat;
+
   const PhotoCaptureOptions({
     this.flash = FlashMode.off,
     this.quality = QualityPrioritization.balanced,
@@ -27,6 +42,7 @@ class PhotoCaptureOptions {
     this.skipMetadata = false,
     this.enableAutoRedEyeReduction = true,
     this.location,
+    this.outputFormat = PhotoOutputFormat.jpeg,
   });
 
   /// Projects onto the FFI struct.
@@ -40,5 +56,6 @@ class PhotoCaptureOptions {
         longitude: location?.longitude ?? 0,
         altitude: location?.altitude ?? 0,
         hasLocation: location != null ? 1 : 0,
+        outputFormat: outputFormat.index,
       );
 }

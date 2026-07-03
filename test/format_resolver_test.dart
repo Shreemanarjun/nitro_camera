@@ -68,6 +68,27 @@ void main() {
       expect(r, same(f1080));
     });
 
+    test('closestTo penalizes aspect-ratio mismatch over pixel distance', () {
+      // vision-camera v5 Size.penalty: a 4:3 format must lose to a 16:9 one
+      // when targeting 16:9, even if the 4:3 pixel count is closer.
+      final f43 = fmt(width: 2048, height: 1536); // 4:3, 3.1 MP (closer area)
+      final f169 = fmt(width: 1280, height: 720); // 16:9, 0.9 MP
+      final dev43 = device([f43, f169]);
+      final r = FormatResolver.resolve(dev43,
+          const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
+      expect(r, same(f169), reason: 'aspect mismatch weighs 3× log-distance');
+    });
+
+    test('closestTo log-distance treats 2× up and 2× down symmetrically', () {
+      // Both are 16:9 and exactly 4× / ¼ the target pixel count — the tie
+      // must break by list order, proving the distances are equal.
+      final fBig = fmt(width: 3840, height: 2160);
+      final fSmall = fmt(width: 960, height: 540);
+      final r = FormatResolver.resolve(device([fSmall, fBig]),
+          const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
+      expect(r, same(fSmall), reason: 'equal penalty → first wins');
+    });
+
     test('empty constraints default to the highest resolution', () {
       expect(FormatResolver.resolve(dev, const []), same(f4k));
       expect(dev.bestFormat(), same(f4k));

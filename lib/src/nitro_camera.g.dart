@@ -304,6 +304,8 @@ final class PhotoOptionsFfi extends Struct {
   external double altitude;
   @Int64()
   external int hasLocation;
+  @Int64()
+  external int outputFormat;
 }
 
 extension PhotoOptionsFfiExt on PhotoOptionsFfi {
@@ -318,6 +320,7 @@ extension PhotoOptionsFfiExt on PhotoOptionsFfi {
       longitude: longitude,
       altitude: altitude,
       hasLocation: hasLocation,
+      outputFormat: outputFormat,
     );
   }
 
@@ -338,6 +341,7 @@ extension PhotoOptionsExt on PhotoOptions {
     ptr.ref.longitude = longitude;
     ptr.ref.altitude = altitude;
     ptr.ref.hasLocation = hasLocation;
+    ptr.ref.outputFormat = outputFormat;
     return ptr;
   }
 }
@@ -704,6 +708,7 @@ final class PhotoOptionsProxy extends PhotoOptions implements Finalizable {
         longitude: 0.0,
         altitude: 0.0,
         hasLocation: 0,
+        outputFormat: 0,
       ) {
     assert(
       _finalizer != null,
@@ -731,6 +736,8 @@ final class PhotoOptionsProxy extends PhotoOptions implements Finalizable {
   double get altitude => _native.ref.altitude;
   @override
   int get hasLocation => _native.ref.hasLocation;
+  @override
+  int get outputFormat => _native.ref.outputFormat;
 
   /// Eagerly copies all fields to a plain [PhotoOptions] value, detaches
   /// the finalizer, and frees native memory immediately.
@@ -999,7 +1006,7 @@ class _NitroCameraImpl extends NitroCamera {
     );
     NitroRuntime.checkLinkChecksum(
       'nitro_camera',
-      '923b2e831b9f1934',
+      '4cd7b9292e90ef9d',
       () => _dylib
           .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
             'nitro_camera_nitro_bridge_checksum',
@@ -1363,6 +1370,44 @@ class _NitroCameraImpl extends NitroCamera {
       .asFunction<void Function(int, int, int, Pointer<NitroErrorFfi>)>(
         isLeaf: true,
       );
+  late final void Function(int, int, int, Pointer<NitroErrorFfi>)
+  _setDistortionCorrectionPtr = _dylib
+      .lookup<
+        NativeFunction<
+          Void Function(Int64, Int64, Int64, Pointer<NitroErrorFfi>)
+        >
+      >('nitro_camera_set_distortion_correction')
+      .asFunction<void Function(int, int, int, Pointer<NitroErrorFfi>)>(
+        isLeaf: true,
+      );
+  late final void Function(int, int, Pointer<NitroErrorFfi>)
+  _enableOrientationEventsPtr = _dylib
+      .lookup<
+        NativeFunction<Void Function(Int64, Int64, Pointer<NitroErrorFfi>)>
+      >('nitro_camera_enable_orientation_events')
+      .asFunction<void Function(int, int, Pointer<NitroErrorFfi>)>(
+        isLeaf: true,
+      );
+  late final void Function(int, int, Pointer<NitroErrorFfi>)
+  _enableDeviceAvailabilityEventsPtr = _dylib
+      .lookup<
+        NativeFunction<Void Function(Int64, Int64, Pointer<NitroErrorFfi>)>
+      >('nitro_camera_enable_device_availability_events')
+      .asFunction<void Function(int, int, Pointer<NitroErrorFfi>)>(
+        isLeaf: true,
+      );
+  late final void Function(int, int, Pointer<Utf8>, Pointer<NitroErrorFfi>)
+  _setNativeDetectorPtr = _dylib
+      .lookupFunction<
+        Void Function(Int64, Int64, Pointer<Utf8>, Pointer<NitroErrorFfi>),
+        void Function(int, int, Pointer<Utf8>, Pointer<NitroErrorFfi>)
+      >('nitro_camera_set_native_detector');
+  late final Pointer<Utf8> Function(int, Pointer<NitroErrorFfi>)
+  _getConcurrentCameraIdsJsonPtr = _dylib
+      .lookupFunction<
+        Pointer<Utf8> Function(Int64, Pointer<NitroErrorFfi>),
+        Pointer<Utf8> Function(int, Pointer<NitroErrorFfi>)
+      >('nitro_camera_get_concurrent_camera_ids_json');
   late final Pointer<Uint8> Function(int, int, Pointer<Void>)
   _takePhotoWithOptionsPtr = _dylib
       .lookupFunction<
@@ -1917,6 +1962,61 @@ class _NitroCameraImpl extends NitroCamera {
       _setTargetOrientationPtr(_instanceId, textureId, degrees, _nitroErr);
       NitroRuntime.throwIfOutParamError(_nitroErr);
     }, methodName: 'setTargetOrientation');
+  }
+
+  @override
+  void setDistortionCorrection(int textureId, int enabled) {
+    checkDisposed();
+    NitroRuntime.callSync<void>(() {
+      _setDistortionCorrectionPtr(_instanceId, textureId, enabled, _nitroErr);
+      NitroRuntime.throwIfOutParamError(_nitroErr);
+    }, methodName: 'setDistortionCorrection');
+  }
+
+  @override
+  void enableOrientationEvents(int enabled) {
+    checkDisposed();
+    NitroRuntime.callSync<void>(() {
+      _enableOrientationEventsPtr(_instanceId, enabled, _nitroErr);
+      NitroRuntime.throwIfOutParamError(_nitroErr);
+    }, methodName: 'enableOrientationEvents');
+  }
+
+  @override
+  void enableDeviceAvailabilityEvents(int enabled) {
+    checkDisposed();
+    NitroRuntime.callSync<void>(() {
+      _enableDeviceAvailabilityEventsPtr(_instanceId, enabled, _nitroErr);
+      NitroRuntime.throwIfOutParamError(_nitroErr);
+    }, methodName: 'enableDeviceAvailabilityEvents');
+  }
+
+  @override
+  void setNativeDetector(int textureId, String detector) {
+    checkDisposed();
+    return NitroRuntime.callSync(
+      () => withArena((arena) {
+        _setNativeDetectorPtr(
+          _instanceId,
+          textureId,
+          detector.toNativeUtf8(allocator: arena),
+          _nitroErr,
+        );
+        NitroRuntime.throwIfOutParamError(_nitroErr);
+        return;
+      }),
+      methodName: 'setNativeDetector',
+    );
+  }
+
+  @override
+  String getConcurrentCameraIdsJson() {
+    checkDisposed();
+    return NitroRuntime.callSync(() {
+      final res = _getConcurrentCameraIdsJsonPtr(_instanceId, _nitroErr);
+      NitroRuntime.throwIfOutParamError(_nitroErr);
+      return res.toDartStringWithFree();
+    }, methodName: 'getConcurrentCameraIdsJson');
   }
 
   @override

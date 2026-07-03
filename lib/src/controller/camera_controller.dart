@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonDecode;
 import 'package:flutter/foundation.dart';
 import '../configuration/configuration.dart';
 import '../models/models.dart';
@@ -178,13 +179,20 @@ class CameraController extends ChangeNotifier {
     final h = height ?? fmt?.videoHeight ?? 720;
     final targetFps = fps ?? fmt?.maxFps.toInt() ?? 30;
 
-    _textureId = await NitroCamera.instance.openCamera(
+    final tid = await NitroCamera.instance.openCamera(
       device.id,
       w,
       h,
       targetFps,
       audio ? 1 : 0,
     );
+    // The native side returns 0 when the open failed (unknown device, HAL
+    // rejection, ...). Treating 0 as a live session would publish a broken
+    // controller — surface it as an error so callers can retry/back off.
+    if (tid == 0) {
+      throw StateError('openCamera failed for device ${device.id}');
+    }
+    _textureId = tid;
     // The requested w/h are screen-matched, not the camera's real output size —
     // read back the actual, orientation-corrected preview dimensions so the
     // preview's aspect ratio is correct (not stretched). Defensive: never let a
@@ -228,13 +236,19 @@ class CameraController extends ChangeNotifier {
       if (old != null) await NitroCamera.instance.closeCamera(old);
       final w = next.format?.videoWidth ?? _width;
       final h = next.format?.videoHeight ?? _height;
-      _textureId = await NitroCamera.instance.openCamera(
+      final tid = await NitroCamera.instance.openCamera(
         next.deviceId ?? device.id,
         w,
         h,
         next.fps,
         next.enableAudio ? 1 : 0,
       );
+      if (tid == 0) {
+        _textureId = null;
+        throw StateError(
+            'openCamera failed for device ${next.deviceId ?? device.id}');
+      }
+      _textureId = tid;
       _width = w;
       _height = h;
       _isActive = true;
@@ -277,14 +291,36 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True once [closeSession] (or [dispose]) has closed the native session.
+  bool _sessionClosed = false;
+
+  /// Closes the native camera session — freeing the camera **hardware** for
+  /// the next open — while keeping this controller (and [textureId]) alive.
+  ///
+  /// A mounted `Texture` widget keeps showing the session's last rendered
+  /// frame: the native side defers the Flutter texture release past the swap
+  /// window. This is the first half of a freeze-frame device switch — close
+  /// the old camera *before* opening the new one (two briefly-overlapping
+  /// open cameras wedge constrained HALs), then call [dispose] once the new
+  /// preview is on screen.
+  Future<void> closeSession() async {
+    if (_sessionClosed || _isDisposed) return;
+    _sessionClosed = true;
+    final tid = _textureId;
+    if (tid != null) {
+      await NitroCamera.instance.closeCamera(tid);
+    }
+  }
+
   @override
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
     final tid = _textureId;
-    if (tid != null) {
+    _textureId = null;
+    if (tid != null && !_sessionClosed) {
+      _sessionClosed = true;
       await NitroCamera.instance.closeCamera(tid);
-      _textureId = null;
     }
     super.dispose();
   }
@@ -436,6 +472,53 @@ class CameraController extends ChangeNotifier {
   void setTargetOrientation(int degrees) {
     _requireInitialized();
     NitroCamera.instance.setTargetOrientation(_textureId!, degrees);
+  }
+
+  /// Enables / disables lens distortion correction (default ON where the
+  /// device supports it — API 28+). vision-camera's
+  /// `enableDistortionCorrection`.
+  void setDistortionCorrection({required bool enabled}) {
+    _requireInitialized();
+    NitroCamera.instance.setDistortionCorrection(_textureId!, enabled ? 1 : 0);
+  }
+
+  /// Runs a NATIVE ML Kit detector on this session's frames:
+  /// `"barcode"`, `"face"`, or `""` to stop. Results arrive as
+  /// [CameraEventType.detection] events (JSON in `message`) — see
+  /// [nativeDetections]. Requires the host app to add the matching ML Kit
+  /// dependency (documented in the README).
+  void setNativeDetector(String detector) {
+    _requireInitialized();
+    NitroCamera.instance.setNativeDetector(_textureId!, detector);
+  }
+
+  /// Decoded native-detector results for THIS session, as parsed JSON maps
+  /// (`{detector, width, height, rotation, results: [...]}`).
+  Stream<Map<String, dynamic>> get nativeDetections =>
+      NitroCamera.instance.eventStream
+          .where((e) =>
+              CameraEventType.values[e.type] == CameraEventType.detection &&
+              (e.textureId == _textureId || e.textureId == 0))
+          .map((e) {
+        try {
+          return jsonDecode(e.message) as Map<String, dynamic>;
+        } catch (_) {
+          return <String, dynamic>{'error': 'bad detection payload'};
+        }
+      });
+
+  /// Camera-ID combinations that can stream CONCURRENTLY (multi-cam, API 30+).
+  /// Each inner list is one combination that [initialize] can open as
+  /// simultaneous [CameraController] instances. Empty when unsupported.
+  static List<List<String>> getConcurrentCameraIds() {
+    try {
+      final raw = jsonDecode(NitroCamera.instance.getConcurrentCameraIdsJson());
+      return (raw as List)
+          .map((combo) => (combo as List).cast<String>())
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   // ---- Photo capture ----

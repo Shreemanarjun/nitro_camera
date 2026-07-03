@@ -58,6 +58,10 @@ enum CameraEventType {
   photoCaptureBegan, // onWillBeginCapture — exposure/metering has started
   photoCaptureShutter, // onWillCapturePhoto — the shutter moment (flash UI)
   photoThumbnail, // onPreviewImageAvailable — fast thumbnail path in `message`
+  deviceConnected, // a camera became available (hot-plug); `message` = deviceId
+  deviceDisconnected, // a camera went away (hot-plug); `message` = deviceId
+  orientationChanged, // physical device rotated; `reason` = degrees (0/90/180/270)
+  detection, // native detector result; `message` = JSON array of detections
 }
 
 /// Why the camera session was interrupted (mirrors AVFoundation reasons).
@@ -254,6 +258,7 @@ class PhotoOptions {
   final double longitude;
   final double altitude;
   final int hasLocation; // 0 / 1
+  final int outputFormat; // 0 = JPEG, 1 = DNG (RAW; requires supportsRawCapture)
 
   const PhotoOptions({
     required this.flash,
@@ -265,6 +270,7 @@ class PhotoOptions {
     this.longitude = 0,
     this.altitude = 0,
     this.hasLocation = 0,
+    this.outputFormat = 0,
   });
 }
 
@@ -503,6 +509,33 @@ abstract class NitroCamera extends HybridObject {
 
   /// Sets the target output orientation in degrees (0 / 90 / 180 / 270).
   void setTargetOrientation(int textureId, int degrees);
+
+  /// Enables or disables lens distortion correction on the capture pipeline
+  /// (Camera2 `DISTORTION_CORRECTION_MODE`, API 28+). No-op when the device
+  /// doesn't support it. [enabled]: 1 = on (HIGH_QUALITY), 0 = off.
+  void setDistortionCorrection(int textureId, int enabled);
+
+  /// Starts emitting [CameraEventType.orientationChanged] events for physical
+  /// device rotation (via the native orientation sensor listener — works even
+  /// when the UI orientation is locked). [enabled]: 1 = on, 0 = off.
+  void enableOrientationEvents(int enabled);
+
+  /// Starts emitting [CameraEventType.deviceConnected] /
+  /// [CameraEventType.deviceDisconnected] hot-plug events (e.g. USB cameras).
+  /// [enabled]: 1 = on, 0 = off.
+  void enableDeviceAvailabilityEvents(int enabled);
+
+  /// Runs a NATIVE ML detector on the session's frames, emitting
+  /// [CameraEventType.detection] events with a JSON payload per hit.
+  /// [detector]: "barcode" | "face" | "" (off). Requires the host app to add
+  /// the matching ML Kit dependency (see docs) — throws a descriptive error
+  /// event if the detector class is not on the classpath.
+  void setNativeDetector(int textureId, String detector);
+
+  /// Returns the camera-ID combinations that can stream CONCURRENTLY
+  /// (multi-cam), as a JSON array of arrays (e.g. `[["0","1"]]`). Empty when
+  /// unsupported (API < 30 or no combinations).
+  String getConcurrentCameraIdsJson();
 
   /// Captures a photo using explicit [options] (flash, quality, shutter sound).
   @nitroAsync

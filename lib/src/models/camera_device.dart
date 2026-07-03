@@ -50,9 +50,14 @@ class CameraDeviceInfo {
   /// Identifiers of the underlying physical cameras (e.g. "wide-angle-camera").
   final List<String> physicalDevices;
 
+  /// Vendor camera extensions available on this device (API 31+):
+  /// "night" | "hdr" | "bokeh" | "face-retouch" | "auto". Query-only for now
+  /// (extension capture sessions are a planned feature).
+  final List<String> extensions;
+
   final double focalLength;
   final double aperture;
-  
+
   /// Available capture formats, sorted by descending resolution.
   final List<CameraDeviceFormat> formats;
 
@@ -78,6 +83,7 @@ class CameraDeviceInfo {
     this.supportsFocus = true,
     this.hardwareLevel = 'full',
     this.physicalDevices = const [],
+    this.extensions = const [],
     this.formats = const [],
     this.focalLength = 3.5,
     this.aperture = 1.8,
@@ -111,6 +117,7 @@ class CameraDeviceInfo {
       supportsFocus:       json['supportsFocus'] != false,
       hardwareLevel:       json['hardwareLevel'] as String? ?? 'full',
       physicalDevices:     physical,
+      extensions:          (json['extensions'] as List? ?? []).cast<String>(),
       formats:             fmts,
       focalLength:         (json['focalLength'] as num? ?? 3.5).toDouble(),
       aperture:            (json['aperture'] as num? ?? 1.8).toDouble(),

@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import Combine
 import Flutter
+import UIKit
 
 /// Real AVFoundation implementation of `HybridNitroCameraProtocol`.
 ///
@@ -30,7 +31,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     // CameraEventType: 0=started 1=stopped 2=error 3=interruptionStarted
-    //                  4=interruptionEnded 5=frameDropped
+    //                  4=interruptionEnded 5=frameDropped 6=photoCaptureBegan
+    //                  7=photoCaptureShutter 8=photoThumbnail 9=deviceConnected
+    //                  10=deviceDisconnected 11=orientationChanged 12=detection
     private func emitEvent(_ type: Int64, textureId: Int64 = 0, reason: Int64 = 0, message: String = "") {
         eventSubject.send(CameraEvent(type: type, textureId: textureId, reason: reason, message: message))
     }
@@ -347,16 +350,122 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         session(for: textureId)?.setTargetOrientation(degrees)
     }
 
+    public func setDistortionCorrection(textureId: Int64, enabled: Int64) {
+        session(for: textureId)?.setDistortionCorrection(enabled != 0)
+    }
+
+    public func setNativeDetector(textureId: Int64, detector: String) {
+        session(for: textureId)?.setNativeDetector(detector)
+    }
+
+    // MARK: - Physical-orientation events (vision-camera's DeviceOrientationManager)
+    //
+    // UIDevice orientation notifications report the SENSOR-measured device
+    // rotation even when the UI orientation is locked — mapped to 0/90/180/270
+    // and emitted only on change (faceUp/faceDown/unknown are ignored).
+
+    private var orientationObserver: NSObjectProtocol?
+    private var lastOrientationDeg: Int64 = -1
+
+    public func enableOrientationEvents(enabled: Int64) {
+        // UIDevice orientation generation + notification delivery live on main.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if enabled != 0 {
+                guard self.orientationObserver == nil else { return }
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                self.orientationObserver = NotificationCenter.default.addObserver(
+                    forName: UIDevice.orientationDidChangeNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    guard let self = self else { return }
+                    let degrees: Int64
+                    switch UIDevice.current.orientation {
+                    case .portrait:           degrees = 0
+                    case .landscapeLeft:      degrees = 90
+                    case .portraitUpsideDown: degrees = 180
+                    case .landscapeRight:     degrees = 270
+                    default:                  return // faceUp/faceDown/unknown
+                    }
+                    guard degrees != self.lastOrientationDeg else { return }
+                    self.lastOrientationDeg = degrees
+                    self.emitEvent(11 /* orientationChanged */, textureId: 0, reason: degrees)
+                }
+            } else {
+                guard let observer = self.orientationObserver else { return }
+                NotificationCenter.default.removeObserver(observer)
+                self.orientationObserver = nil
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                self.lastOrientationDeg = -1
+            }
+        }
+    }
+
+    // MARK: - Device hot-plug (AVCaptureDevice wasConnected/wasDisconnected)
+
+    private var deviceConnectedObserver: NSObjectProtocol?
+    private var deviceDisconnectedObserver: NSObjectProtocol?
+
+    public func enableDeviceAvailabilityEvents(enabled: Int64) {
+        if enabled != 0 {
+            guard deviceConnectedObserver == nil else { return }
+            let center = NotificationCenter.default
+            deviceConnectedObserver = center.addObserver(
+                forName: .AVCaptureDeviceWasConnected, object: nil, queue: nil
+            ) { [weak self] note in
+                guard let device = note.object as? AVCaptureDevice,
+                      device.hasMediaType(.video) else { return }
+                self?.emitEvent(9 /* deviceConnected */, message: device.uniqueID)
+            }
+            deviceDisconnectedObserver = center.addObserver(
+                forName: .AVCaptureDeviceWasDisconnected, object: nil, queue: nil
+            ) { [weak self] note in
+                guard let device = note.object as? AVCaptureDevice,
+                      device.hasMediaType(.video) else { return }
+                self?.emitEvent(10 /* deviceDisconnected */, message: device.uniqueID)
+            }
+        } else {
+            let center = NotificationCenter.default
+            if let observer = deviceConnectedObserver { center.removeObserver(observer) }
+            if let observer = deviceDisconnectedObserver { center.removeObserver(observer) }
+            deviceConnectedObserver = nil
+            deviceDisconnectedObserver = nil
+        }
+    }
+
+    /// Concurrent-streaming camera combinations (multi-cam), iOS 13+ — JSON
+    /// array of arrays of device uniqueIDs; "[]" where multi-cam is unsupported.
+    public func getConcurrentCameraIdsJson() -> String {
+        guard #available(iOS 13.0, *), AVCaptureMultiCamSession.isMultiCamSupported else {
+            return "[]"
+        }
+        let combos = discoverySession().supportedMultiCamDeviceSets.map { set in
+            set.map { $0.uniqueID }.sorted()
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: combos),
+              let json = String(data: data, encoding: .utf8) else { return "[]" }
+        return json
+    }
+
     public func takePhotoWithOptions(textureId: Int64, options: PhotoOptions) async throws -> PhotoResult {
         guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
+        // outputFormat 1 = DNG (RAW) — dedicated ProRAW/Bayer capture path with
+        // its own runtime support check (throws `rawNotSupported` when the
+        // output offers no RAW pixel formats).
+        if options.outputFormat == 1 { return try await s.takeDngPhoto(options: options) }
         let flash: AVCaptureDevice.FlashMode
         switch options.flash {
         case 1:  flash = .on
         case 2:  flash = .auto
         default: flash = .off
         }
+        // skipMetadata drops the GPS geotag — the only optional metadata we
+        // attach. `enableShutterSound` is a no-op on iOS: the system plays the
+        // shutter sound itself where required (no public mute on
+        // AVCapturePhotoOutput; we deliberately do NOT hack audio sessions).
         let loc: (lat: Double, lon: Double, alt: Double)? =
-            options.hasLocation != 0
+            (options.hasLocation != 0 && options.skipMetadata == 0)
                 ? (options.latitude, options.longitude, options.altitude)
                 : nil
         return try await s.takePhoto(
@@ -389,15 +498,44 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     private func discoverySession() -> AVCaptureDevice.DiscoverySession {
-        AVCaptureDevice.DiscoverySession(
-            deviceTypes: [
-                .builtInWideAngleCamera,
-                .builtInUltraWideCamera,
-                .builtInTelephotoCamera,
-            ],
+        // Physical lenses + virtual (logical multi-cam) devices. Virtual devices
+        // are the iOS analogue of Android's LOGICAL_MULTI_CAMERA: they expose
+        // constituent physical lenses and seamless zoom switch-over.
+        var deviceTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera,
+            .builtInUltraWideCamera,
+            .builtInTelephotoCamera,
+            .builtInDualCamera,
+        ]
+        if #available(iOS 13.0, *) {
+            deviceTypes.append(.builtInDualWideCamera)
+            deviceTypes.append(.builtInTripleCamera)
+        }
+        return AVCaptureDevice.DiscoverySession(
+            deviceTypes: deviceTypes,
             mediaType: .video,
             position: .unspecified
         )
+    }
+
+    /// vision-camera's `physicalDevices` naming — the SAME strings as Android.
+    private func lensTypeName(_ type: AVCaptureDevice.DeviceType) -> String {
+        switch type {
+        case .builtInUltraWideCamera: return "ultra-wide-angle-camera"
+        case .builtInTelephotoCamera: return "telephoto-camera"
+        default:                      return "wide-angle-camera"
+        }
+    }
+
+    /// Nominal focal length in mm by lens type — AVFoundation exposes no
+    /// physical focal-length API, so report a typical per-lens value (the
+    /// Android side reads the real LENS_INFO_AVAILABLE_FOCAL_LENGTHS).
+    private func nominalFocalLength(_ type: AVCaptureDevice.DeviceType) -> Double {
+        switch type {
+        case .builtInUltraWideCamera: return 1.6
+        case .builtInTelephotoCamera: return 7.0
+        default:                      return 4.2
+        }
     }
 
     private func deviceInfoDict(for device: AVCaptureDevice) -> [String: Any] {
@@ -451,6 +589,23 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         let maxEv = Double(device.maxExposureTargetBias)
         let minFocusDist = device.lensPosition > 0 ? Double(device.lensPosition) : 0.0
 
+        // Physical lens composition (vision-camera's physicalDevices) — the
+        // SAME strings as Android. A plain camera reports its own lens type; a
+        // virtual (logical multi-cam) device lists its constituents'.
+        var physicalDevices = [lensTypeName(device.deviceType)]
+        var isMultiCam = false
+        // neutralZoom: the first virtual-device switch-over factor (the zoom at
+        // which a multi-cam device hands off between constituent lenses); 1.0
+        // for plain physical cameras.
+        var neutralZoom = 1.0
+        if #available(iOS 13.0, *), device.isVirtualDevice {
+            isMultiCam = true
+            physicalDevices = device.constituentDevices.map { lensTypeName($0.deviceType) }
+            if let firstSwitchOver = device.virtualDeviceSwitchOverVideoZoomFactors.first {
+                neutralZoom = Double(truncating: firstSwitchOver)
+            }
+        }
+
         return [
             "id":                   device.uniqueID,
             "name":                 device.localizedName,
@@ -461,7 +616,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             "sensorOrientation":    0,
             "minZoom":              Double(device.minAvailableVideoZoomFactor),
             "maxZoom":              Double(device.maxAvailableVideoZoomFactor),
-            "neutralZoom":          1.0,
+            "neutralZoom":          neutralZoom,
             "hasFlash":             device.hasFlash,
             "hasTorch":             device.hasTorch,
             "maxPhotoWidth":        maxW,
@@ -469,12 +624,22 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             "minExposure":          minEv,
             "maxExposure":          maxEv,
             "minFocusDistanceCm":   minFocusDist,
-            "isMultiCam":           false,
+            "isMultiCam":           isMultiCam,
             "supportsLowLightBoost": device.isLowLightBoostSupported,
+            // Honest capability report: RAW availability on iOS is only knowable
+            // from a LIVE AVCapturePhotoOutput (availableRawPhotoPixelFormatTypes
+            // depends on the connected session + active format), so enumeration
+            // reports false and the DNG capture path performs the real runtime
+            // check — throwing a clear `rawNotSupported` error when absent.
             "supportsRawCapture":   false,
             "supportsFocus":        device.isFocusPointOfInterestSupported,
             "hardwareLevel":        "full",
-            "physicalDevices":      [device.deviceType.rawValue],
+            "physicalDevices":      physicalDevices,
+            // Vendor extensions (Night / HDR / Bokeh...) are an Android-only
+            // concept (CameraExtensionCharacteristics); always empty on iOS.
+            "extensions":           [String](),
+            "focalLength":          nominalFocalLength(device.deviceType),
+            "aperture":             Double(device.lensAperture),
             "formats":              formats,
         ]
     }
@@ -492,6 +657,12 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
             if Int64(dim.width) > maxW { maxW = Int64(dim.width); maxH = Int64(dim.height) }
         }
+        // Virtual multi-cam devices: neutral zoom = first lens switch-over factor.
+        var neutralZoom = 1.0
+        if #available(iOS 13.0, *), device.isVirtualDevice,
+           let firstSwitchOver = device.virtualDeviceSwitchOverVideoZoomFactors.first {
+            neutralZoom = Double(truncating: firstSwitchOver)
+        }
         return CameraDevice(
             id: device.uniqueID,
             name: device.localizedName,
@@ -500,13 +671,13 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             sensorOrientation: Int64(0), // upright buffers — see JSON variant above
             minZoom: Double(device.minAvailableVideoZoomFactor),
             maxZoom: Double(device.maxAvailableVideoZoomFactor),
-            neutralZoom: 1.0,
+            neutralZoom: neutralZoom,
             hasFlash: device.hasFlash ? Int64(1) : Int64(0),
             hasTorch: device.hasTorch ? Int64(1) : Int64(0),
             maxPhotoWidth: maxW,
             maxPhotoHeight: maxH,
-            focalLength: 3.5,
-            aperture: 1.8
+            focalLength: nominalFocalLength(device.deviceType), // no public focal-length API
+            aperture: Double(device.lensAperture)
         )
     }
 }

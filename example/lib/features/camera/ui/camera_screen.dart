@@ -11,10 +11,11 @@ import 'widgets/controls/sensor_tray.dart';
 import 'widgets/controls/top_bar.dart';
 import 'widgets/overlays/camera_status_widgets.dart';
 import 'widgets/overlays/capture_overlays.dart';
+import 'widgets/overlays/detection_overlay.dart';
 import 'widgets/overlays/filtered_preview.dart';
 import 'widgets/overlays/frame_overlay.dart';
-import 'widgets/sheets/settings_sheet.dart';
 import 'widgets/transitions/camera_switch_loader.dart';
+import 'widgets/transitions/switch_dim_overlay.dart';
 
 /// The camera screen: preview + gestures (tap-to-focus, pinch-zoom, mode
 /// swipe), the control trays, the scanner overlay and the capture overlays.
@@ -186,6 +187,10 @@ class _CameraScreenState extends State<CameraScreen>
               ),
             ),
 
+            // 1b. Freeze-dim overlay during session reopen (device / quality /
+            // fps switch) — blurs + dims the preview, fades out on ready.
+            const Positioned.fill(child: SwitchDimOverlay()),
+
             // 2a. Zoom indicator.
             Positioned(
               left: 0,
@@ -224,21 +229,9 @@ class _CameraScreenState extends State<CameraScreen>
               return FocusIndicator(key: ValueKey(offset), offset: offset);
             }),
 
-            // 3. Top controls.
+            // 3. Top controls (icon strip + config caption + quick panel; the
+            // SETTINGS entry lives inside the quick panel now).
             const TopBar(),
-
-            // 3b. Unified settings entry (PRO + CONFIG in one sheet).
-            Positioned(
-              right: 16,
-              top: MediaQuery.of(context).padding.top + 56,
-              child: Builder(
-                builder: (context) => PillButton(
-                  icon: Icons.tune,
-                  label: 'SETTINGS',
-                  onTap: () => SettingsSheet.show(context),
-                ),
-              ),
-            ),
 
             // 4. Sensor tray (front/back categories + lenses).
             const Positioned(
@@ -283,6 +276,17 @@ class _CameraScreenState extends State<CameraScreen>
                       )
                     : const SizedBox.shrink(key: ValueKey('none')),
               );
+            }),
+
+            // 5b. Native ML Kit detection boxes (FACE chip in the top bar).
+            Watch((context) {
+              final det = cameraStore.nativeDetector.value;
+              // Key on the controller so the overlay re-subscribes after a
+              // camera switch (new controller instance = new detections
+              // stream).
+              final ctrl = cameraStore.activeController.value;
+              if (det.isEmpty || ctrl == null) return const SizedBox.shrink();
+              return DetectionOverlay(key: ValueKey('det_${ctrl.textureId}'));
             }),
 
             // 6. Bottom main controls.

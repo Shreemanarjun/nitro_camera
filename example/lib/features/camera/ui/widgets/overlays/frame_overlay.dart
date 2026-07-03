@@ -30,32 +30,142 @@ class _FrameOverlayState extends State<FrameOverlay> {
 
   CodeScanner? _scanner;
   StreamSubscription<CodeResult>? _resultSub;
+  StreamSubscription<CodeResult>? _detectionSub;
   StreamSubscription<FrameProcessStats>? _statsSub;
+  StreamSubscription<CameraFrame>? _assistSub;
   late final void Function() _kindWatchDispose;
+  late final void Function() _oneShotWatchDispose;
+
+  // Live highlight state (from raw detections).
+  List<double>? _highlightPoints;
+  DateTime _highlightAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Auto-assist state.
+  bool _torchHint = false;
+  int _assistFrameCounter = 0;
+  DateTime _lastDetectionAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastFocusNudge = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastAutoZoom = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _assistTimer;
+  bool _oneShotDone = false;
+
+  // Scanner lifecycle guards: signals' subscribe() fires IMMEDIATELY with the
+  // current value, so without the change checks initState would spawn three
+  // concurrent scanners (direct init + both subscriptions) and leak two worker
+  // isolates. The epoch invalidates in-flight inits superseded by a restart.
+  int _scannerEpoch = 0;
+  late CodeScanKind _scannerKind;
+  late bool _scannerOneShot;
 
   @override
   void initState() {
     super.initState();
-    _initScanner(cameraStore.scanKind.value);
-    // Restart the worker with the new format family when the user switches
-    // the QR / 1D / 2D / ALL chips.
+    _scannerKind = cameraStore.scanKind.value;
+    _scannerOneShot = cameraStore.scanOneShot.value;
+    _initScanner(_scannerKind);
+    // Restart the worker with the new format family / mode when switched.
     _kindWatchDispose = cameraStore.scanKind.subscribe((kind) {
+      if (kind == _scannerKind) return;
+      _scannerKind = kind;
       _restartScanner(kind);
+    });
+    _oneShotWatchDispose = cameraStore.scanOneShot.subscribe((oneShot) {
+      if (oneShot == _scannerOneShot) return;
+      _scannerOneShot = oneShot;
+      _restartScanner(_scannerKind);
+    });
+    // Focus nudge: if nothing has been detected for a while, refocus center.
+    _assistTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted || !widget.isProcessing) return;
+      final now = DateTime.now();
+      if (now.difference(_lastDetectionAt).inMilliseconds > 2500 &&
+          now.difference(_lastFocusNudge).inSeconds >= 3) {
+        _lastFocusNudge = now;
+        cameraStore.setFocusPoint(0.5, 0.5);
+      }
     });
   }
 
   /// Spawns a persistent scanning isolate for [kind] and consumes the frame
   /// stream with zero-copy hand-off + drop-latest backpressure ([CodeScanner]).
   Future<void> _initScanner(CodeScanKind kind) async {
-    final scanner = CodeScanner(kind: kind);
+    final epoch = ++_scannerEpoch;
+    final scanner = CodeScanner(
+      kind: kind,
+      mode: cameraStore.scanOneShot.value
+          ? ScanMode.oneShot
+          : ScanMode.continuous,
+    );
     await scanner.start(NitroCamera.instance.frameStream);
-    if (!mounted) {
+    if (!mounted || epoch != _scannerEpoch) {
+      // Widget gone, or a newer restart superseded this init while its worker
+      // was spawning — tear down instead of installing leaked subscriptions.
       await scanner.dispose();
       return;
     }
     _scanner = scanner;
+    _oneShotDone = false;
     _resultSub = scanner.results.listen(_onResult);
+    _detectionSub = scanner.detections.listen(_onDetection);
     _statsSub = scanner.stats.listen(_onStats);
+    // Low-light torch hint: sample the luma stream cheaply on the UI isolate.
+    _assistSub = NitroCamera.instance.frameStream.listen(_onAssistFrame);
+  }
+
+  /// Raw per-frame detection: drive the live highlight + smart zoom.
+  void _onDetection(CodeResult r) {
+    if (!mounted || !widget.isProcessing) return;
+    _lastDetectionAt = DateTime.now();
+    final pts = r.windowPoints;
+    if (pts != null && pts.length >= 2) {
+      setState(() {
+        _highlightPoints = pts;
+        _highlightAt = DateTime.now();
+      });
+
+      // Smart zoom: symbol much smaller than the window → step zoom in.
+      if (pts.length >= 4) {
+        var minX = 1.0, maxX = 0.0, minY = 1.0, maxY = 0.0;
+        for (var i = 0; i + 1 < pts.length; i += 2) {
+          if (pts[i] < minX) minX = pts[i];
+          if (pts[i] > maxX) maxX = pts[i];
+          if (pts[i + 1] < minY) minY = pts[i + 1];
+          if (pts[i + 1] > maxY) maxY = pts[i + 1];
+        }
+        final span =
+            (maxX - minX) > (maxY - minY) ? (maxX - minX) : (maxY - minY);
+        final now = DateTime.now();
+        final zoom = cameraStore.currentZoom.value;
+        if (span < 0.22 &&
+            zoom < 2.9 &&
+            now.difference(_lastAutoZoom).inSeconds >= 2) {
+          _lastAutoZoom = now;
+          cameraStore.setZoom((zoom + 1).clamp(1.0, 3.0));
+        }
+      }
+    }
+  }
+
+  /// Sparse luma sampling for the low-light torch hint (every 15th frame,
+  /// 256 pixels — negligible cost; the pixels view is only valid during the
+  /// callback, which is exactly how it's used).
+  void _onAssistFrame(CameraFrame f) {
+    if (!mounted || !widget.isProcessing) return;
+    if (++_assistFrameCounter % 15 != 0) return;
+    final px = f.pixels;
+    if (px.isEmpty) return;
+    var sum = 0;
+    final step = px.length > 256 ? px.length ~/ 256 : 1;
+    var n = 0;
+    for (var i = 0; i < px.length; i += step) {
+      sum += px[i];
+      n++;
+    }
+    final mean = sum / n;
+    final wantHint = mean < 45 && !cameraStore.torch.value;
+    if (wantHint != _torchHint) {
+      setState(() => _torchHint = wantHint);
+    }
   }
 
   int _windowFrames = 0;
@@ -64,6 +174,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
   /// benchmark readouts. FPS is a windowed count (inter-arrival timing lies
   /// when isolate replies arrive in bursts).
   void _onStats(FrameProcessStats s) {
+    if (!mounted) return;
     _frameCount.value++;
     _windowFrames++;
     final now = DateTime.now();
@@ -90,11 +201,15 @@ class _FrameOverlayState extends State<FrameOverlay> {
 
   Future<void> _restartScanner(CodeScanKind kind) async {
     await _resultSub?.cancel();
+    await _detectionSub?.cancel();
     await _statsSub?.cancel();
+    await _assistSub?.cancel();
     await _scanner?.dispose();
     _scanner = null;
     _lastStatAt = null;
     _windowFrames = 0;
+    _highlightPoints = null;
+    _oneShotDone = false;
     if (!mounted) return;
     await _initScanner(kind);
   }
@@ -105,20 +220,39 @@ class _FrameOverlayState extends State<FrameOverlay> {
       HapticFeedback.vibrate();
       HapticFeedback.selectionClick();
     }
+    final oneShot = cameraStore.scanOneShot.value;
     setState(() {
       _lastResult = r;
+      if (oneShot) _oneShotDone = true;
       _resultClearTimer?.cancel();
-      _resultClearTimer = Timer(const Duration(seconds: 2), () {
-        if (mounted) setState(() => _lastResult = null);
-      });
+      if (!oneShot) {
+        _resultClearTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _lastResult = null);
+        });
+      }
+    });
+  }
+
+  /// One-shot: tap to re-arm for the next scan.
+  void _resumeOneShot() {
+    _scanner?.resume();
+    setState(() {
+      _oneShotDone = false;
+      _lastResult = null;
+      _highlightPoints = null;
     });
   }
 
   @override
   void dispose() {
+    _scannerEpoch++; // invalidate any in-flight _initScanner
     _kindWatchDispose();
+    _oneShotWatchDispose();
+    _assistTimer?.cancel();
     _resultSub?.cancel();
+    _detectionSub?.cancel();
     _statsSub?.cancel();
+    _assistSub?.cancel();
     _scanner?.dispose();
     _image?.dispose();
     _fpsCounter.dispose();
@@ -190,6 +324,18 @@ class _FrameOverlayState extends State<FrameOverlay> {
                 ),
               ),
 
+              // 3b. Live code highlight (raw detections → window-mapped box).
+              if (_highlightPoints != null &&
+                  DateTime.now().difference(_highlightAt).inMilliseconds < 600)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _CodeHighlightPainter(
+                      points: _highlightPoints!,
+                      windowRect: _decodeWindowRectOnScreen(context),
+                    ),
+                  ),
+                ),
+
               // 4. Detected Result (Floating Glass Card)
               if (_lastResult != null)
                 Align(
@@ -226,7 +372,235 @@ class _FrameOverlayState extends State<FrameOverlay> {
                 )),
           ),
         ),
+
+        // 7. One-shot / continuous toggle (below the SETTINGS pill).
+        Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 168, right: 16),
+            child: Watch((_) {
+              final oneShot = cameraStore.scanOneShot.value;
+              return GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  cameraStore.scanOneShot.value = !oneShot;
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: oneShot
+                        ? Colors.cyanAccent
+                        : Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(16),
+                    border:
+                        Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  child: Text(
+                    oneShot ? 'ONE-SHOT' : 'CONTINUOUS',
+                    style: TextStyle(
+                      color: oneShot ? Colors.black : Colors.white60,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+
+        // 8. Low-light auto-assist: pulsing torch suggestion.
+        if (_torchHint)
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 420),
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  cameraStore.setTorch(true);
+                  setState(() => _torchHint = false);
+                },
+                child: _PulsingChip(
+                  icon: Icons.flashlight_on_rounded,
+                  label: 'LOW LIGHT — TAP FOR TORCH',
+                ),
+              ),
+            ),
+          ),
+
+        // 9. One-shot done: tap anywhere in the window to re-arm.
+        if (_oneShotDone)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _resumeOneShot,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 230),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: Colors.cyanAccent.withValues(alpha: 0.5)),
+                    ),
+                    child: const Text(
+                      'TAP TO SCAN AGAIN',
+                      style: TextStyle(
+                        color: Colors.cyanAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
+    );
+  }
+
+  /// Where the decode window sits ON SCREEN: the stream is cover-fitted and
+  /// centered, and the window is a centered square of
+  /// [kScannerWindowFraction] × the upright stream's short side.
+  Rect _decodeWindowRectOnScreen(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final ctrl = cameraStore.activeController.value;
+    var fw = (ctrl?.width ?? 1920).toDouble();
+    var fh = (ctrl?.height ?? 1080).toDouble();
+    // Upright dims: the preview rotates the landscape stream in portrait.
+    if (MediaQuery.of(context).orientation == Orientation.portrait &&
+        fw > fh) {
+      final t = fw;
+      fw = fh;
+      fh = t;
+    }
+    final cover = cameraStore.resizeCover.value;
+    final sx = size.width / fw, sy = size.height / fh;
+    final scale = cover ? (sx > sy ? sx : sy) : (sx < sy ? sx : sy);
+    final side = kScannerWindowFraction * (fw < fh ? fw : fh) * scale;
+    return Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: side,
+      height: side,
+    );
+  }
+}
+
+/// Draws the detected code's key points: a bounding quad + corner dots.
+class _CodeHighlightPainter extends CustomPainter {
+  final List<double> points;
+  final Rect windowRect;
+  _CodeHighlightPainter({required this.points, required this.windowRect});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final mapped = <Offset>[];
+    for (var i = 0; i + 1 < points.length; i += 2) {
+      mapped.add(Offset(
+        windowRect.left + points[i] * windowRect.width,
+        windowRect.top + points[i + 1] * windowRect.height,
+      ));
+    }
+    if (mapped.isEmpty) return;
+
+    final stroke = Paint()
+      ..color = Colors.greenAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+
+    if (mapped.length == 2) {
+      // 1D: underline the scanline between the two endpoints.
+      canvas.drawLine(mapped[0], mapped[1], stroke);
+    } else {
+      // 2D: bounding box around all points (finder patterns).
+      var minX = double.infinity, maxX = -double.infinity;
+      var minY = double.infinity, maxY = -double.infinity;
+      for (final p in mapped) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      final r = Rect.fromLTRB(minX - 12, minY - 12, maxX + 12, maxY + 12);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(r, const Radius.circular(10)),
+        stroke,
+      );
+    }
+    final dot = Paint()..color = Colors.greenAccent;
+    for (final p in mapped) {
+      canvas.drawCircle(p, 4, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CodeHighlightPainter old) =>
+      old.points != points || old.windowRect != windowRect;
+}
+
+/// A pulsing attention chip (used by the low-light torch hint).
+class _PulsingChip extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  const _PulsingChip({required this.icon, required this.label});
+
+  @override
+  State<_PulsingChip> createState() => _PulsingChipState();
+}
+
+class _PulsingChipState extends State<_PulsingChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 0.55, end: 1.0).animate(_ctrl),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.amberAccent),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.flashlight_on_rounded,
+                color: Colors.amberAccent, size: 15),
+            const SizedBox(width: 8),
+            Text(
+              widget.label,
+              style: const TextStyle(
+                color: Colors.amberAccent,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

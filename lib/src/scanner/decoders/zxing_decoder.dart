@@ -80,7 +80,18 @@ RawDecode? zxingDecode(
     final isGs1 = format == CodeFormat.rss14 ||
         format == CodeFormat.rssExpanded ||
         (symbologyId != null && _gs1SymbologyIds.contains(symbologyId));
-    return RawDecode(result.text, format, isGs1: isGs1);
+    List<double>? points;
+    final rp = result.resultPoints;
+    if (rp != null && rp.isNotEmpty) {
+      points = <double>[];
+      for (final p in rp) {
+        if (p == null) continue;
+        points.add(p.x);
+        points.add(p.y);
+      }
+      if (points.isEmpty) points = null;
+    }
+    return RawDecode(result.text, format, isGs1: isGs1, points: points);
   } catch (_) {
     return null; // MultiFormatReader throws NotFoundException on no match.
   }
