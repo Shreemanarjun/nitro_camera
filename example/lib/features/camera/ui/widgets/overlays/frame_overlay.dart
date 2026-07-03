@@ -18,11 +18,19 @@ class _FrameOverlayState extends State<FrameOverlay> {
   final ui.Image? _image = null; // reserved (debug preview)
   final _fpsCounter = ValueNotifier<double>(0);
   final _frameCount = ValueNotifier<int>(0);
+
+  /// Smoothed per-frame decode time (ms) — the scan benchmark.
+  final _analyzeMs = ValueNotifier<double>(0);
+
+  /// Smoothed decode time of SUCCESSFUL scans only (ms).
+  final _hitMs = ValueNotifier<double>(0);
+  DateTime? _lastStatAt;
   CodeResult? _lastResult;
   Timer? _resultClearTimer;
 
   CodeScanner? _scanner;
   StreamSubscription<CodeResult>? _resultSub;
+  StreamSubscription<FrameProcessStats>? _statsSub;
   late final void Function() _kindWatchDispose;
 
   @override
@@ -47,19 +55,52 @@ class _FrameOverlayState extends State<FrameOverlay> {
     }
     _scanner = scanner;
     _resultSub = scanner.results.listen(_onResult);
+    _statsSub = scanner.stats.listen(_onStats);
+  }
+
+  int _windowFrames = 0;
+
+  /// Every analysed frame (hit or miss): update the scan-FPS + analyze-time
+  /// benchmark readouts. FPS is a windowed count (inter-arrival timing lies
+  /// when isolate replies arrive in bursts).
+  void _onStats(FrameProcessStats s) {
+    _frameCount.value++;
+    _windowFrames++;
+    final now = DateTime.now();
+    final last = _lastStatAt;
+    if (last == null) {
+      _lastStatAt = now;
+    } else {
+      final dt = now.difference(last).inMicroseconds / 1e6;
+      if (dt >= 1.0) {
+        _fpsCounter.value = _windowFrames / dt;
+        _windowFrames = 0;
+        _lastStatAt = now;
+      }
+    }
+    _analyzeMs.value = _analyzeMs.value == 0
+        ? s.elapsedMillis
+        : _analyzeMs.value * 0.8 + s.elapsedMillis * 0.2;
+    if (s.success) {
+      _hitMs.value = _hitMs.value == 0
+          ? s.elapsedMillis
+          : _hitMs.value * 0.8 + s.elapsedMillis * 0.2;
+    }
   }
 
   Future<void> _restartScanner(CodeScanKind kind) async {
     await _resultSub?.cancel();
+    await _statsSub?.cancel();
     await _scanner?.dispose();
     _scanner = null;
+    _lastStatAt = null;
+    _windowFrames = 0;
     if (!mounted) return;
     await _initScanner(kind);
   }
 
   void _onResult(CodeResult r) {
     if (!mounted || !widget.isProcessing) return;
-    _frameCount.value++;
     if (_lastResult == null) {
       HapticFeedback.vibrate();
       HapticFeedback.selectionClick();
@@ -77,10 +118,13 @@ class _FrameOverlayState extends State<FrameOverlay> {
   void dispose() {
     _kindWatchDispose();
     _resultSub?.cancel();
+    _statsSub?.cancel();
     _scanner?.dispose();
     _image?.dispose();
     _fpsCounter.dispose();
     _frameCount.dispose();
+    _analyzeMs.dispose();
+    _hitMs.dispose();
     _resultClearTimer?.cancel();
     super.dispose();
   }
@@ -104,6 +148,8 @@ class _FrameOverlayState extends State<FrameOverlay> {
                 child: _AnimatedStatsCard(
                   fpsCounter: _fpsCounter,
                   frameCount: _frameCount,
+                  analyzeMs: _analyzeMs,
+                  hitMs: _hitMs,
                   lastResult: _lastResult?.text,
                 ),
               ),
@@ -308,11 +354,15 @@ class _ScanKindChips extends StatelessWidget {
 class _AnimatedStatsCard extends StatelessWidget {
   final ValueNotifier<double> fpsCounter;
   final ValueNotifier<int> frameCount;
+  final ValueNotifier<double> analyzeMs;
+  final ValueNotifier<double> hitMs;
   final String? lastResult;
 
   const _AnimatedStatsCard({
     required this.fpsCounter,
     required this.frameCount,
+    required this.analyzeMs,
+    required this.hitMs,
     this.lastResult,
   });
 
@@ -340,6 +390,42 @@ class _AnimatedStatsCard extends StatelessWidget {
                   builder: (ctx, v, _) => Text("${v.toInt()} FPS", style: _valStyle),
                 ),
                 color: Colors.cyanAccent,
+              ),
+              const SizedBox(height: 12),
+              _StatItem(
+                icon: Icons.timer_outlined,
+                label: "ANALYZE",
+                value: ValueListenableBuilder<double>(
+                  valueListenable: analyzeMs,
+                  builder: (ctx, v, _) => Text(
+                    v == 0 ? "—" : "${v.toStringAsFixed(1)} ms",
+                    style: _valStyle.copyWith(
+                      color: v == 0
+                          ? Colors.white38
+                          : v < 20
+                              ? Colors.greenAccent
+                              : v < 50
+                                  ? Colors.amberAccent
+                                  : Colors.redAccent,
+                    ),
+                  ),
+                ),
+                color: Colors.cyanAccent,
+              ),
+              const SizedBox(height: 12),
+              _StatItem(
+                icon: Icons.check_circle_outline,
+                label: "HIT AVG",
+                value: ValueListenableBuilder<double>(
+                  valueListenable: hitMs,
+                  builder: (ctx, v, _) => Text(
+                    v == 0 ? "—" : "${v.toStringAsFixed(1)} ms",
+                    style: _valStyle.copyWith(
+                      color: v == 0 ? Colors.white38 : Colors.greenAccent,
+                    ),
+                  ),
+                ),
+                color: Colors.greenAccent,
               ),
               const SizedBox(height: 12),
               _StatItem(
@@ -668,7 +754,9 @@ class _QRResultCard extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                             letterSpacing: -0.2,
                           ),
-                          maxLines: 1,
+                          // Wrap to two lines before ellipsizing so typical
+                          // payloads (URLs, GS1 AI strings) aren't clipped.
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],

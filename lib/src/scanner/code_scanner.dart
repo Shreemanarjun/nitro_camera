@@ -1,150 +1,22 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:zxing_lib/common.dart' as zxing;
-import 'package:zxing_lib/zxing.dart' as zxing;
-
 import '../nitro_camera.native.dart' show CameraFrame;
 import '../processing/frame_processor.dart';
+import 'decoders/code11.dart';
+import 'decoders/industrial_2of5.dart';
+import 'decoders/msi.dart';
+import 'decoders/pharmacode.dart';
+import 'decoders/postnet.dart';
+import 'decoders/rm4scc.dart';
+import 'decoders/telepen.dart';
+import 'decoders/zxing_decoder.dart';
+import 'engine/bar_extractor.dart';
+import 'engine/binarizer.dart';
+import 'engine/scanline.dart';
+import 'types.dart';
 
-/// Barcode / code symbologies the scanner can detect.
-///
-/// Coverage: all common **linear** codes (EAN/UPC incl. ISBN Bookland,
-/// Code 39/93/128, ITF, Codabar), **GS1 DataBar** ([rss14] = GS1 DataBar,
-/// [rssExpanded] = GS1 DataBar Expanded), and **2D** codes (QR, Data Matrix,
-/// Aztec, PDF417, MaxiCode) including their **GS1 variants** (GS1-128,
-/// GS1 DataMatrix, GS1 QR — flagged via [CodeResult.isGs1]). Postal
-/// symbologies (POSTNET / RM4SCC / Intelligent Mail) are not decodable by the
-/// underlying zxing engine; they need a dedicated native decoder.
-///
-/// The public API is deliberately decoupled from the underlying decoder
-/// (currently `zxing_lib` in Dart) so a native (C++) implementation can be
-/// swapped in without breaking callers.
-enum CodeFormat {
-  // ── 2D ──
-  qrCode,
-  dataMatrix,
-  aztec,
-  pdf417,
-  maxicode,
-  // ── 1D ──
-  ean13,
-  ean8,
-  upcA,
-  upcE,
-  code39,
-  code93,
-  code128,
-  itf,
-  codabar,
-
-  /// GS1 DataBar (formerly RSS-14).
-  rss14,
-
-  /// GS1 DataBar Expanded (formerly RSS Expanded).
-  rssExpanded;
-
-  /// Whether this is a 2D (matrix) symbology.
-  bool get is2D => switch (this) {
-        qrCode || dataMatrix || aztec || pdf417 || maxicode => true,
-        _ => false,
-      };
-
-  /// Whether this is a 1D (linear) symbology.
-  bool get is1D => !is2D;
-}
-
-/// Which family of codes to look for in a frame.
-enum CodeScanKind {
-  /// QR codes only — the fastest option.
-  qr,
-
-  /// Linear barcodes (EAN/UPC/Code-39/93/128/ITF/Codabar/RSS).
-  oneD,
-
-  /// Matrix codes (QR, Data Matrix, Aztec, PDF417, MaxiCode).
-  twoD,
-
-  /// Everything — 1D and 2D.
-  all;
-
-  /// The formats this kind scans for.
-  Set<CodeFormat> get formats => switch (this) {
-        qr => const {CodeFormat.qrCode},
-        oneD => CodeFormat.values.where((f) => f.is1D).toSet(),
-        twoD => CodeFormat.values.where((f) => f.is2D).toSet(),
-        all => CodeFormat.values.toSet(),
-      };
-
-  String get label => switch (this) {
-        qr => 'QR',
-        oneD => '1D',
-        twoD => '2D',
-        all => 'ALL',
-      };
-}
-
-/// A decoded code.
-class CodeResult {
-  final String text;
-  final CodeFormat format;
-
-  /// Frame timestamp (ms) the code was decoded from, when known.
-  final int timestamp;
-
-  /// Whether the symbol carries GS1-structured data: GS1 DataBar (always),
-  /// GS1-128 / GS1 DataMatrix / GS1 QR (detected from the symbology
-  /// identifier, e.g. `]C1`, `]d2`, `]Q3`, `]e0`).
-  final bool isGs1;
-
-  const CodeResult(
-    this.text,
-    this.format, {
-    this.timestamp = 0,
-    this.isGs1 = false,
-  });
-
-  /// The ISBN when this is a Bookland EAN-13 (978/979 prefix), else null.
-  String? get isbn {
-    if (format != CodeFormat.ean13) return null;
-    if (!(text.startsWith('978') || text.startsWith('979'))) return null;
-    return text;
-  }
-
-  @override
-  String toString() => '${format.name}${isGs1 ? '·GS1' : ''}: $text';
-}
-
-// ── zxing mapping (internal) ────────────────────────────────────────────────
-
-zxing.BarcodeFormat _toZxing(CodeFormat f) => switch (f) {
-      CodeFormat.qrCode => zxing.BarcodeFormat.qrCode,
-      CodeFormat.dataMatrix => zxing.BarcodeFormat.dataMatrix,
-      CodeFormat.aztec => zxing.BarcodeFormat.aztec,
-      CodeFormat.pdf417 => zxing.BarcodeFormat.pdf417,
-      CodeFormat.maxicode => zxing.BarcodeFormat.maxicode,
-      CodeFormat.ean13 => zxing.BarcodeFormat.ean13,
-      CodeFormat.ean8 => zxing.BarcodeFormat.ean8,
-      CodeFormat.upcA => zxing.BarcodeFormat.upcA,
-      CodeFormat.upcE => zxing.BarcodeFormat.upcE,
-      CodeFormat.code39 => zxing.BarcodeFormat.code39,
-      CodeFormat.code93 => zxing.BarcodeFormat.code93,
-      CodeFormat.code128 => zxing.BarcodeFormat.code128,
-      CodeFormat.itf => zxing.BarcodeFormat.itf,
-      CodeFormat.codabar => zxing.BarcodeFormat.codabar,
-      CodeFormat.rss14 => zxing.BarcodeFormat.rss14,
-      CodeFormat.rssExpanded => zxing.BarcodeFormat.rssExpanded,
-    };
-
-CodeFormat? _fromZxing(zxing.BarcodeFormat f) {
-  for (final v in CodeFormat.values) {
-    if (_toZxing(v) == f) return v;
-  }
-  return null;
-}
-
-/// Symbology identifiers that mark GS1-structured payloads.
-const _gs1SymbologyIds = {']C1', ']e0', ']e1', ']e2', ']d2', ']Q3'};
+export 'types.dart';
 
 /// Fraction of the frame's short side scanned by the streaming [CodeScanner]
 /// — matches the centered viewfinder window in the UI. Cropping before
@@ -156,9 +28,15 @@ const double kScannerWindowFraction = 0.72;
 
 /// Decodes one frame's luma plane, looking only for [kind]'s formats.
 ///
+/// Engine routing:
+///  * zxing — common linear, 2D, GS1 DataBar (+GS1 flagging);
+///  * built-in postal engine — POSTNET / PLANET / RM4SCC / KIX;
+///  * built-in width engine — MSI, Code 11, Industrial 2-of-5, Telepen;
+///  * built-in Pharmacode engine — one- & two-track (explicit kinds only).
+///
 /// Pure and synchronous — callable directly (e.g. from a custom isolate or a
-/// one-shot still scan). The camera must be streaming **YUV** (`pixelFormat 0`);
-/// BGRA bytes decode as noise. Returns `null` when nothing was found.
+/// one-shot still scan). The camera must be streaming **YUV** (`pixelFormat
+/// 0`); BGRA bytes decode as noise. Returns `null` when nothing was found.
 ///
 /// [windowCropFraction] < 1.0 scans only the centered square covering that
 /// fraction of the frame's short side (zero-copy view — no pixels are moved).
@@ -167,56 +45,168 @@ CodeResult? decodeCodeFrame(
   CodeScanKind kind, {
   double windowCropFraction = 1.0,
 }) {
-  try {
-    final zxing.LuminanceSource source;
-    if (windowCropFraction < 1.0) {
-      final side =
-          ((f.width < f.height ? f.width : f.height) * windowCropFraction)
-              .round();
-      final left = (f.width - side) ~/ 2;
-      final top = (f.height - side) ~/ 2;
-      source = _StridedLuminanceSource(
-        f.bytes,
-        side,
-        side,
-        f.effectiveBytesPerRow,
+  int left, top, w, h;
+  if (windowCropFraction < 1.0) {
+    final side =
+        ((f.width < f.height ? f.width : f.height) * windowCropFraction)
+            .round();
+    left = (f.width - side) ~/ 2;
+    top = (f.height - side) ~/ 2;
+    w = side;
+    h = side;
+  } else {
+    left = 0;
+    top = 0;
+    w = f.width;
+    h = f.height;
+  }
+  var stride = f.effectiveBytesPerRow;
+  var bytes = f.bytes;
+
+  // Decimate large windows 2× before decoding: barcode readers don't need
+  // >~700 px — quartering the pixels roughly quarters binarize+decode time
+  // (measured ~180 ms → ~50 ms for the full ALL cascade on a 1036² window).
+  if (w > 700 && h > 700) {
+    final dw = w ~/ 2, dh = h ~/ 2;
+    final dec = Uint8List(dw * dh);
+    for (var y = 0; y < dh; y++) {
+      final src = (top + y * 2) * stride + left;
+      final dst = y * dw;
+      for (var x = 0; x < dw; x++) {
+        dec[dst + x] = bytes[src + x * 2];
+      }
+    }
+    bytes = dec;
+    stride = dw;
+    left = 0;
+    top = 0;
+    w = dw;
+    h = dh;
+  }
+  final formats = kind.formats;
+
+  // Pass 1: the window as delivered (sensor orientation — landscape rows).
+  var raw = _decodeWindow(bytes, stride, left, top, w, h, formats);
+
+  // Pass 2: linear/postal/pharma symbologies are read along rows, so a
+  // barcode held horizontally ON SCREEN lies vertically in the sensor buffer
+  // when the device is portrait — rotate the window 90° and retry those
+  // formats. (2D codes are rotation-invariant; skip them on this pass.)
+  if (raw == null) {
+    final rotatable = formats.where((x) => !x.is2D).toSet();
+    if (rotatable.isNotEmpty) {
+      final rot = Uint8List(w * h);
+      // rotate 90° clockwise: (x, y) → (h-1-y, x)
+      for (var y = 0; y < h; y++) {
+        final src = (top + y) * stride + left;
+        final dstX = h - 1 - y;
+        for (var x = 0; x < w; x++) {
+          rot[x * h + dstX] = bytes[src + x];
+        }
+      }
+      raw = _decodeWindow(rot, h, 0, 0, h, w, rotatable);
+    }
+  }
+
+  if (raw == null) return null;
+  return CodeResult(
+    raw.text,
+    raw.format,
+    timestamp: f.timestamp,
+    isGs1: raw.isGs1,
+  );
+}
+
+/// Runs the full engine cascade over one window orientation.
+RawDecode? _decodeWindow(
+  Uint8List bytes,
+  int stride,
+  int left,
+  int top,
+  int w,
+  int h,
+  Set<CodeFormat> formats,
+) {
+  RawDecode? raw;
+
+  // 1. zxing engine (linear + 2D + DataBar).
+  if (formats.any((x) => x.isZxing)) {
+    raw = zxingDecode(
+      bytes,
+      stride: stride,
+      left: left,
+      top: top,
+      width: w,
+      height: h,
+      formats: formats,
+    );
+  }
+
+  // The built-in engines share one binarized window.
+  GrayWindow? win;
+  GrayWindow window() => win ??= GrayWindow(
+        bytes,
+        stride: stride,
         left: left,
         top: top,
+        width: w,
+        height: h,
       );
-    } else {
-      source = _StridedLuminanceSource(
-        f.bytes,
-        f.width,
-        f.height,
-        f.effectiveBytesPerRow,
-      );
+
+  // 2. Postal engine (height-modulated).
+  if (raw == null && formats.any((x) => x.isPostal)) {
+    final bars = extractBars(window());
+    if (bars != null) {
+      final states = classify4State(bars);
+      if (formats.contains(CodeFormat.rm4scc)) {
+        raw = decodeRm4scc(states);
+      }
+      if (raw == null &&
+          (formats.contains(CodeFormat.postnet) ||
+              formats.contains(CodeFormat.planet))) {
+        raw = decodePostnetPlanet(classify2State(bars));
+      }
+      if (raw == null && formats.contains(CodeFormat.kix)) {
+        raw = decodeKix(states);
+      }
     }
-    final bitmap = zxing.BinaryBitmap(zxing.HybridBinarizer(source));
-    final result = zxing.MultiFormatReader().decode(
-      bitmap,
-      zxing.DecodeHint(
-        possibleFormats: kind.formats.map(_toZxing).toList(),
-        // Screens/print in poor light are often inverted-friendly.
-        alsoInverted: true,
-      ),
-    );
-    final format = _fromZxing(result.barcodeFormat);
-    if (format == null) return null;
-    final symbologyId = result
-        .resultMetadata?[zxing.ResultMetadataType.symbologyIdentifier]
-        ?.toString();
-    final isGs1 = format == CodeFormat.rss14 ||
-        format == CodeFormat.rssExpanded ||
-        (symbologyId != null && _gs1SymbologyIds.contains(symbologyId));
-    return CodeResult(
-      result.text,
-      format,
-      timestamp: f.timestamp,
-      isGs1: isGs1,
-    );
-  } catch (_) {
-    return null; // MultiFormatReader throws NotFoundException on no match.
   }
+
+  // 3. Width engine (MSI / Code 11 / Industrial 2-of-5 / Telepen /
+  //    Pharmacode one-track).
+  final wantsWidth = formats.contains(CodeFormat.msi) ||
+      formats.contains(CodeFormat.code11) ||
+      formats.contains(CodeFormat.industrial2of5) ||
+      formats.contains(CodeFormat.telepen) ||
+      formats.contains(CodeFormat.pharmacode);
+  if (raw == null && wantsWidth) {
+    for (final runs in extractScanlineRuns(window())) {
+      final units = runsToUnits(runs);
+      if (units == null) continue;
+      raw ??= formats.contains(CodeFormat.msi) ? decodeMsi(units) : null;
+      raw ??=
+          formats.contains(CodeFormat.code11) ? decodeCode11(units) : null;
+      raw ??= formats.contains(CodeFormat.industrial2of5)
+          ? decodeIndustrial2of5(units)
+          : null;
+      raw ??=
+          formats.contains(CodeFormat.telepen) ? decodeTelepen(units) : null;
+      raw ??= formats.contains(CodeFormat.pharmacode)
+          ? decodePharmaOneTrack(units)
+          : null;
+      if (raw != null) break;
+    }
+  }
+
+  // 4. Pharmacode two-track (height-modulated, explicit only).
+  if (raw == null && formats.contains(CodeFormat.pharmacodeTwoTrack)) {
+    final bars = extractBars(window(), minBars: 3);
+    if (bars != null) {
+      raw = decodePharmaTwoTrack(classify4State(bars));
+    }
+  }
+
+  return raw;
 }
 
 // Isolate handlers must be top-level; one per kind carries the selection
@@ -228,6 +218,10 @@ CodeResult? _scan1D(FrameData f) => decodeCodeFrame(f, CodeScanKind.oneD,
     windowCropFraction: kScannerWindowFraction);
 CodeResult? _scan2D(FrameData f) => decodeCodeFrame(f, CodeScanKind.twoD,
     windowCropFraction: kScannerWindowFraction);
+CodeResult? _scanPostal(FrameData f) => decodeCodeFrame(f, CodeScanKind.postal,
+    windowCropFraction: kScannerWindowFraction);
+CodeResult? _scanPharma(FrameData f) => decodeCodeFrame(f, CodeScanKind.pharma,
+    windowCropFraction: kScannerWindowFraction);
 CodeResult? _scanAll(FrameData f) => decodeCodeFrame(f, CodeScanKind.all,
     windowCropFraction: kScannerWindowFraction);
 
@@ -235,6 +229,8 @@ FrameHandler<CodeResult?> _handlerFor(CodeScanKind kind) => switch (kind) {
       CodeScanKind.qr => _scanQr,
       CodeScanKind.oneD => _scan1D,
       CodeScanKind.twoD => _scan2D,
+      CodeScanKind.postal => _scanPostal,
+      CodeScanKind.pharma => _scanPharma,
       CodeScanKind.all => _scanAll,
     };
 
@@ -264,6 +260,11 @@ class CodeScanner {
   Stream<CodeResult> get results =>
       _proc.results.where((r) => r != null).cast<CodeResult>();
 
+  /// Per-frame decode timing — emitted for EVERY analysed frame (hit or
+  /// miss). Feed to a benchmarking HUD: `stats.elapsedMillis` is how long the
+  /// full engine pass took on the worker isolate.
+  Stream<FrameProcessStats> get stats => _proc.stats;
+
   /// Spawns the worker and starts consuming [frames].
   Future<void> start(Stream<CameraFrame> frames) async {
     if (_started) return;
@@ -276,51 +277,4 @@ class CodeScanner {
     await _sub?.cancel();
     await _proc.dispose();
   }
-}
-
-/// [zxing.LuminanceSource] that reads a luma plane with an arbitrary **row
-/// stride** (the camera's `bytesPerRow`) and an optional **window offset**
-/// ([left], [top]) — a zero-copy cropped view over the full plane.
-class _StridedLuminanceSource extends zxing.LuminanceSource {
-  final Uint8List _pixels;
-  final int _stride;
-  final int _left;
-  final int _top;
-
-  _StridedLuminanceSource(
-    this._pixels,
-    int width,
-    int height,
-    this._stride, {
-    int left = 0,
-    int top = 0,
-  })  : _left = left,
-        _top = top,
-        super(width, height);
-
-  @override
-  Uint8List getRow(int y, Uint8List? row) {
-    final res = (row != null && row.length >= width) ? row : Uint8List(width);
-    final start = (y + _top) * _stride + _left;
-    final end = start + width;
-    if (end <= _pixels.length) {
-      res.setRange(0, width, _pixels, start);
-    }
-    return res;
-  }
-
-  @override
-  Uint8List get matrix {
-    if (_stride == width && _left == 0 && _top == 0) return _pixels;
-    final m = Uint8List(width * height);
-    for (var y = 0; y < height; y++) {
-      final src = (y + _top) * _stride + _left;
-      if (src + width > _pixels.length) break;
-      m.setRange(y * width, y * width + width, _pixels, src);
-    }
-    return m;
-  }
-
-  @override
-  bool get isCropSupported => false;
 }

@@ -54,6 +54,36 @@ class _Init<R> {
   const _Init(this.reply, this.handler);
 }
 
+/// Per-frame processing statistics, emitted for EVERY processed frame
+/// (successful or not) — the basis for scan benchmarking UIs.
+class FrameProcessStats {
+  /// Wall-clock time the handler took for this frame, in microseconds.
+  final int elapsedMicros;
+
+  /// The frame's native timestamp (ms), when known.
+  final int frameTimestamp;
+
+  /// Whether the handler produced a result for this frame (non-null return).
+  /// Lets UIs benchmark hit latency separately from miss latency.
+  final bool success;
+
+  const FrameProcessStats(
+    this.elapsedMicros,
+    this.frameTimestamp, {
+    this.success = false,
+  });
+
+  double get elapsedMillis => elapsedMicros / 1000.0;
+}
+
+/// Worker → main reply: the handler result plus its timing.
+class _Reply<R> {
+  final R result;
+  final int elapsedMicros;
+  final int frameTimestamp;
+  const _Reply(this.result, this.elapsedMicros, this.frameTimestamp);
+}
+
 /// Wire message: pixel bytes are carried as [TransferableTypedData] so the
 /// isolate hand-off *moves* the buffer instead of copying it again.
 class _FrameWire {
@@ -88,6 +118,8 @@ class CameraFrameProcessor<R> {
   SendPort? _toWorker;
   final Completer<void> _ready = Completer<void>();
   final StreamController<R> _out = StreamController<R>.broadcast();
+  final StreamController<FrameProcessStats> _stats =
+      StreamController<FrameProcessStats>.broadcast();
 
   bool _busy = false;
   _FrameWire? _pending;
@@ -95,6 +127,10 @@ class CameraFrameProcessor<R> {
 
   /// Results emitted by the handler, in completion order.
   Stream<R> get results => _out.stream;
+
+  /// Per-frame handler timing, emitted for every processed frame — feed this
+  /// to a benchmarking HUD ("analyze took N ms").
+  Stream<FrameProcessStats> get stats => _stats.stream;
 
   /// Whether [start] has completed and the worker is accepting frames.
   bool get isRunning => _ready.isCompleted && !_disposed;
@@ -110,9 +146,17 @@ class CameraFrameProcessor<R> {
         if (!_ready.isCompleted) _ready.complete();
         return;
       }
-      // Otherwise it's a handler result.
+      // Otherwise it's a handler reply (result + timing).
       _busy = false;
-      if (!_out.isClosed) _out.add(msg as R);
+      final reply = msg as _Reply<R>;
+      if (!_out.isClosed) _out.add(reply.result);
+      if (!_stats.isClosed) {
+        _stats.add(FrameProcessStats(
+          reply.elapsedMicros,
+          reply.frameTimestamp,
+          success: reply.result != null,
+        ));
+      }
       final p = _pending;
       if (p != null) {
         _pending = null;
@@ -179,15 +223,20 @@ class CameraFrameProcessor<R> {
     _isolate = null;
     _pending = null;
     if (!_out.isClosed) await _out.close();
+    if (!_stats.isClosed) await _stats.close();
   }
 
   static void _entry<R>(_Init<R> init) {
     final rp = ReceivePort();
+    final sw = Stopwatch();
     init.reply.send(rp.sendPort);
     rp.listen((msg) {
       if (msg is _FrameWire) {
         final bytes = msg.bytes.materialize().asUint8List();
-        init.reply.send(init.handler(FrameData(
+        sw
+          ..reset()
+          ..start();
+        final result = init.handler(FrameData(
           bytes: bytes,
           width: msg.width,
           height: msg.height,
@@ -196,7 +245,9 @@ class CameraFrameProcessor<R> {
           orientation: msg.orientation,
           bytesPerRow: msg.bytesPerRow,
           isMirrored: msg.isMirrored,
-        )));
+        ));
+        sw.stop();
+        init.reply.send(_Reply<R>(result, sw.elapsedMicroseconds, msg.timestamp));
       }
     });
   }
