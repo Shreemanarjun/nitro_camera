@@ -1,5 +1,20 @@
 PODS:
   - Flutter (1.0.0)
+  - get_thumbnail_video (0.0.1):
+    - Flutter
+    - libwebp
+  - libwebp (1.5.0):
+    - libwebp/demux (= 1.5.0)
+    - libwebp/mux (= 1.5.0)
+    - libwebp/sharpyuv (= 1.5.0)
+    - libwebp/webp (= 1.5.0)
+  - libwebp/demux (1.5.0):
+    - libwebp/webp
+  - libwebp/mux (1.5.0):
+    - libwebp/demux
+  - libwebp/sharpyuv (1.5.0)
+  - libwebp/webp (1.5.0):
+    - libwebp/sharpyuv
   - media_kit_libs_ios_video (1.0.4):
     - Flutter
   - media_kit_video (0.0.1):
@@ -7,12 +22,19 @@ PODS:
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
+  - get_thumbnail_video (from `.symlinks/plugins/get_thumbnail_video/ios`)
   - media_kit_libs_ios_video (from `.symlinks/plugins/media_kit_libs_ios_video/ios`)
   - media_kit_video (from `.symlinks/plugins/media_kit_video/ios`)
+
+SPEC REPOS:
+  trunk:
+    - libwebp
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
+  get_thumbnail_video:
+    :path: ".symlinks/plugins/get_thumbnail_video/ios"
   media_kit_libs_ios_video:
     :path: ".symlinks/plugins/media_kit_libs_ios_video/ios"
   media_kit_video:
@@ -20,6 +42,8 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  get_thumbnail_video: 1a754d46b860dffefcc57b7290a43089cd5d7e58
+  libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   media_kit_libs_ios_video: 5a18affdb97d1f5d466dc79988b13eff6c5e2854
   media_kit_video: 1746e198cb697d1ffb734b1d05ec429d1fcd1474
 

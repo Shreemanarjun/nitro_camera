@@ -5,6 +5,7 @@ import android.opengl.*
 import android.opengl.GLUtils
 import android.util.Log
 import android.view.Surface
+import dev.shreeman.nitro_camera.utils.NitraFrameTransform
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -14,6 +15,10 @@ import java.nio.FloatBuffer
  * Implements a programmable video filter chain using GLSL Shaders.
  *
  * Flow: Camera (OES Texture) -> OpenGL Shader -> Output Surface (Flutter Texture)
+ *
+ * vision-camera analogue: none — RN renders through a CameraX PreviewView /
+ * their FrameRenderer view; Flutter needs this GL pipeline to feed the engine
+ * texture (plus platform-view and recorder surfaces) from one OES source.
  */
 class NitraRenderer(private val width: Int, private val height: Int) {
     private var sensorOrientation: Int = 90

@@ -1,5 +1,6 @@
 package dev.shreeman.nitro_camera
 
+import dev.shreeman.nitro_camera.utils.NitraFrameTransform
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

@@ -3,7 +3,6 @@ package dev.shreeman.nitro_camera
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.os.Build
@@ -12,6 +11,9 @@ import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import androidx.core.content.ContextCompat
+import dev.shreeman.nitro_camera.core.CameraDeviceDetails
+import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
+import dev.shreeman.nitro_camera.session.CameraSession
 import io.flutter.view.TextureRegistry
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,6 +28,15 @@ import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
+/**
+ * The generated-spec facade: permissions, the device list, the SERIAL camera
+ * queue (open/close ordering), hot-plug + physical-orientation observers, and
+ * per-texture delegation into [CameraSession]. This class's package/name are
+ * part of the plugin ABI (registered with the Nitro bridge) and must not move.
+ *
+ * vision-camera analogue: android/.../hybrids/HybridCameraSession.kt (their
+ * generated-spec facade over session/ActiveCameraSession*).
+ */
 class NitroCameraImpl(
     private val context: Context,
     private val textureRegistry: TextureRegistry,
@@ -100,14 +111,30 @@ class NitroCameraImpl(
     }
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-    private val sessions = ConcurrentHashMap<Long, NitraCameraSession>()
+    private val sessions = ConcurrentHashMap<Long, CameraSession>()
     private val sessionsLock = Any()
+
+    /// Device JSON / characteristics reading (vision-camera's HybridCameraDevice).
+    private val deviceDetails = CameraDeviceDetails(cameraManager, ::getCharacteristics)
 
     private val openHandlerThread = android.os.HandlerThread("NitraOpenThread").also { it.start() }
     private val openHandler = Handler(openHandlerThread.looper)
 
     private val _frameFlow = MutableSharedFlow<CameraFrame>(extraBufferCapacity = 10)
     override val frameStream: SharedFlow<CameraFrame> = _frameFlow
+
+    // Rate-limited frame-delivery diagnostics: one log line per ~120 frames
+    // (and per 30 drops) so the emit path is observable in logcat without
+    // per-frame log spam.
+    private var _emitOk = 0L
+    private var _emitDropped = 0L
+    private fun frameEmitStats(textureId: Long, delivered: Boolean) {
+        if (delivered) _emitOk++ else _emitDropped++
+        if ((delivered && _emitOk % 120 == 1L) || (!delivered && _emitDropped % 30 == 1L)) {
+            Log.d(TAG, "frameEmit[$textureId]: ok=$_emitOk dropped=$_emitDropped " +
+                "subscribers=${_frameFlow.subscriptionCount.value}")
+        }
+    }
 
     private val _eventFlow = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 32)
     override val eventStream: SharedFlow<CameraEvent> = _eventFlow
@@ -187,30 +214,42 @@ class NitroCameraImpl(
 
     override fun getDeviceCount(): Long = getIds().size.toLong()
 
+    // Device-list JSON cache: characteristics, formats and vendor extensions
+    // are immutable per camera, but building the JSON is expensive — the
+    // extension query (getCameraExtensionCharacteristics, API 31+) alone costs
+    // ~100ms of binder round-trips per camera. Built once (per-camera queries
+    // in parallel), served from cache afterwards; invalidated on hot-plug
+    // together with _cachedIds (see enableDeviceAvailabilityEvents).
+    @Volatile private var _devicesJsonCache: String? = null
+
     override suspend fun getAvailableCameraDevicesJson(): String {
-        val arr = JSONArray()
-        for (id in getIds()) {
-            arr.put(buildCameraDeviceJson(id, getCharacteristics(id)))
+        _devicesJsonCache?.let { return it }
+        val parts = coroutineScope {
+            getIds().map { id ->
+                async(Dispatchers.IO) { deviceDetails.buildCameraDeviceJson(id, getCharacteristics(id)) }
+            }.awaitAll()
         }
-        return arr.toString()
+        val json = JSONArray().also { arr -> parts.forEach { arr.put(it) } }.toString()
+        _devicesJsonCache = json
+        return json
     }
 
     override fun getAvailableCameraDevices(): List<CameraDevice> {
-        return getIds().map { id -> buildCameraDevice(id, getCharacteristics(id)) }
+        return getIds().map { id -> deviceDetails.buildCameraDevice(id, getCharacteristics(id)) }
     }
 
     override fun getDevice(index: Long): CameraDevice {
         val ids = getIds()
         if (index < 0 || index >= ids.size) throw Exception("Camera index out of bounds")
         val id = ids[index.toInt()]
-        return buildCameraDevice(id, getCharacteristics(id))
+        return deviceDetails.buildCameraDevice(id, getCharacteristics(id))
     }
 
     /// ONE serial queue for ALL camera hardware transitions (vision-camera's
     /// classic CameraQueues.cameraQueue model): every open and close runs
     /// through this mutex, so two opens can never overlap and an open can
     /// never race a close. The close INTERNALS stay parallelized (~100ms, see
-    /// NitraCameraSession.closeKeepTexture) — only the ordering is serial.
+    /// CameraSession.closeKeepTexture) — only the ordering is serial.
     ///
     /// Background: guarding only cameraManager.openCamera (and letting closes
     /// run detached) let a new open overlap the previous session's teardown.
@@ -229,7 +268,7 @@ class NitroCameraImpl(
     // Texture widget keeps its frozen last frame during a device switch. The
     // texture is released RETIRED_TEXTURE_LINGER_MS after the hardware close
     // (or immediately on closeAll).
-    private val retiredTextures = ConcurrentHashMap<Long, NitraCameraSession>()
+    private val retiredTextures = ConcurrentHashMap<Long, CameraSession>()
 
     // Duration of the most recent session close (for the switch timing log).
     @Volatile private var lastCloseDurationMs: Long = 0L
@@ -257,18 +296,33 @@ class NitroCameraImpl(
         var surfaceProducer: Any? = null
         var surfaceTextureEntry: TextureRegistry.SurfaceTextureEntry? = null
 
+        // Flutter texture ids are handed out from 0, but the openCamera ABI keeps
+        // 0 as its "open failed" sentinel (both the Dart controller and the iOS
+        // bridge use it). On a cold boot the FIRST registered texture would get
+        // id 0 — a perfectly working native session that Dart then misreads as a
+        // failure, leaking the session and forcing a retry (the "first open at
+        // boot always fails once" bug). Burn the ambiguous id-0 registration once
+        // (ids are monotonic and never reused) so real sessions start at 1.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val producer = withContext(Dispatchers.Main) { textureRegistry.createSurfaceProducer() }
+                val producer = withContext(Dispatchers.Main) {
+                    var p = textureRegistry.createSurfaceProducer()
+                    if (p.id() == 0L) {
+                        val zero = p
+                        p = textureRegistry.createSurfaceProducer()
+                        runCatching { zero.release() }
+                    }
+                    p
+                }
                 surfaceProducer = producer
                 textureId = producer.id()
             } catch (e: Exception) {
-                val entry = withContext(Dispatchers.Main) { textureRegistry.createSurfaceTexture() }
+                val entry = withContext(Dispatchers.Main) { createNonZeroSurfaceTexture() }
                 surfaceTextureEntry = entry
                 textureId = entry.id()
             }
         } else {
-            val entry = withContext(Dispatchers.Main) { textureRegistry.createSurfaceTexture() }
+            val entry = withContext(Dispatchers.Main) { createNonZeroSurfaceTexture() }
             surfaceTextureEntry = entry
             textureId = entry.id()
         }
@@ -301,12 +355,31 @@ class NitroCameraImpl(
                                     if (cont.isActive) cont.resume(cam) { cam.close() } else cam.close()
                                 }
                                 override fun onDisconnected(cam: android.hardware.camera2.CameraDevice) {
-                                    cam.close()
-                                    if (cont.isActive) cont.cancel()
+                                    if (cont.isActive) {
+                                        cam.close()
+                                        cont.cancel()
+                                    } else {
+                                        // MID-SESSION disconnect (another client
+                                        // took the camera / service died). This
+                                        // callback outlives the open — route it
+                                        // to the live session so the interruption
+                                        // surfaces as an event instead of a
+                                        // silent black preview (vision-camera's
+                                        // CameraState observer semantics).
+                                        sessions[textureId]?.onDeviceDisconnected()
+                                            ?: cam.close()
+                                    }
                                 }
                                 override fun onError(cam: android.hardware.camera2.CameraDevice, error: Int) {
-                                    cam.close()
-                                    if (cont.isActive) cont.resumeWith(Result.failure(Exception("Camera open error $error")))
+                                    if (cont.isActive) {
+                                        cam.close()
+                                        cont.resumeWith(Result.failure(
+                                            Exception("Camera open failed: ${cameraErrorMessage(error)}")))
+                                    } else {
+                                        // Mid-session fatal device/service error.
+                                        sessions[textureId]?.onDeviceError(error)
+                                            ?: cam.close()
+                                    }
                                 }
                             },
                             openHandler,
@@ -343,7 +416,7 @@ class NitroCameraImpl(
                     awaitOpen()
                 }
 
-                val session = NitraCameraSession(
+                val session = CameraSession(
                     context      = context,
                     textureId    = textureId,
                     surfaceEntry = surfaceTextureEntry,
@@ -356,7 +429,10 @@ class NitroCameraImpl(
                     requestedFps = fps.toInt(),
                     enableAudio  = enableAudio != 0L,
                 )
-                session.onFrame = { frame -> _frameFlow.tryEmit(frame) }
+                session.onFrame = { frame ->
+                    val delivered = _frameFlow.tryEmit(frame)
+                    frameEmitStats(textureId, delivered)
+                }
                 session.onEvent = { type, reason, message ->
                     _eventFlow.tryEmit(CameraEvent(type.nativeValue, textureId, reason.nativeValue, message))
                 }
@@ -379,6 +455,17 @@ class NitroCameraImpl(
             }
             return 0L
         }
+    }
+
+    /// Legacy-entry variant of the id-0 burn above (see openCamera).
+    private fun createNonZeroSurfaceTexture(): TextureRegistry.SurfaceTextureEntry {
+        var e = textureRegistry.createSurfaceTexture()
+        if (e.id() == 0L) {
+            val zero = e
+            e = textureRegistry.createSurfaceTexture()
+            runCatching { zero.release() }
+        }
+        return e
     }
 
     fun attachPlatformView(textureId: Long, surface: Surface) {
@@ -446,7 +533,8 @@ class NitroCameraImpl(
     }
 
     override suspend fun stopVideoRecording(textureId: Long): RecordingResult =
-        session(textureId)?.stopVideoRecording() ?: RecordingResult("", 0L, 0L)
+        session(textureId)?.stopVideoRecording()
+            ?: RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 0L)
 
     override fun pauseRecording(textureId: Long)  { session(textureId)?.pauseVideoRecording() }
     override fun resumeRecording(textureId: Long) { session(textureId)?.resumeVideoRecording() }
@@ -563,11 +651,13 @@ class NitroCameraImpl(
             val cb = object : CameraManager.AvailabilityCallback() {
                 override fun onCameraAvailable(cameraId: String) {
                     _cachedIds = null // a USB camera may have appeared
+                    _devicesJsonCache = null
                     emitEvent(CameraEventType.DEVICECONNECTED, message = cameraId)
                 }
 
                 override fun onCameraUnavailable(cameraId: String) {
                     _cachedIds = null
+                    _devicesJsonCache = null
                     emitEvent(CameraEventType.DEVICEDISCONNECTED, message = cameraId)
                 }
             }
@@ -615,233 +705,4 @@ class NitroCameraImpl(
         session(textureId)?.takePhoto() ?: error("No session")
 
     private fun session(textureId: Long) = synchronized(sessionsLock) { sessions[textureId] }
-
-    private fun buildCameraDeviceJson(cameraId: String, chars: CameraCharacteristics): JSONObject {
-        val position = when (chars.get(CameraCharacteristics.LENS_FACING)) {
-            CameraCharacteristics.LENS_FACING_FRONT -> 0
-            CameraCharacteristics.LENS_FACING_BACK  -> 1
-            else                                     -> 2
-        }
-        val orientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        val hasFlash    = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-
-        // Zoom: prefer the modern ratio range (API 30, covers <1.0 ultra-wide
-        // zoom-out on logical cameras) over the legacy digital-zoom max.
-        var minZoom = 1.0
-        var maxZoom = (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.let {
-                minZoom = it.lower.toDouble()
-                maxZoom = it.upper.toDouble()
-            }
-        }
-
-        val map      = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val jpegSizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)?.sortedByDescending { it.width * it.height }
-        val maxPhotoW = jpegSizes?.firstOrNull()?.width ?: 1920
-        val maxPhotoH = jpegSizes?.firstOrNull()?.height ?: 1080
-
-        val focalArray = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val focalLength = focalArray?.firstOrNull() ?: 3.5f
-        val apertures  = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
-        val aperture   = apertures?.firstOrNull() ?: 1.8f
-
-        val lensType = when {
-            focalLength < 2.3f -> 2  // ultra-wide
-            focalLength > 6.0f -> 3  // telephoto
-            else               -> 1  // wide-angle
-        }
-
-        val lensName = when (lensType) { 2 -> "Ultra Wide" 3 -> "Telephoto" else -> "Wide" }
-        val name     = if (position == 0) "Front Camera" else "$lensName Camera"
-
-        val evRange  = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
-        val evStep   = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 1.0
-        val minEv    = if (evRange != null && evStep != 0.0) evRange.lower * evStep else -4.0
-        val maxEv    = if (evRange != null && evStep != 0.0) evRange.upper * evStep else  4.0
-
-        // Capabilities → RAW / depth / logical multi-cam flags.
-        val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-        val supportsRaw = caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)
-        val supportsDepth = caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT)
-        val isMultiCam = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-            caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
-
-        val hardwareLevel = when (chars.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
-            CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY  -> "legacy"
-            CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "limited"
-            else                                                         -> "full"
-        }
-
-        // Physical lens composition (vision-camera's physicalDevices). A plain
-        // camera reports its own lens type; a logical camera lists its members'.
-        val physical = JSONArray()
-        fun lensTypeName(focal: Float) = when {
-            focal < 2.3f -> "ultra-wide-angle-camera"
-            focal > 6.0f -> "telephoto-camera"
-            else         -> "wide-angle-camera"
-        }
-        if (isMultiCam && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            for (physId in chars.physicalCameraIds) {
-                val pf = try {
-                    getCharacteristics(physId)
-                        .get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                        ?.firstOrNull()
-                } catch (_: Exception) { null }
-                physical.put(lensTypeName(pf ?: focalLength))
-            }
-        } else {
-            physical.put(lensTypeName(focalLength))
-        }
-
-        // Focus: LENS_INFO_MINIMUM_FOCUS_DISTANCE is in diopters; 0 = fixed-focus.
-        val minFocusDiopters = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
-        val minFocusDistanceCm = if (minFocusDiopters > 0f) (100.0 / minFocusDiopters) else 0.0
-        val afModes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
-        val supportsFocus = afModes.any { it != CameraCharacteristics.CONTROL_AF_MODE_OFF }
-
-        // ISO + field of view (from the physical sensor size).
-        val isoRange = chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-        val sensorSize = chars.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
-        val fieldOfView = if (sensorSize != null && focalLength > 0f) {
-            Math.toDegrees(2.0 * Math.atan2(sensorSize.width / 2.0, focalLength.toDouble()))
-        } else 69.4
-
-        // Stabilization modes (digital EIS + optical OIS).
-        val stabModes = JSONArray().apply { put("off") }
-        val eis = chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) ?: intArrayOf()
-        if (eis.contains(CameraCharacteristics.CONTROL_VIDEO_STABILIZATION_MODE_ON)) stabModes.put("standard")
-        val ois = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION) ?: intArrayOf()
-        if (ois.contains(CameraCharacteristics.LENS_OPTICAL_STABILIZATION_MODE_ON)) stabModes.put("cinematic")
-
-        // Vendor extensions (Night / HDR / Bokeh...), API 31+ — query-only.
-        val extensions = JSONArray()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val extChars = cameraManager.getCameraExtensionCharacteristics(cameraId)
-                for (ext in extChars.supportedExtensions) {
-                    extensions.put(
-                        when (ext) {
-                            android.hardware.camera2.CameraExtensionCharacteristics.EXTENSION_AUTOMATIC -> "auto"
-                            android.hardware.camera2.CameraExtensionCharacteristics.EXTENSION_FACE_RETOUCH -> "face-retouch"
-                            android.hardware.camera2.CameraExtensionCharacteristics.EXTENSION_BOKEH -> "bokeh"
-                            android.hardware.camera2.CameraExtensionCharacteristics.EXTENSION_HDR -> "hdr"
-                            android.hardware.camera2.CameraExtensionCharacteristics.EXTENSION_NIGHT -> "night"
-                            else -> "unknown-$ext"
-                        }
-                    )
-                }
-            } catch (_: Exception) { /* extensions unsupported on this device */ }
-        }
-
-        // Real fps ranges from the AE target ranges (was hardcoded 15–30).
-        val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-        val deviceMinFps = fpsRanges?.minOfOrNull { it.lower }?.toDouble() ?: 15.0
-        val deviceMaxFps = fpsRanges?.maxOfOrNull { it.upper }?.toDouble() ?: 30.0
-
-        // 10-bit HDR video profiles (API 33+).
-        val supportsVideoHdr = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT)
-        val supportsPhotoHdr = (0 until extensions.length()).any { extensions.getString(it) == "hdr" }
-
-        val autoFocusSystem = if (supportsFocus) "contrast-detection" else "none"
-
-        val formatsArr = JSONArray()
-        val videoSizes = map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
-            ?.sortedByDescending { it.width * it.height } ?: emptyList()
-
-        for (size in videoSizes) {
-            // High-speed ranges only apply to specific sizes; report the
-            // device-wide AE range, capped to 60 fps for oversized streams
-            // (large YUV streams can't sustain high-speed rates).
-            val area = size.width.toLong() * size.height
-            val maxFpsForSize = if (area > 1920L * 1080 && deviceMaxFps > 30.0) 30.0 else deviceMaxFps
-            val fmt = JSONObject()
-            fmt.put("photoWidth",  maxPhotoW)
-            fmt.put("photoHeight", maxPhotoH)
-            fmt.put("videoWidth",  size.width)
-            fmt.put("videoHeight", size.height)
-            fmt.put("minFps",      deviceMinFps)
-            fmt.put("maxFps",      maxFpsForSize)
-            if (isoRange != null) {
-                fmt.put("minISO", isoRange.lower.toDouble())
-                fmt.put("maxISO", isoRange.upper.toDouble())
-            }
-            fmt.put("fieldOfView", fieldOfView)
-            fmt.put("supportsVideoHdr", supportsVideoHdr)
-            fmt.put("supportsPhotoHdr", supportsPhotoHdr)
-            fmt.put("supportsDepthCapture", supportsDepth)
-            fmt.put("autoFocusSystem", autoFocusSystem)
-            fmt.put("videoStabilizationModes", stabModes)
-            formatsArr.put(fmt)
-        }
-
-        return JSONObject().apply {
-            put("id",                  cameraId)
-            put("name",                name)
-            put("position",            position)
-            put("lensType",            lensType)
-            put("sensorOrientation",   orientation)
-            put("minZoom",             minZoom)
-            put("maxZoom",             maxZoom)
-            put("neutralZoom",         1.0)
-            put("hasFlash",            hasFlash)
-            put("hasTorch",            hasFlash) // Android: torch iff flash unit
-            put("maxPhotoWidth",       maxPhotoW)
-            put("maxPhotoHeight",      maxPhotoH)
-            put("minExposure",         minEv)
-            put("maxExposure",         maxEv)
-            put("minFocusDistanceCm",  minFocusDistanceCm)
-            put("isMultiCam",          isMultiCam)
-            put("supportsRawCapture",  supportsRaw)
-            put("supportsFocus",       supportsFocus)
-            put("hardwareLevel",       hardwareLevel)
-            put("physicalDevices",     physical)
-            put("extensions",          extensions)
-            put("focalLength",         focalLength.toDouble())
-            put("aperture",            aperture.toDouble())
-            put("formats",             formatsArr)
-        }
-    }
-
-    private fun buildCameraDevice(cameraId: String, chars: CameraCharacteristics): CameraDevice {
-        val position = when (chars.get(CameraCharacteristics.LENS_FACING)) {
-            CameraCharacteristics.LENS_FACING_FRONT -> 0L
-            CameraCharacteristics.LENS_FACING_BACK  -> 1L
-            else                                     -> 2L
-        }
-        val orientation = (chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0).toLong()
-        val map   = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val sizes = map?.getOutputSizes(android.graphics.ImageFormat.JPEG)?.sortedByDescending { it.width }
-        val maxZoom = (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).toDouble()
-        val hasFlash = if (chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true) 1L else 0L
-
-        val focalArray = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-        val focalLength = focalArray?.firstOrNull() ?: 3.5f
-        val apertures  = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
-        val aperture   = apertures?.firstOrNull() ?: 1.8f
-
-        val lensType = when {
-            focalLength < 2.3f -> 2L // ultra-wide
-            focalLength > 6.0f -> 3L // telephoto
-            else               -> 1L // wide-angle
-        }
-
-        return CameraDevice(
-            id                = cameraId,
-            name              = if (position == 0L) "Front Camera" else "Lens $focalLength",
-            position          = position,
-            lensType          = lensType,
-            sensorOrientation = orientation,
-            minZoom           = 1.0,
-            maxZoom           = maxZoom,
-            neutralZoom       = 1.0,
-            hasFlash          = hasFlash,
-            hasTorch          = hasFlash,
-            maxPhotoWidth     = sizes?.firstOrNull()?.width?.toLong() ?: 1280L,
-            maxPhotoHeight    = sizes?.firstOrNull()?.height?.toLong() ?: 720L,
-            focalLength       = focalLength.toDouble(),
-            aperture          = aperture.toDouble()
-        )
-    }
 }

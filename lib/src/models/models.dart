@@ -6,5 +6,6 @@ library;
 export 'camera_device.dart';
 export 'camera_event.dart';
 export 'photo_options.dart';
+export 'recording.dart';
 export 'resolved_config.dart';
 export 'session_state.dart';

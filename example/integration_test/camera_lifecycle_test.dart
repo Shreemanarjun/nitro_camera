@@ -94,18 +94,51 @@ Future<void> bootApp(WidgetTester tester) async {
           'device, or pre-grant with: adb install -r -g <test-apk>)',
     );
   }
+  // Gate on the PUBLISHED controller too, not just the status signal: during
+  // a session settle/swap the status can read `running` while the fresh
+  // controller (and its reapply pass) hasn't landed yet — tests that install
+  // processors/settings during that window attach to the dying session and
+  // then race the self-healing re-attach.
   await pumpUntil(
     tester,
-    () => cameraStore.status.value == CameraStatus.running,
+    () =>
+        cameraStore.status.value == CameraStatus.running &&
+        (cameraStore.activeController.value?.isInitialized ?? false),
     timeout: const Duration(seconds: 10),
-    reason: 'camera preview running after app boot',
+    reason: 'camera preview running with a published controller after boot',
   );
 }
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('1. app boots to a running camera preview', (tester) async {
+  // Known real-device environment flake (observed on ColorOS/CPH2447): the OS
+  // flips the platform semantics-enabled state mid-test (its accessibility
+  // bridge toggles around camera UX changes), so the framework binding
+  // acquires a SemanticsHandle DURING a test and flutter_test's end-of-test
+  // verifier fails whichever test the event happened to land in with
+  // "A SemanticsHandle was active at the end of the test". Nothing in the
+  // app under test creates semantics handles (semanticsEnabled: false below),
+  // so that specific verifier failure is filtered here; every other exception
+  // still fails the test normally.
+  final defaultReporter = reportTestException;
+  reportTestException = (details, testDescription) {
+    final e = details.exception;
+    if (e is FlutterError &&
+        e.message.startsWith('A SemanticsHandle was active')) {
+      debugPrint(
+          'Ignored platform-driven SemanticsHandle flake in "$testDescription"');
+      return;
+    }
+    defaultReporter(details, testDescription);
+  };
+
+  // semanticsEnabled: false on every test: the default per-test SemanticsHandle
+  // races the pipeline owner's asynchronous semantics detach on real devices,
+  // randomly failing tests with "A SemanticsHandle was active at the end of
+  // the test". These tests assert camera behavior, not accessibility.
+  testWidgets('1. app boots to a running camera preview',
+      semanticsEnabled: false, (tester) async {
     await bootApp(tester);
 
     expect(cameraStore.status.value, CameraStatus.running);
@@ -117,7 +150,7 @@ void main() {
   });
 
   testWidgets('2. survives rapid device switching (6 toggles, 1s gaps)',
-      (tester) async {
+      semanticsEnabled: false, (tester) async {
     await bootApp(tester);
     if (cameraStore.devices.value.length < 2) {
       markTestSkipped('device exposes fewer than 2 cameras');
@@ -145,17 +178,27 @@ void main() {
   });
 
   testWidgets('3. custom frame processor receives frames and survives a '
-      'SCANNER round-trip', (tester) async {
+      'SCANNER round-trip', semanticsEnabled: false, (tester) async {
     await bootApp(tester);
 
     // Install the demo LUMA processor (user-pluggable FrameProcessor).
     cameraStore.setFrameProcessor(luminanceProcessor);
-    await pumpFor(tester, const Duration(seconds: 3));
     expect(cameraStore.frameProcessor.value, isNotNull);
+    // Condition-based, not a fixed sleep: first-frame delivery has to cross
+    // enableFrameProcessing → repeating-request rebuild → FFI stream, and a
+    // late session reapply may re-adopt the processor — a fixed pump races
+    // that pipeline and flakes. Gate on the FRAME COUNTER, not the luminance
+    // value: a covered lens / black scene legitimately reads 0.0, and this
+    // test's claim is "frames are delivered", not "the scene is bright".
+    await pumpUntil(
+      tester,
+      () => luminanceProcessor.framesProcessed.value > 0,
+      timeout: const Duration(seconds: 15),
+      reason: 'frames flowed through the custom processor '
+          '(framesProcessed stayed 0 — native delivery gap, not scene-dependent)',
+    );
     expect(luminanceProcessor.attached.value, isTrue,
         reason: 'processor is adopted by the live session');
-    expect(luminanceProcessor.luminance.value, greaterThan(0.0),
-        reason: 'frames flowed through the custom processor');
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull,
         reason: 'enabling a custom processor must not error');
@@ -177,6 +220,35 @@ void main() {
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
 
+    // LENS CHANGE with the processor installed (user repro: "changing lens
+    // with luminance on stuck the app"): the store must re-attach the
+    // processor to the fresh session and frames must keep flowing — even on
+    // lenses whose HAL starves the YUV stream beside the pre-wired recorder
+    // surface (the native starvation watchdog rebuilds without it).
+    if (cameraStore.devices.value.length > 1) {
+      final beforeTid = cameraStore.activeTextureId.value;
+      final beforeFrames = luminanceProcessor.framesProcessed.value;
+      cameraStore.toggleCamera();
+      await pumpUntil(
+        tester,
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != beforeTid,
+        timeout: const Duration(seconds: 15),
+        reason: 'preview running on the new device with the processor installed',
+      );
+      await pumpUntil(
+        tester,
+        () => luminanceProcessor.framesProcessed.value > beforeFrames,
+        timeout: const Duration(seconds: 15),
+        reason: 'frames keep flowing through the processor after a lens change',
+      );
+      expect(luminanceProcessor.attached.value, isTrue,
+          reason: 'processor re-adopted by the new session');
+      expect(cameraStore.errorMessage.value, isNull,
+          reason: 'a lens change with an active processor must not error');
+    }
+
     // Cleanup for the following tests.
     cameraStore.clearFrameProcessor();
     expect(luminanceProcessor.attached.value, isFalse);
@@ -184,7 +256,7 @@ void main() {
   });
 
   testWidgets('4. resolution change 1080p -> 720p -> 1080p survives',
-      (tester) async {
+      semanticsEnabled: false, (tester) async {
     await bootApp(tester);
 
     Future<void> changeRes(int w, int h) async {

@@ -238,8 +238,16 @@ class CameraStore {
       currentDevice.value?.formats.any((f) => f.videoWidth >= 3840) ?? false);
 
   /// Compact label for the active stream config (e.g. "1080P").
+  ///
+  /// Prefers the RESOLVED session dimensions over the requested ones so the
+  /// badge reflects what the camera actually negotiated (long edge — the
+  /// stream is portrait-swapped on iOS). Falls back to the request while a
+  /// session is still opening.
   late final resolutionLabel = computed(() {
-    final w = width.value;
+    final rc = resolvedConfig.value;
+    final w = rc != null
+        ? (rc.videoWidth > rc.videoHeight ? rc.videoWidth : rc.videoHeight)
+        : width.value;
     if (w >= 3840) return '4K';
     if (w >= 1920) return '1080P';
     return '720P';
@@ -353,11 +361,28 @@ class CameraStore {
 
   // ── Init & permissions ──────────────────────────────────────────────────────
 
-  Future<void> init() async {
+  /// In-flight init coalescing: `main()`, `CameraScreen.initState` and the
+  /// app-resume lifecycle hook all call [init] around launch — without this
+  /// the (slow, native) device enumeration ran twice on every cold boot.
+  Future<void>? _initInFlight;
+
+  Future<void> init() {
+    final pending = _initInFlight;
+    if (pending != null) return pending;
+    if (devices.value.isNotEmpty) return Future.value();
+    final run = _initImpl();
+    _initInFlight = run.whenComplete(() {
+      // Allow a re-run when this pass produced no devices (e.g. camera
+      // permission still missing) — grantPermission() calls init() again.
+      if (devices.value.isEmpty) _initInFlight = null;
+    });
+    return _initInFlight!;
+  }
+
+  Future<void> _initImpl() async {
     await Future.microtask(() {});
     unawaited(hydrateGallery());
     try {
-      if (loading.value && devices.value.isNotEmpty) return;
       loading.value = true;
       final perm = NitroCamera.instance.getCameraPermissionStatus();
       cameraPermission.value = perm;

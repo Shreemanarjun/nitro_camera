@@ -4,7 +4,13 @@ import Combine
 import Flutter
 import UIKit
 
-/// Real AVFoundation implementation of `HybridNitroCameraProtocol`.
+/// Real AVFoundation implementation of `HybridNitroCameraProtocol` — a thin
+/// facade that routes bridge calls to the owning `CameraSession` and its
+/// composed outputs (`frameOutput` / `photoOutput` / `recorder`).
+///
+/// vision-camera analogue: ios/Hybrid Objects/HybridCameraSession.swift acts as
+/// their facade over outputs/controllers; our single flat FFI protocol plays
+/// that role here (nitro generates one protocol instead of per-object specs).
 ///
 /// Method sync/async split mirrors the generated protocol exactly: `@nitroAsync`
 /// spec methods are `async throws` here; everything else is synchronous. Sync
@@ -15,7 +21,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     private weak var textureRegistry: FlutterTextureRegistry?
     /// Active sessions keyed by textureId.
-    private var sessions = [Int64: NitraCameraSession]()
+    private var sessions = [Int64: CameraSession]()
     private let sessionsLock = NSLock()
 
     // Frame stream publisher (CPU path).
@@ -37,6 +43,27 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     private func emitEvent(_ type: Int64, textureId: Int64 = 0, reason: Int64 = 0, message: String = "") {
         eventSubject.send(CameraEvent(type: type, textureId: textureId, reason: reason, message: message))
     }
+
+    // Physical-orientation events (vision-camera's DeviceOrientationManager).
+    private lazy var orientationManager: OrientationManager = {
+        let manager = OrientationManager()
+        manager.onOrientationChanged = { [weak self] degrees in
+            self?.emitEvent(11 /* orientationChanged */, textureId: 0, reason: degrees)
+        }
+        return manager
+    }()
+
+    // Device hot-plug (AVCaptureDevice wasConnected/wasDisconnected).
+    private lazy var devicesObserver: CameraDevicesObserver = {
+        let observer = CameraDevicesObserver()
+        observer.onConnected = { [weak self] deviceId in
+            self?.emitEvent(9 /* deviceConnected */, message: deviceId)
+        }
+        observer.onDisconnected = { [weak self] deviceId in
+            self?.emitEvent(10 /* deviceDisconnected */, message: deviceId)
+        }
+        return observer
+    }()
 
     public init(textureRegistry: FlutterTextureRegistry) {
         self.textureRegistry = textureRegistry
@@ -96,28 +123,22 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         }
     }
 
-    // MARK: - Device enumeration
+    // MARK: - Device enumeration (see CameraDeviceInfo)
 
     public func getAvailableCameraDevicesJson() async throws -> String {
-        let devices = discoverySession().devices
-        let arr = devices.compactMap { deviceInfoDict(for: $0) }
-        guard let data = try? JSONSerialization.data(withJSONObject: arr, options: []),
-              let json = String(data: data, encoding: .utf8) else {
-            return "[]"
-        }
-        return json
+        return CameraDeviceInfo.devicesJson()
     }
 
     public func getAvailableCameraDevices() -> [CameraDevice] {
-        return discoverySession().devices.map { deviceInfo(for: $0) }
+        return CameraDeviceInfo.discoverySession().devices.map { CameraDeviceInfo.deviceInfo(for: $0) }
     }
 
     public func getDeviceCount() -> Int64 {
-        Int64(discoverySession().devices.count)
+        Int64(CameraDeviceInfo.discoverySession().devices.count)
     }
 
     public func getDevice(index: Int64) -> CameraDevice {
-        let devices = discoverySession().devices
+        let devices = CameraDeviceInfo.discoverySession().devices
         guard !devices.isEmpty else {
             return CameraDevice(
                 id: "", name: "", position: 2, lensType: 0, sensorOrientation: 0,
@@ -125,37 +146,66 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
                 maxPhotoWidth: 0, maxPhotoHeight: 0, focalLength: 0, aperture: 0)
         }
         let i = Int(max(0, min(index, Int64(devices.count - 1))))
-        return deviceInfo(for: devices[i])
+        return CameraDeviceInfo.deviceInfo(for: devices[i])
+    }
+
+    public func getConcurrentCameraIdsJson() -> String {
+        return CameraDeviceInfo.concurrentCameraIdsJson()
     }
 
     // MARK: - Camera lifecycle
 
     public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64) async throws -> Int64 {
+        // Each guard logs its reason: the bridge collapses thrown errors into a
+        // 0 texture id, so without these lines an open failure is unattributable.
         guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
-            throw NitraCameraError.permissionDenied
+            NSLog("NitroCamera openCamera FAILED: camera permission not authorized")
+            throw CameraError.permissionDenied
         }
         guard let avDevice = AVCaptureDevice(uniqueID: deviceId) else {
-            throw NitraCameraError.deviceNotFound
+            NSLog("NitroCamera openCamera FAILED: no device with id %@", deviceId)
+            throw CameraError.deviceNotFound
         }
         guard let registry = textureRegistry else {
-            throw NitraCameraError.configurationFailed
+            NSLog("NitroCamera openCamera FAILED: texture registry gone")
+            throw CameraError.configurationFailed
         }
 
-        // Build the session and register it as a Flutter texture ON the main
-        // thread, then ADOPT the id `register()` returns. (The previous
-        // placeholder/unregister/re-register dance returned a stale texture id to
-        // Dart while the live session streamed to a different, unwatched id →
-        // permanently black preview.)
-        let realSession = try await MainActor.run { () -> NitraCameraSession in
-            let s = try NitraCameraSession(
-                textureId: 0, device: avDevice, textureRegistry: registry,
-                width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
-            s.textureId = registry.register(s)
-            return s
+        // Build the session and register its FrameOutput as a Flutter texture
+        // ON the main thread, then ADOPT the id `register()` returns. (The
+        // previous placeholder/unregister/re-register dance returned a stale
+        // texture id to Dart while the live session streamed to a different,
+        // unwatched id → permanently black preview.)
+        let realSession: CameraSession
+        do {
+            realSession = try await MainActor.run { () -> CameraSession in
+                let s = try CameraSession(
+                    textureId: 0, device: avDevice, textureRegistry: registry,
+                    width: width, height: height, fps: fps, enableAudio: enableAudio != 0)
+                s.textureId = registry.register(s.frameOutput)
+                // Flutter's iOS registry hands out id 0 for the FIRST texture,
+                // but 0 is the Dart-side "open failed" sentinel — returning it
+                // makes every first open look failed, and the retry LEAKS this
+                // session (still streaming, still holding the camera), which
+                // then starves heavier reopens (the 4K black-preview report).
+                // Burn id 0 and take a fresh, non-zero id.
+                if s.textureId == 0 {
+                    registry.unregisterTexture(0)
+                    s.textureId = registry.register(s.frameOutput)
+                    NSLog("NitroCamera openCamera: texture id 0 burned — reassigned id %lld", s.textureId)
+                }
+                return s
+            }
+        } catch {
+            // The bridge swallows thrown errors into a 0 texture id — log the
+            // real reason here or open failures are undiagnosable on device.
+            NSLog("NitroCamera openCamera(%@ %lldx%lld@%lld) FAILED: %@",
+                  deviceId, width, height, fps, error.localizedDescription)
+            throw error
         }
         let textureId = realSession.textureId
 
-        realSession.onFrame = { [weak self] frame in
+        realSession.frameOutput.onFrame = { [weak self] frame in
             self?.frameSubject.send(frame)
         }
         realSession.onEvent = { [weak self] type, message in
@@ -187,6 +237,15 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         session(for: textureId)?.stop()
     }
 
+    public func reset() {
+        sessionsLock.lock()
+        for session in sessions.values {
+            session.close()
+        }
+        sessions.removeAll()
+        sessionsLock.unlock()
+    }
+
     // MARK: - Camera controls
 
     public func setZoom(textureId: Int64, zoom: Double) {
@@ -206,7 +265,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func setFlash(textureId: Int64, mode: Int64) {
-        session(for: textureId)?.setFlash(mode: mode)
+        session(for: textureId)?.photoOutput.setFlash(mode: mode)
     }
 
     public func setTorch(textureId: Int64, enabled: Int64) {
@@ -218,108 +277,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func setHdr(textureId: Int64, enabled: Int64) {
-        try? session(for: textureId)?.setHdr(enabled: enabled != 0)
-    }
-
-    // MARK: - Photo capture
-
-    public func takePhoto(textureId: Int64) async throws -> PhotoResult {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        return try await s.takePhoto()
-    }
-
-    // MARK: - Video recording
-
-    public func startVideoRecording(textureId: Int64, outputPath: String, options: RecordingOptions) async throws {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        try await s.startVideoRecording(to: outputPath, options: options)
-    }
-
-    public func stopVideoRecording(textureId: Int64) async throws -> RecordingResult {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        return try await s.stopVideoRecording()
-    }
-
-    public func pauseRecording(textureId: Int64) {
-        session(for: textureId)?.pauseVideoRecording()
-    }
-
-    public func resumeRecording(textureId: Int64) {
-        session(for: textureId)?.resumeVideoRecording()
-    }
-
-    public func cancelRecording(textureId: Int64) {
-        let s = session(for: textureId)
-        Task { try? await s?.cancelVideoRecording() }
-    }
-
-    // MARK: - Frame processing
-
-    public func enableFrameProcessing(textureId: Int64, enabled: Int64) {
-        session(for: textureId)?.frameProcessingEnabled = (enabled != 0)
-    }
-
-    public func setFrameFormat(textureId: Int64, format: Int64) {
-        session(for: textureId)?.setFrameFormat(format)
-    }
-
-    public func setSamplingRate(textureId: Int64, samplingRate: Int64) {
-        session(for: textureId)?.setSamplingRate(samplingRate)
-    }
-
-    public func setFilterShader(textureId: Int64, shaderSource: String) {
-        // GPU preview filter is Android-only for now; reserved on iOS.
-    }
-
-    public func updateOverlay(textureId: Int64, overlayData: Data) {
-        // Reserved.
-    }
-
-    // MARK: - Declarative configuration & advanced controls
-
-    public func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        try? s.setZoom(config.zoom)
-        try? s.setExposure(value: config.exposure)
-        s.setFlash(mode: config.flash)
-        if config.torchLevel > 0 {
-            s.setTorchLevel(config.torchLevel)
-        } else {
-            try? s.setTorch(enabled: config.torch != 0)
-        }
-        try? s.setWhiteBalance(temperature: config.whiteBalanceKelvin)
-        try? s.setHdr(enabled: config.videoHdr != 0)
-        s.setLowLightBoost(config.lowLightBoost != 0)
-        try? s.setAutoFocus(mode: config.autoFocus)
-        s.setVideoStabilization(config.videoStabilization)
-        s.setFrameFormat(config.pixelFormat)
-        s.setSamplingRate(config.samplingRate)
-        s.frameProcessingEnabled = (config.enableFrameProcessing != 0)
-        if config.active != 0 { s.start() } else { s.stop() }
-
-        let afSystem: Int64 = config.autoFocus == 0 ? 0 : 2 // off vs phase-detection
-        return ResolvedConfig(
-            width: s.streamWidth,
-            height: s.streamHeight,
-            fps: s.activeFps,
-            pixelFormat: s.pixelFormat,
-            videoHdrEnabled: config.videoHdr,
-            autoFocusSystem: afSystem,
-            active: config.active)
-    }
-
-    public func getSessionStateJson(textureId: Int64) -> String {
-        guard let s = session(for: textureId) else { return "{\"running\":false}" }
-        let dict: [String: Any] = [
-            "running":     s.isRunning,
-            "width":       s.streamWidth,
-            "height":      s.streamHeight,
-            "fps":         s.activeFps,
-            "pixelFormat": s.pixelFormat,
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: dict),
-              let json = String(data: data, encoding: .utf8) else { return "{}" }
-        return json
+        session(for: textureId)?.setHdr(enabled: enabled != 0)
     }
 
     public func setVideoStabilization(textureId: Int64, mode: Int64) {
@@ -355,105 +313,22 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func setNativeDetector(textureId: Int64, detector: String) {
-        session(for: textureId)?.setNativeDetector(detector)
+        session(for: textureId)?.frameOutput.setNativeDetector(detector)
     }
 
-    // MARK: - Physical-orientation events (vision-camera's DeviceOrientationManager)
-    //
-    // UIDevice orientation notifications report the SENSOR-measured device
-    // rotation even when the UI orientation is locked — mapped to 0/90/180/270
-    // and emitted only on change (faceUp/faceDown/unknown are ignored).
+    // MARK: - Photo capture (routes to PhotoOutput)
 
-    private var orientationObserver: NSObjectProtocol?
-    private var lastOrientationDeg: Int64 = -1
-
-    public func enableOrientationEvents(enabled: Int64) {
-        // UIDevice orientation generation + notification delivery live on main.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            if enabled != 0 {
-                guard self.orientationObserver == nil else { return }
-                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-                self.orientationObserver = NotificationCenter.default.addObserver(
-                    forName: UIDevice.orientationDidChangeNotification,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    guard let self = self else { return }
-                    let degrees: Int64
-                    switch UIDevice.current.orientation {
-                    case .portrait:           degrees = 0
-                    case .landscapeLeft:      degrees = 90
-                    case .portraitUpsideDown: degrees = 180
-                    case .landscapeRight:     degrees = 270
-                    default:                  return // faceUp/faceDown/unknown
-                    }
-                    guard degrees != self.lastOrientationDeg else { return }
-                    self.lastOrientationDeg = degrees
-                    self.emitEvent(11 /* orientationChanged */, textureId: 0, reason: degrees)
-                }
-            } else {
-                guard let observer = self.orientationObserver else { return }
-                NotificationCenter.default.removeObserver(observer)
-                self.orientationObserver = nil
-                UIDevice.current.endGeneratingDeviceOrientationNotifications()
-                self.lastOrientationDeg = -1
-            }
-        }
-    }
-
-    // MARK: - Device hot-plug (AVCaptureDevice wasConnected/wasDisconnected)
-
-    private var deviceConnectedObserver: NSObjectProtocol?
-    private var deviceDisconnectedObserver: NSObjectProtocol?
-
-    public func enableDeviceAvailabilityEvents(enabled: Int64) {
-        if enabled != 0 {
-            guard deviceConnectedObserver == nil else { return }
-            let center = NotificationCenter.default
-            deviceConnectedObserver = center.addObserver(
-                forName: .AVCaptureDeviceWasConnected, object: nil, queue: nil
-            ) { [weak self] note in
-                guard let device = note.object as? AVCaptureDevice,
-                      device.hasMediaType(.video) else { return }
-                self?.emitEvent(9 /* deviceConnected */, message: device.uniqueID)
-            }
-            deviceDisconnectedObserver = center.addObserver(
-                forName: .AVCaptureDeviceWasDisconnected, object: nil, queue: nil
-            ) { [weak self] note in
-                guard let device = note.object as? AVCaptureDevice,
-                      device.hasMediaType(.video) else { return }
-                self?.emitEvent(10 /* deviceDisconnected */, message: device.uniqueID)
-            }
-        } else {
-            let center = NotificationCenter.default
-            if let observer = deviceConnectedObserver { center.removeObserver(observer) }
-            if let observer = deviceDisconnectedObserver { center.removeObserver(observer) }
-            deviceConnectedObserver = nil
-            deviceDisconnectedObserver = nil
-        }
-    }
-
-    /// Concurrent-streaming camera combinations (multi-cam), iOS 13+ — JSON
-    /// array of arrays of device uniqueIDs; "[]" where multi-cam is unsupported.
-    public func getConcurrentCameraIdsJson() -> String {
-        guard #available(iOS 13.0, *), AVCaptureMultiCamSession.isMultiCamSupported else {
-            return "[]"
-        }
-        let combos = discoverySession().supportedMultiCamDeviceSets.map { set in
-            set.map { $0.uniqueID }.sorted()
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: combos),
-              let json = String(data: data, encoding: .utf8) else { return "[]" }
-        return json
+    public func takePhoto(textureId: Int64) async throws -> PhotoResult {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        return try await s.photoOutput.takePhoto()
     }
 
     public func takePhotoWithOptions(textureId: Int64, options: PhotoOptions) async throws -> PhotoResult {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
         // outputFormat 1 = DNG (RAW) — dedicated ProRAW/Bayer capture path with
         // its own runtime support check (throws `rawNotSupported` when the
         // output offers no RAW pixel formats).
-        if options.outputFormat == 1 { return try await s.takeDngPhoto(options: options) }
+        if options.outputFormat == 1 { return try await s.photoOutput.takeDngPhoto(options: options) }
         let flash: AVCaptureDevice.FlashMode
         switch options.flash {
         case 1:  flash = .on
@@ -468,7 +343,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             (options.hasLocation != 0 && options.skipMetadata == 0)
                 ? (options.latitude, options.longitude, options.altitude)
                 : nil
-        return try await s.takePhoto(
+        return try await s.photoOutput.takePhoto(
             flashMode: flash,
             quality: options.qualityPrioritization,
             redEyeReduction: options.enableAutoRedEyeReduction != 0,
@@ -476,208 +351,119 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func takeSnapshot(textureId: Int64) async throws -> PhotoResult {
-        guard let s = session(for: textureId) else { throw NitraCameraError.deviceNotFound }
-        return try await s.takePhoto()
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        return try await s.photoOutput.takePhoto()
     }
 
-    public func reset() {
-        sessionsLock.lock()
-        for session in sessions.values {
-            session.close()
+    // MARK: - Video recording (routes to VideoRecorder)
+
+    public func startVideoRecording(textureId: Int64, outputPath: String, options: RecordingOptions) async throws {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        try await s.recorder.start(to: outputPath, options: options)
+    }
+
+    public func stopVideoRecording(textureId: Int64) async throws -> RecordingResult {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        return try await s.recorder.stop()
+    }
+
+    public func pauseRecording(textureId: Int64) {
+        session(for: textureId)?.recorder.pause()
+    }
+
+    public func resumeRecording(textureId: Int64) {
+        session(for: textureId)?.recorder.resume()
+    }
+
+    public func cancelRecording(textureId: Int64) {
+        let s = session(for: textureId)
+        Task { try? await s?.recorder.cancel() }
+    }
+
+    // MARK: - Frame processing (routes to FrameOutput)
+
+    public func enableFrameProcessing(textureId: Int64, enabled: Int64) {
+        session(for: textureId)?.frameOutput.frameProcessingEnabled = (enabled != 0)
+    }
+
+    public func setFrameFormat(textureId: Int64, format: Int64) {
+        session(for: textureId)?.setFrameFormat(format)
+    }
+
+    public func setSamplingRate(textureId: Int64, samplingRate: Int64) {
+        session(for: textureId)?.frameOutput.setSamplingRate(samplingRate)
+    }
+
+    public func setFilterShader(textureId: Int64, shaderSource: String) {
+        // GPU preview filter is Android-only for now; reserved on iOS.
+    }
+
+    public func updateOverlay(textureId: Int64, overlayData: Data) {
+        // Reserved.
+    }
+
+    // MARK: - Declarative configuration
+
+    public func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        try? s.setZoom(config.zoom)
+        try? s.setExposure(value: config.exposure)
+        s.photoOutput.setFlash(mode: config.flash)
+        if config.torchLevel > 0 {
+            s.setTorchLevel(config.torchLevel)
+        } else {
+            try? s.setTorch(enabled: config.torch != 0)
         }
-        sessions.removeAll()
-        sessionsLock.unlock()
+        try? s.setWhiteBalance(temperature: config.whiteBalanceKelvin)
+        s.setHdr(enabled: config.videoHdr != 0)
+        s.setLowLightBoost(config.lowLightBoost != 0)
+        try? s.setAutoFocus(mode: config.autoFocus)
+        s.setVideoStabilization(config.videoStabilization)
+        s.setFrameFormat(config.pixelFormat)
+        s.frameOutput.setSamplingRate(config.samplingRate)
+        s.frameOutput.frameProcessingEnabled = (config.enableFrameProcessing != 0)
+        if config.active != 0 { s.start() } else { s.stop() }
+
+        let afSystem: Int64 = config.autoFocus == 0 ? 0 : 2 // off vs phase-detection
+        return ResolvedConfig(
+            width: s.streamWidth,
+            height: s.streamHeight,
+            fps: s.activeFps,
+            pixelFormat: s.frameOutput.pixelFormat,
+            videoHdrEnabled: config.videoHdr,
+            autoFocusSystem: afSystem,
+            active: config.active)
+    }
+
+    public func getSessionStateJson(textureId: Int64) -> String {
+        guard let s = session(for: textureId) else { return "{\"running\":false}" }
+        let dict: [String: Any] = [
+            "running":     s.isRunning,
+            "width":       s.streamWidth,
+            "height":      s.streamHeight,
+            "fps":         s.activeFps,
+            "pixelFormat": s.frameOutput.pixelFormat,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    // MARK: - Global observers (see OrientationManager / CameraDevicesObserver)
+
+    public func enableOrientationEvents(enabled: Int64) {
+        orientationManager.setEnabled(enabled != 0)
+    }
+
+    public func enableDeviceAvailabilityEvents(enabled: Int64) {
+        devicesObserver.setEnabled(enabled != 0)
     }
 
     // MARK: - Helpers
 
-    private func session(for textureId: Int64) -> NitraCameraSession? {
+    private func session(for textureId: Int64) -> CameraSession? {
         sessionsLock.lock()
         defer { sessionsLock.unlock() }
         return sessions[textureId]
-    }
-
-    private func discoverySession() -> AVCaptureDevice.DiscoverySession {
-        // Physical lenses + virtual (logical multi-cam) devices. Virtual devices
-        // are the iOS analogue of Android's LOGICAL_MULTI_CAMERA: they expose
-        // constituent physical lenses and seamless zoom switch-over.
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [
-            .builtInWideAngleCamera,
-            .builtInUltraWideCamera,
-            .builtInTelephotoCamera,
-            .builtInDualCamera,
-        ]
-        if #available(iOS 13.0, *) {
-            deviceTypes.append(.builtInDualWideCamera)
-            deviceTypes.append(.builtInTripleCamera)
-        }
-        return AVCaptureDevice.DiscoverySession(
-            deviceTypes: deviceTypes,
-            mediaType: .video,
-            position: .unspecified
-        )
-    }
-
-    /// vision-camera's `physicalDevices` naming — the SAME strings as Android.
-    private func lensTypeName(_ type: AVCaptureDevice.DeviceType) -> String {
-        switch type {
-        case .builtInUltraWideCamera: return "ultra-wide-angle-camera"
-        case .builtInTelephotoCamera: return "telephoto-camera"
-        default:                      return "wide-angle-camera"
-        }
-    }
-
-    /// Nominal focal length in mm by lens type — AVFoundation exposes no
-    /// physical focal-length API, so report a typical per-lens value (the
-    /// Android side reads the real LENS_INFO_AVAILABLE_FOCAL_LENGTHS).
-    private func nominalFocalLength(_ type: AVCaptureDevice.DeviceType) -> Double {
-        switch type {
-        case .builtInUltraWideCamera: return 1.6
-        case .builtInTelephotoCamera: return 7.0
-        default:                      return 4.2
-        }
-    }
-
-    private func deviceInfoDict(for device: AVCaptureDevice) -> [String: Any] {
-        let position: Int = device.position == .front ? 0 : (device.position == .back ? 1 : 2)
-        let lensType: Int
-        switch device.deviceType {
-        case .builtInUltraWideCamera: lensType = 2
-        case .builtInTelephotoCamera: lensType = 3
-        default:                      lensType = 1
-        }
-
-        var maxW = 0, maxH = 0
-        for fmt in device.formats {
-            let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-            if Int(dim.width) > maxW { maxW = Int(dim.width); maxH = Int(dim.height) }
-        }
-
-        let formats: [[String: Any]] = device.formats.compactMap { fmt -> [String: Any]? in
-            let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-            guard dim.width > 0 && dim.height > 0 else { return nil }
-            let fpsRanges = fmt.videoSupportedFrameRateRanges
-            let minFps = fpsRanges.map { $0.minFrameRate }.min() ?? 1.0
-            let maxFps = fpsRanges.map { $0.maxFrameRate }.max() ?? 30.0
-            var afSystem = "none"
-            if #available(iOS 13.0, *) {
-                switch fmt.autoFocusSystem {
-                case .phaseDetection:    afSystem = "phase-detection"
-                case .contrastDetection: afSystem = "contrast-detection"
-                default: break
-                }
-            }
-            return [
-                "photoWidth":           maxW,
-                "photoHeight":          maxH,
-                "videoWidth":           Int(dim.width),
-                "videoHeight":          Int(dim.height),
-                "minFps":               minFps,
-                "maxFps":               maxFps,
-                "minISO":               device.activeFormat.minISO,
-                "maxISO":               device.activeFormat.maxISO,
-                "fieldOfView":          fmt.videoFieldOfView,
-                "supportsVideoHdr":     fmt.isVideoHDRSupported,
-                "supportsPhotoHdr":     false,
-                "supportsDepthCapture": fmt.supportedDepthDataFormats.count > 0,
-                "autoFocusSystem":      afSystem,
-                "videoStabilizationModes": ["off", "standard"],
-            ]
-        }
-
-        let minEv = Double(device.minExposureTargetBias)
-        let maxEv = Double(device.maxExposureTargetBias)
-        let minFocusDist = device.lensPosition > 0 ? Double(device.lensPosition) : 0.0
-
-        // Physical lens composition (vision-camera's physicalDevices) — the
-        // SAME strings as Android. A plain camera reports its own lens type; a
-        // virtual (logical multi-cam) device lists its constituents'.
-        var physicalDevices = [lensTypeName(device.deviceType)]
-        var isMultiCam = false
-        // neutralZoom: the first virtual-device switch-over factor (the zoom at
-        // which a multi-cam device hands off between constituent lenses); 1.0
-        // for plain physical cameras.
-        var neutralZoom = 1.0
-        if #available(iOS 13.0, *), device.isVirtualDevice {
-            isMultiCam = true
-            physicalDevices = device.constituentDevices.map { lensTypeName($0.deviceType) }
-            if let firstSwitchOver = device.virtualDeviceSwitchOverVideoZoomFactors.first {
-                neutralZoom = Double(truncating: firstSwitchOver)
-            }
-        }
-
-        return [
-            "id":                   device.uniqueID,
-            "name":                 device.localizedName,
-            "position":             position,
-            "lensType":             lensType,
-            // 0: buffers are delivered upright (connection.videoOrientation = .portrait),
-            // so the Flutter preview must NOT swap width/height.
-            "sensorOrientation":    0,
-            "minZoom":              Double(device.minAvailableVideoZoomFactor),
-            "maxZoom":              Double(device.maxAvailableVideoZoomFactor),
-            "neutralZoom":          neutralZoom,
-            "hasFlash":             device.hasFlash,
-            "hasTorch":             device.hasTorch,
-            "maxPhotoWidth":        maxW,
-            "maxPhotoHeight":       maxH,
-            "minExposure":          minEv,
-            "maxExposure":          maxEv,
-            "minFocusDistanceCm":   minFocusDist,
-            "isMultiCam":           isMultiCam,
-            "supportsLowLightBoost": device.isLowLightBoostSupported,
-            // Honest capability report: RAW availability on iOS is only knowable
-            // from a LIVE AVCapturePhotoOutput (availableRawPhotoPixelFormatTypes
-            // depends on the connected session + active format), so enumeration
-            // reports false and the DNG capture path performs the real runtime
-            // check — throwing a clear `rawNotSupported` error when absent.
-            "supportsRawCapture":   false,
-            "supportsFocus":        device.isFocusPointOfInterestSupported,
-            "hardwareLevel":        "full",
-            "physicalDevices":      physicalDevices,
-            // Vendor extensions (Night / HDR / Bokeh...) are an Android-only
-            // concept (CameraExtensionCharacteristics); always empty on iOS.
-            "extensions":           [String](),
-            "focalLength":          nominalFocalLength(device.deviceType),
-            "aperture":             Double(device.lensAperture),
-            "formats":              formats,
-        ]
-    }
-
-    private func deviceInfo(for device: AVCaptureDevice) -> CameraDevice {
-        let position: Int64 = device.position == .front ? 0 : (device.position == .back ? 1 : 2)
-        let lensType: Int64
-        switch device.deviceType {
-        case .builtInUltraWideCamera: lensType = 2
-        case .builtInTelephotoCamera: lensType = 3
-        default:                      lensType = 1
-        }
-        var maxW: Int64 = 0, maxH: Int64 = 0
-        for fmt in device.formats {
-            let dim = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
-            if Int64(dim.width) > maxW { maxW = Int64(dim.width); maxH = Int64(dim.height) }
-        }
-        // Virtual multi-cam devices: neutral zoom = first lens switch-over factor.
-        var neutralZoom = 1.0
-        if #available(iOS 13.0, *), device.isVirtualDevice,
-           let firstSwitchOver = device.virtualDeviceSwitchOverVideoZoomFactors.first {
-            neutralZoom = Double(truncating: firstSwitchOver)
-        }
-        return CameraDevice(
-            id: device.uniqueID,
-            name: device.localizedName,
-            position: position,
-            lensType: lensType,
-            sensorOrientation: Int64(0), // upright buffers — see JSON variant above
-            minZoom: Double(device.minAvailableVideoZoomFactor),
-            maxZoom: Double(device.maxAvailableVideoZoomFactor),
-            neutralZoom: neutralZoom,
-            hasFlash: device.hasFlash ? Int64(1) : Int64(0),
-            hasTorch: device.hasTorch ? Int64(1) : Int64(0),
-            maxPhotoWidth: maxW,
-            maxPhotoHeight: maxH,
-            focalLength: nominalFocalLength(device.deviceType), // no public focal-length API
-            aperture: Double(device.lensAperture)
-        )
     }
 }

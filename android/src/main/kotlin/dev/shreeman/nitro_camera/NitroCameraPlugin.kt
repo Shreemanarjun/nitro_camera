@@ -7,6 +7,13 @@ import kotlinx.coroutines.*
 import androidx.lifecycle.LifecycleOwner
 import nitro.nitro_camera_module.NitroCameraJniBridge
 
+/**
+ * Flutter plugin entry point: registers the shared [NitroCameraImpl] with the
+ * Nitro bridge, the platform-view factory, and the activity lifecycle hooks.
+ *
+ * vision-camera analogue: android/.../VisionCameraPackage.kt (their RN package
+ * registration).
+ */
 class NitroCameraPlugin : FlutterPlugin, ActivityAware {
 
     companion object {

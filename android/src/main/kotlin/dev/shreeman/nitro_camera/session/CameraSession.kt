@@ -1,34 +1,33 @@
-package dev.shreeman.nitro_camera
+package dev.shreeman.nitro_camera.session
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.ImageFormat
 import android.graphics.Rect
-import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.display.DisplayManager
 import android.view.Display
-import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
+import dev.shreeman.nitro_camera.NitraRenderer
+import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
+import dev.shreeman.nitro_camera.extensions.hasFlashUnit
+import dev.shreeman.nitro_camera.extensions.isFrontFacing
+import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
+import dev.shreeman.nitro_camera.outputs.FrameOutput
+import dev.shreeman.nitro_camera.outputs.PhotoOutput
+import dev.shreeman.nitro_camera.outputs.VideoOutput
+import dev.shreeman.nitro_camera.utils.NitraDetectors
 import io.flutter.view.TextureRegistry
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import nitro.nitro_camera_module.*
-import java.nio.ByteBuffer
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import android.hardware.camera2.CameraManager
@@ -36,21 +35,30 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraDevice as AndroidCameraDevice
 
 /**
- * Manages one Camera2 session per open camera.
+ * Manages one Camera2 session per open camera: configure/start/stop/close,
+ * the surface-combination policy (preview + photo + frameReader [+ recorder]),
+ * capture-request settings (3A, zoom, stabilization, distortion correction)
+ * and interruption/recovery. Still capture, recording and frame delivery are
+ * owned by the outputs ([PhotoOutput], [VideoOutput], [FrameOutput]).
+ *
+ * vision-camera analogue: android/.../session/ActiveCameraSession.kt +
+ * ActiveCameraSessionSingle.kt (their per-config CameraX session; ours drives
+ * Camera2 directly — distortion correction, 3A locks and codec selection are
+ * capabilities their own TODOs concede CameraX cannot express).
  */
 @SuppressLint("MissingPermission")
-class NitraCameraSession(
-    private val context: Context,
+class CameraSession(
+    internal val context: Context,
     val textureId: Long,
     private val surfaceEntry: TextureRegistry.SurfaceTextureEntry?,
     private val surfaceProducer: Any?, // TextureRegistry.SurfaceProducer
-    private var cameraDevice: AndroidCameraDevice,
-    private val characteristics: CameraCharacteristics,
+    internal var cameraDevice: AndroidCameraDevice,
+    internal val characteristics: CameraCharacteristics,
     val deviceId: String,
-    private val width: Int,
-    private val height: Int,
+    internal val width: Int,
+    internal val height: Int,
     private val requestedFps: Int,
-    private val enableAudio: Boolean,
+    enableAudio: Boolean,
 ) {
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
@@ -58,26 +66,13 @@ class NitraCameraSession(
     private val glThread = HandlerThread("NitraGLThread").apply { start() }
     private val glHandler = Handler(glThread.looper)
 
-    private val resolvedSize: android.util.Size = run {
-        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?: throw IllegalStateException("No stream configuration map")
-        val sizes = map.getOutputSizes(SurfaceTexture::class.java)
+    // Preview stream size (see ConstraintResolver.resolvePreviewSize — best
+    // aspect match, then closest area; keeping this proven selection avoids
+    // breaking the device's supported stream combination).
+    private val resolvedSize: android.util.Size =
+        ConstraintResolver.resolvePreviewSize(characteristics, width, height)
 
-        // Find size that matches requested aspect ratio best, or closest matching size.
-        // (The preview STRETCH is fixed on the Flutter side — the native GL renderer
-        // already center-crops — so we keep this proven selection to avoid breaking
-        // the device's supported stream combination.)
-        val targetAspect = width.toFloat() / height.toFloat()
-
-        sizes.minByOrNull { s ->
-            val aspect = s.width.toFloat() / s.height.toFloat()
-            val aspectDiff = Math.abs(aspect - targetAspect)
-            val areaDiff = Math.abs(s.width * s.height - width * height)
-            aspectDiff * 1000000 + areaDiff
-        } ?: sizes[0]
-    }
-
-    private val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
+    internal val renderer = NitraRenderer(resolvedSize.width, resolvedSize.height)
 
     // Keep the preview's content rotation in sync with the device orientation so it
     // stays upright in portrait AND landscape (like the stock camera).
@@ -153,15 +148,15 @@ class NitraCameraSession(
         }
     }
 
-    private var previewSurface: Surface? = null
+    internal var previewSurface: Surface? = null
     private var currentRequestBuilder: CaptureRequest.Builder? = null
 
     // --- Persistent Camera State ---
     private var zoomValue: Double = 1.0
-    private var flashMode: Long = 0L
+    internal var flashMode: Long = 0L
     private var exposureValue: Double = 0.0
     private var afMode: Long = 1L
-    private var torchEnabled: Boolean = false
+    internal var torchEnabled: Boolean = false
     private var torchLevel: Double = 1.0
     private var videoStabMode: Long = 0L
     private var lowLightBoost: Boolean = false
@@ -174,30 +169,20 @@ class NitraCameraSession(
     // Default ON: without it the ultra-wide shows heavy barrel distortion.
     private var distortionCorrection: Boolean = true
     // Active native ML detector ("barcode" / "face" / "" = off).
-    @Volatile private var nativeDetector: String = ""
+    @Volatile internal var nativeDetector: String = ""
+        private set
 
     // Whether this camera has a physical flash unit (front sensors usually
     // don't). Gates every FLASH_MODE / AE-flash-mode request — flash-less HALs
     // ignore or reject them — and routes flash≠off captures to the screen-fill
-    // path in doCapture instead.
-    private val hasFlashUnit: Boolean =
-        characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-
-    private companion object {
-        /// Max wait for the AE precapture sequence to settle before capturing anyway.
-        const val PRECAPTURE_TIMEOUT_MS = 1_500L
-
-        /// Screen-fill flash (flash-less front cameras): time given to the white
-        /// overlay + max-brightness window to actually light the subject (and AE
-        /// to react) before the exposure starts.
-        const val SCREEN_FLASH_ILLUMINATION_MS = 350L
-    }
+    // path in PhotoOutput.doCapture instead.
+    internal val hasFlashUnit: Boolean = characteristics.hasFlashUnit
 
     // --- Read-back accessors (used by configure()/getSessionStateJson) ---
     val streamWidth: Int get() = resolvedSize.width
     val streamHeight: Int get() = resolvedSize.height
     val activeFps: Int get() = bestFpsRange()?.upper ?: requestedFps
-    val currentPixelFormat: Long get() = pixelFormat
+    val currentPixelFormat: Long get() = frameOutput.pixelFormat
     val isPreviewRunning: Boolean get() = captureSession != null
 
     init {
@@ -217,9 +202,8 @@ class NitraCameraSession(
                         Surface(st)
                     }
                 }
-                renderer.setSensorOrientation(characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90)
-                val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
-                renderer.setIsFrontCamera(isFront)
+                renderer.setSensorOrientation(characteristics.sensorOrientationDegrees(90))
+                renderer.setIsFrontCamera(characteristics.isFrontFacing)
                 renderer.setup(inputSurface)
             } catch (e: Exception) {
                 Log.e("NitroCamera", "GL Setup Error: ${e.message}")
@@ -259,13 +243,15 @@ class NitraCameraSession(
         }
     }
 
-    @Volatile private var isClosed = false
-    @Volatile private var captureSession: CameraCaptureSession? = null
+    @Volatile internal var isClosed = false
+        private set
+    @Volatile internal var captureSession: CameraCaptureSession? = null
 
     // --- Persistent recorder surface state (instant recording start) ---
     // Non-null while a recording streams through the persistent recorder surface
     // that is pre-wired into the capture session (no reconfiguration at start).
-    @Volatile private var recordingViaSessionSurface: Surface? = null
+    @Volatile internal var recordingViaSessionSurface: Surface? = null
+        private set
     // Set when the device rejects the extra recorder stream at session config;
     // from then on this session records via the GL pipeline fallback only.
     @Volatile private var persistentSurfaceUnusable = false
@@ -285,38 +271,18 @@ class NitraCameraSession(
                 // recording start/stop). Skip during session bring-up: the
                 // initial sendPreviewRequest reads this flag itself.
                 cameraHandler.post {
-                    val session = captureSession ?: return@post
-                    if (currentRequestBuilder == null) return@post
+                    val session = captureSession
+                    if (session == null || currentRequestBuilder == null) {
+                        Log.d("NitroCamera", "frameProcessingEnabled[$textureId]=$value: " +
+                            "session not configured yet — initial request picks the flag up")
+                        return@post
+                    }
                     if (!isClosed) sendPreviewRequest(session)
                 }
             }
         }
-    var onFrame: ((CameraFrame) -> Unit)? = null
-    var onEvent: ((CameraEventType, InterruptionReason, String) -> Unit)? = null
-    // @Volatile: set from the Dart/nitro thread (setFrameFormat/setSamplingRate),
-    // read on the camera thread (emitFrame / state read-back).
-    @Volatile private var pixelFormat: Long = 1
-    @Volatile private var samplingRate: Long = 1
-    private var frameCounter: Long = 0
 
-    // Frame-processing (scanner) YUV stream size — MUST be a size the camera
-    // actually advertises for YUV_420_888, otherwise the HAL may accept the
-    // session and then never deliver a single buffer. Prefers the requested
-    // size when supported, else the closest supported size by area.
-    private val frameReaderSize: android.util.Size = run {
-        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val yuvSizes = map?.getOutputSizes(ImageFormat.YUV_420_888)
-        when {
-            yuvSizes == null || yuvSizes.isEmpty() -> android.util.Size(width, height)
-            yuvSizes.any { it.width == width && it.height == height } ->
-                android.util.Size(width, height)
-            else -> yuvSizes.minByOrNull {
-                Math.abs(it.width.toLong() * it.height - width.toLong() * height)
-            }!!
-        }
-    }
-    private val frameReader = ImageReader.newInstance(
-        frameReaderSize.width, frameReaderSize.height, ImageFormat.YUV_420_888, 2)
+    var onEvent: ((CameraEventType, InterruptionReason, String) -> Unit)? = null
 
     /**
      * Whether the persistent recorder surface may be pre-wired into the capture
@@ -334,20 +300,37 @@ class NitraCameraSession(
      * cameras on FULL/LEVEL_3 hardware. Front and limited cameras record via
      * the GL-pipeline fallback instead (slightly slower start, still works),
      * and the frameReader is ALWAYS part of the session.
+     *
+     * The static allowlist is not sufficient: on the CPH2447 a BACK FULL lens
+     * (id "2") also accepts the 4-stream combo and then starves the YUV
+     * stream — and once a repeating request targets the starved stream the
+     * HAL WEDGES (in-flight requests never drain; a later reconfigure dies
+     * with CAMERA_ERROR "Error waiting to drain" and the framework
+     * force-disconnects the device; observed live). Detection-and-recover is
+     * therefore impossible — [sendPreviewRequest] PREVENTS the combination
+     * instead: the frameReader is never targeted while the recorder surface
+     * is part of the session (see the mutual-exclusion block there).
      */
     private val canPreWireRecorderSurface: Boolean = run {
-        val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
-            CameraCharacteristics.LENS_FACING_FRONT
         val level = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
-        !isFront && (level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL ||
-            level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3)
+        !characteristics.isFrontFacing &&
+            (level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL ||
+                level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3)
     }
-    private var directBuffer: ByteBuffer? = null
-    private var lastRawShader: String = ""
 
-    val mediaManager = NitraMediaManager(
-        context, cameraDevice, characteristics, cameraHandler, width, height, enableAudio
-    )
+    internal var lastRawShader: String = ""
+        private set
+
+    // ── Outputs (vision-camera's hybrids/outputs/*) ─────────────────────────────
+    internal val frameOutput = FrameOutput(characteristics, textureId, width, height)
+    internal val videoOutput = VideoOutput(
+        context, characteristics, cameraHandler, width, height, enableAudio)
+    internal val photoOutput = PhotoOutput(this)
+
+    /** Frame delivery into the shared flow — forwarded to [FrameOutput]. */
+    var onFrame: ((CameraFrame) -> Unit)?
+        get() = frameOutput.onFrame
+        set(value) { frameOutput.onFrame = value }
 
     fun onAppStop() {
         if (isClosed) return
@@ -367,6 +350,47 @@ class NitraCameraSession(
         Log.d("NitroCamera", "Session $textureId paused hardware")
     }
 
+    /**
+     * Mid-session device loss (another / higher-priority client took the
+     * camera, USB camera unplugged, camera service died). vision-camera
+     * surfaces this as a typed interruption + recoverable classification; here
+     * the hardware is paused exactly like [onAppStop] so [onAppResume] / a
+     * Dart-side reopen can recover, and an INTERRUPTIONSTARTED event tells the
+     * UI why the preview froze (previously this was swallowed silently — a
+     * black preview with no event).
+     */
+    fun onDeviceDisconnected() {
+        if (isClosed) return
+        Log.w("NitroCamera", "Session $textureId: camera $deviceId disconnected mid-session")
+        try {
+            captureSession?.stopRepeating()
+            captureSession?.close()
+        } catch (_: Exception) {}
+        captureSession = null
+        try { cameraDevice.close() } catch (_: Exception) {}
+        onEvent?.invoke(
+            CameraEventType.INTERRUPTIONSTARTED,
+            InterruptionReason.VIDEODEVICEINUSEBYANOTHERCLIENT,
+            "camera disconnected",
+        )
+    }
+
+    /**
+     * Mid-session fatal device/service error → ERROR event with a
+     * human-readable reason (vision-camera's StateError taxonomy — see
+     * extensions/CameraError+message.kt). The framework has already
+     * invalidated the device at this point, so only cleanup + surfacing remain.
+     */
+    fun onDeviceError(code: Int) {
+        if (isClosed) return
+        val message = cameraErrorMessage(code)
+        Log.e("NitroCamera", "Session $textureId: device error — $message")
+        try { captureSession?.close() } catch (_: Exception) {}
+        captureSession = null
+        try { cameraDevice.close() } catch (_: Exception) {}
+        onEvent?.invoke(CameraEventType.ERROR, InterruptionReason.NONE, message)
+    }
+
     suspend fun onAppResume(cameraManager: CameraManager) {
         if (isClosed) return
         if (captureSession != null) return // Already running
@@ -380,12 +404,23 @@ class NitraCameraSession(
                             if (cont.isActive) cont.resume(cam)
                         }
                         override fun onDisconnected(cam: AndroidCameraDevice) {
-                            cam.close()
-                            if (cont.isActive) cont.cancel()
+                            if (cont.isActive) {
+                                cam.close()
+                                cont.cancel()
+                            } else {
+                                // Post-resume disconnect on the long-lived device.
+                                onDeviceDisconnected()
+                            }
                         }
                         override fun onError(cam: AndroidCameraDevice, error: Int) {
-                            cam.close()
-                            if (cont.isActive) cont.resumeWith(Result.failure(Exception("Camera resume error $error")))
+                            if (cont.isActive) {
+                                cam.close()
+                                cont.resumeWith(Result.failure(
+                                    Exception("Camera resume failed: ${cameraErrorMessage(error)}")))
+                            } else {
+                                // Post-resume fatal error on the long-lived device.
+                                onDeviceError(error)
+                            }
                         }
                     }, cameraHandler)
                 } catch (e: Exception) {
@@ -405,17 +440,10 @@ class NitraCameraSession(
         }
     }
 
-    private fun bestFpsRange(): android.util.Range<Int>? {
-        val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-            ?: return null
-        return if (requestedFps <= 0) {
-            ranges.maxByOrNull { it.upper }
-        } else {
-            ranges.filter { it.upper >= requestedFps }
-                .minByOrNull { it.upper - requestedFps + if (it.lower == it.upper) 0 else 1 }
-                ?: ranges.maxByOrNull { it.upper }
-        }
-    }
+    /// AE target FPS range (see ConstraintResolver.resolveFpsRange — the exact
+    /// vision-camera v5 pass-2 algorithm).
+    private fun bestFpsRange(): android.util.Range<Int>? =
+        ConstraintResolver.resolveFpsRange(characteristics, requestedFps)
 
     fun startPreview() {
         if (isClosed) return
@@ -437,11 +465,11 @@ class NitraCameraSession(
         // Ensure renderer surface is ready
         val pSurface = renderer.inputSurface ?: return
         previewSurface = pSurface
-        
+
         // Sync buffer size
         renderer.inputSurfaceTexture?.setDefaultBufferSize(resolvedSize.width, resolvedSize.height)
 
-        val surfaces = mutableListOf(pSurface, mediaManager.photoReader.surface, frameReader.surface)
+        val surfaces = mutableListOf(pSurface, photoOutput.photoReader.surface, frameOutput.surface)
         // Pre-wire the persistent recorder surface into the session so recordings
         // start instantly (no session reconfiguration at record time). It is NOT
         // added as a repeating-request target until a recording actually starts —
@@ -449,15 +477,20 @@ class NitraCameraSession(
         // where the 4-stream combo is known-good (see canPreWireRecorderSurface);
         // if the device still rejects the extra stream we retry without it
         // (GL recording fallback).
+        // No recorder stream when frame delivery is already active: targeting
+        // the frameReader beside the pre-wired recorder starves/wedges some
+        // HALs (see the mutual-exclusion note in sendPreviewRequest). Skipping
+        // it here avoids an immediate reconfigure right after bring-up.
         val recorderSurface =
-            if (persistentSurfaceUnusable || !canPreWireRecorderSurface) null
-            else mediaManager.acquirePersistentRecorderSurface()
+            if (persistentSurfaceUnusable || !canPreWireRecorderSurface ||
+                frameProcessingEnabled || nativeDetector.isNotEmpty()) null
+            else videoOutput.acquirePersistentRecorderSurface()
         if (recorderSurface != null) surfaces.add(recorderSurface)
         val includesRecorder = recorderSurface != null
 
         Log.i("NitroCamera", "createCaptureSession($deviceId): " +
             "preview(PRIV)=${resolvedSize.width}x${resolvedSize.height} " +
-            "photo(JPEG) frame(YUV)=${frameReaderSize.width}x${frameReaderSize.height} " +
+            "photo(JPEG) frame(YUV)=${frameOutput.size.width}x${frameOutput.size.height} " +
             "recorder(PRIV)=${if (includesRecorder) "pre-wired" else "off (GL record fallback)"} " +
             "fpsRange=${bestFpsRange()}")
 
@@ -501,35 +534,45 @@ class NitraCameraSession(
             Log.e("NitroCamera", "createCaptureSession failed: ${e.message}")
         }
 
-        frameReader.setOnImageAvailableListener({ reader ->
-            if (isClosed) return@setOnImageAvailableListener
-            
-            // ALWAYS acquire and close the image to free the buffer pool,
-            // even if processing is currently disabled.
-            val image = try { reader.acquireLatestImage() } catch (_: Exception) { null }
-                ?: return@setOnImageAvailableListener
-
-            try {
-                if (frameProcessingEnabled) {
-                    emitFrame(image)
-                }
-                val det = nativeDetector
-                if (det.isNotEmpty()) {
-                    // NitraDetectors copies what it needs SYNCHRONOUSLY (the
-                    // image is closed right after this call) and runs the ML
-                    // model async with drop-while-busy throttling.
-                    NitraDetectors.process(image, characteristics, textureId, det) { json ->
-                        onEvent?.invoke(CameraEventType.DETECTION, InterruptionReason.NONE, json)
-                    }
-                }
-            } finally {
-                image.close()
-            }
-        }, cameraHandler)
+        frameOutput.installListener(
+            handler = cameraHandler,
+            isClosed = { isClosed },
+            frameProcessingEnabled = { frameProcessingEnabled },
+            nativeDetector = { nativeDetector },
+        ) { json ->
+            onEvent?.invoke(CameraEventType.DETECTION, InterruptionReason.NONE, json)
+        }
     }
 
     private fun sendPreviewRequest(session: CameraCaptureSession) {
         if (isClosed) return
+
+        // MUTUAL EXCLUSION — frame delivery vs pre-wired recorder stream.
+        // Never target the YUV frameReader while the persistent recorder
+        // surface is part of the capture session: several HALs (CPH2447 front
+        // camera, back lens "2") accept the 4-stream combination at configure
+        // time and then STARVE the YUV stream. Worse than "no frames": as
+        // soon as a repeating request targets the starved stream, in-flight
+        // requests never complete — the preview freezes with it and a
+        // subsequent reconfigure dies in waitUntilIdle (CAMERA_ERROR (3)
+        // "Error waiting to drain") and the framework force-disconnects the
+        // camera. Prevention is the only safe policy: reconfigure the session
+        // WITHOUT the recorder first (a one-off ~300ms blink; recording still
+        // works via the GL fallback), then target the frameReader on the
+        // guaranteed 3-stream combo (PRIV + YUV + JPEG).
+        // Exception: while a recording is actively streaming through the
+        // persistent surface we cannot drop it — keep the legacy behavior
+        // (frame delivery alongside recording works on the primary sensor,
+        // where in-recording scanning is a realistic use case).
+        val wantsFrames = frameProcessingEnabled || nativeDetector.isNotEmpty()
+        if (wantsFrames && persistentSurfaceInSession && recordingViaSessionSurface == null) {
+            Log.i("NitroCamera", "repeatingRequest[$textureId]: frame delivery requested " +
+                "while the recorder stream is pre-wired — reconfiguring without it " +
+                "(device $deviceId)")
+            reconfigureSessionWithoutRecorder()
+            return
+        }
+
         val inputST = renderer.inputSurfaceTexture ?: return
         inputST.setOnFrameAvailableListener(null)
         inputST.setOnFrameAvailableListener({
@@ -546,30 +589,51 @@ class NitraCameraSession(
             // stable for the encoder).
             val recordSurface = recordingViaSessionSurface
             val template = if (recordSurface != null) {
-                android.hardware.camera2.CameraDevice.TEMPLATE_RECORD
+                AndroidCameraDevice.TEMPLATE_RECORD
             } else {
-                android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW
+                AndroidCameraDevice.TEMPLATE_PREVIEW
             }
             val builder = cameraDevice.createCaptureRequest(template)
             val pSurface = previewSurface ?: return
             builder.addTarget(pSurface)
             if (recordSurface != null) builder.addTarget(recordSurface)
             if (frameProcessingEnabled || nativeDetector.isNotEmpty()) {
-                builder.addTarget(frameReader.surface)
+                builder.addTarget(frameOutput.surface)
             }
             currentRequestBuilder = builder
             applySessionSettings(builder)
             session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            Log.d("NitroCamera", "repeatingRequest[$textureId]: preview" +
+                (if (recordSurface != null) "+recorder" else "") +
+                (if (wantsFrames) "+frameReader" else "") +
+                " (fp=$frameProcessingEnabled det='$nativeDetector')")
         } catch (e: Exception) {
             Log.e("NitroCamera", "setRepeatingRequest failed: ${e.message}")
         }
+    }
+
+    /// Drops the pre-wired recorder stream from the session by reconfiguring
+    /// over the guaranteed 3-stream combo (preview + photo + frameReader).
+    /// Runs on the camera thread; only called BEFORE the frameReader was ever
+    /// targeted, so the HAL is healthy and drains normally. This session
+    /// records via the GL fallback from here on ([persistentSurfaceUnusable]);
+    /// a later reopen re-evaluates the pre-wire from scratch.
+    private fun reconfigureSessionWithoutRecorder() {
+        persistentSurfaceUnusable = true
+        persistentSurfaceInSession = false
+        val old = captureSession
+        captureSession = null
+        currentRequestBuilder = null
+        try { old?.stopRepeating() } catch (_: Exception) {}
+        try { old?.close() } catch (_: Exception) {}
+        startPreview()
     }
 
     fun stopPreview() {
         try { captureSession?.stopRepeating() } catch (_: Exception) {}
     }
 
-    private fun applySessionSettings(builder: CaptureRequest.Builder) {
+    internal fun applySessionSettings(builder: CaptureRequest.Builder) {
         // Lens distortion correction — WITHOUT this the ultra-wide (0.5×) shows heavy
         // barrel distortion (straight lines bulge → looks "stretched"). Stock camera
         // apps enable it; so do we by default, when the device supports it (API 28+).
@@ -629,7 +693,7 @@ class NitraCameraSession(
         // Handle Flash/Torch logic — gated on FLASH_INFO_AVAILABLE: cameras
         // without a flash unit (typically the front sensor) ignore or reject
         // FLASH_MODE / AE flash modes, so they get plain AE. Front "flash" is
-        // implemented as a screen-fill in doCapture instead.
+        // implemented as a screen-fill in PhotoOutput.doCapture instead.
         if (!hasFlashUnit) {
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
@@ -667,8 +731,8 @@ class NitraCameraSession(
         }
         // Keep the precapture trigger IDLE on every request built here — the
         // still-capture path drives the AE precapture sequence explicitly with
-        // a one-shot TRIGGER_START frame (see runFlashPrecapture). IDLE means
-        // "no change"; it does NOT cancel a running sequence.
+        // a one-shot TRIGGER_START frame (see PhotoOutput.runFlashPrecapture).
+        // IDLE means "no change"; it does NOT cancel a running sequence.
         builder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE)
 
 
@@ -735,7 +799,7 @@ class NitraCameraSession(
                 try { captureSession?.close() } catch (_: Exception) {}
                 captureSession = null
                 try { cameraDevice.close() } catch (_: Exception) {}
-                try { frameReader.close() } catch (_: Exception) {}
+                try { frameOutput.close() } catch (_: Exception) {}
                 try { previewSurface?.let { if (it.isValid) it.release() } } catch (_: Exception) {}
                 previewSurface = null
             }
@@ -758,7 +822,8 @@ class NitraCameraSession(
             // (c) Detector + media (recorder / persistent surface / photo reader).
             val media = async(Dispatchers.IO) {
                 try { NitraDetectors.stop(textureId) } catch (_: Exception) {}
-                try { mediaManager.release() } catch (_: Exception) {}
+                try { videoOutput.release() } catch (_: Exception) {}
+                try { photoOutput.release() } catch (_: Exception) {}
             }
             // (d) Detach the Flutter producer callback on the main thread so no
             //     new surface callbacks schedule work (release comes later).
@@ -799,7 +864,7 @@ class NitraCameraSession(
     fun setExposure(value: Double) { exposureValue = value; triggerUpdate() }
     fun setAutoFocus(mode: Long) { afMode = mode; triggerUpdate() }
 
-    private fun triggerUpdate() {
+    internal fun triggerUpdate() {
         if (isClosed) return
         cameraHandler.post {
             val session = captureSession ?: return@post
@@ -820,10 +885,10 @@ class NitraCameraSession(
             if (isClosed) return@post
             try {
                 val rect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@post
-                val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+                val orientation = characteristics.sensorOrientationDegrees(90)
 
                 // 1. Correct mirroring for Front Camera
-                val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+                val isFront = characteristics.isFrontFacing
                 var finalX = if (isFront) 1.0 - x else x
                 var finalY = y
 
@@ -930,8 +995,8 @@ class NitraCameraSession(
         triggerUpdate()
     }
 
-    fun setFrameFormat(format: Long)     { pixelFormat = format }
-    fun setSamplingRate(rate: Long)     { samplingRate = rate }
+    fun setFrameFormat(format: Long)     { frameOutput.pixelFormat = format }
+    fun setSamplingRate(rate: Long)     { frameOutput.samplingRate = rate }
     fun setFilterShader(shader: String) {
         lastRawShader = shader
         glHandler.post {
@@ -951,412 +1016,22 @@ class NitraCameraSession(
         }
     }
 
+    // ── Still capture (delegated to PhotoOutput) ────────────────────────────────
 
+    suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult =
+        photoOutput.takePhoto(options)
 
-    suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult {
-        onEvent?.invoke(CameraEventType.PHOTOCAPTUREBEGAN, InterruptionReason.NONE, "")
-        // The scene-mode HDR still request is what some HALs (e.g. Oplus at full
-        // res) reject with REASON_ERROR — and a failed-then-retried capture is the
-        // "slow photo". So DON'T use it on the primary request: the common path now
-        // succeeds first try. A minimal request is still kept as a safety retry.
-        return try {
-            doCapture(useHdr = false, minimal = false, options = options)
-        } catch (e: Exception) {
-            Log.w("NitroCamera", "takePhoto failed (${e.message}); retrying minimal request")
-            doCapture(useHdr = false, minimal = true, options = options)
-        }
-    }
+    suspend fun takeDngPhoto(options: PhotoOptions): PhotoResult =
+        photoOutput.takeDngPhoto(options)
 
-    /**
-     * Runs the standard Camera2 AE PRECAPTURE metering sequence on the live
-     * repeating preview stream and waits (bounded, [PRECAPTURE_TIMEOUT_MS]) for
-     * AE to settle. Without this, a still request carrying
-     * AE_MODE_ON_ALWAYS_FLASH / ON_AUTO_FLASH captures its frame before the
-     * flash is armed, so the flash never visibly fires on most HALs — that was
-     * exactly the "flash doesn't fire on the back camera" bug (the old code set
-     * TRIGGER_START on the still request itself, AFTER stopRepeating(), so the
-     * sequence had no frames to run on). Never throws: on any failure or
-     * timeout the still capture proceeds anyway.
-     */
-    private suspend fun runFlashPrecapture(session: CameraCaptureSession) {
-        val pSurface = previewSurface ?: return
-        if (!pSurface.isValid) return
-        val settled = CompletableDeferred<Unit>()
-        // Camera2Basic-style two-phase wait:
-        //   1) AE enters PRECAPTURE (or immediately reports FLASH_REQUIRED),
-        //   2) AE leaves PRECAPTURE → CONVERGED / FLASH_REQUIRED (flash armed).
-        var precaptureSeen = false
-        val callback = object : CameraCaptureSession.CaptureCallback() {
-            private fun handle(result: CaptureResult) {
-                val ae = result.get(CaptureResult.CONTROL_AE_STATE)
-                if (ae == null) { settled.complete(Unit); return } // LEGACY HAL: no AE state
-                if (!precaptureSeen) {
-                    when (ae) {
-                        CaptureResult.CONTROL_AE_STATE_PRECAPTURE,
-                        CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED -> precaptureSeen = true
-                        // Some HALs skip the PRECAPTURE state entirely.
-                        CaptureResult.CONTROL_AE_STATE_CONVERGED -> settled.complete(Unit)
-                    }
-                }
-                if (precaptureSeen && ae != CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
-                    settled.complete(Unit)
-                }
-            }
-            override fun onCaptureProgressed(
-                s: CameraCaptureSession, r: CaptureRequest, partial: CaptureResult,
-            ) = handle(partial)
-            override fun onCaptureCompleted(
-                s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult,
-            ) = handle(result)
-        }
-        try {
-            // Watch AE states on the repeating preview stream… (fresh builder —
-            // currentRequestBuilder is owned by the camera thread). Mirror the
-            // normal repeating targets so neither a scanner/detector nor an
-            // active persistent-surface recording stalls meanwhile.
-            val recordSurface = recordingViaSessionSurface
-            val repeating = cameraDevice.createCaptureRequest(
-                if (recordSurface != null) android.hardware.camera2.CameraDevice.TEMPLATE_RECORD
-                else android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-            repeating.addTarget(pSurface)
-            if (recordSurface != null) repeating.addTarget(recordSurface)
-            if (frameProcessingEnabled || nativeDetector.isNotEmpty()) {
-                repeating.addTarget(frameReader.surface)
-            }
-            applySessionSettings(repeating)
-            session.setRepeatingRequest(repeating.build(), callback, cameraHandler)
-
-            // …and kick the metering sequence with a single triggered frame.
-            val trigger = cameraDevice.createCaptureRequest(
-                android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW)
-            trigger.addTarget(pSurface)
-            applySessionSettings(trigger)
-            trigger.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START)
-            session.capture(trigger.build(), callback, cameraHandler)
-
-            val t0 = android.os.SystemClock.elapsedRealtime()
-            val outcome = withTimeoutOrNull(PRECAPTURE_TIMEOUT_MS) { settled.await() }
-            Log.i("NitroCamera", "Flash precapture " +
-                (if (outcome != null) "settled" else "TIMED OUT (capturing anyway)") +
-                " in ${android.os.SystemClock.elapsedRealtime() - t0}ms (flashMode=$flashMode)")
-        } catch (e: Exception) {
-            Log.w("NitroCamera", "Flash precapture failed (${e.message}); capturing anyway")
-        }
-    }
-
-    /**
-     * Screen-fill flash for flash-less (front) cameras: boosts the activity
-     * window to max brightness so the Dart-side white overlay actually lights
-     * the subject. Returns the previous screenBrightness override for
-     * [restoreWindowBrightness]; null when no activity is attached.
-     */
-    private fun boostWindowBrightness(): Float? {
-        val act = NitroCameraJniBridge.activity ?: run {
-            Log.w("NitroCamera", "Screen-flash: no activity attached; skipping brightness boost")
-            return null
-        }
-        return try {
-            val previous = act.window.attributes.screenBrightness
-            act.runOnUiThread {
-                try {
-                    val lp = act.window.attributes
-                    lp.screenBrightness = 1.0f
-                    act.window.attributes = lp
-                } catch (e: Exception) {
-                    Log.w("NitroCamera", "Screen-flash brightness boost failed: ${e.message}")
-                }
-            }
-            Log.i("NitroCamera", "Screen-flash: window brightness boosted to 1.0 (was $previous)")
-            previous
-        } catch (e: Exception) {
-            Log.w("NitroCamera", "Screen-flash brightness boost failed: ${e.message}")
-            null
-        }
-    }
-
-    /** Restores the pre-boost window brightness ([previous]; null → system default). */
-    private fun restoreWindowBrightness(previous: Float?) {
-        val act = NitroCameraJniBridge.activity ?: return
-        act.runOnUiThread {
-            try {
-                val lp = act.window.attributes
-                lp.screenBrightness = previous
-                    ?: android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                act.window.attributes = lp
-                Log.i("NitroCamera", "Screen-flash: window brightness restored to ${lp.screenBrightness}")
-            } catch (_: Exception) {}
-        }
-    }
-
-    private suspend fun doCapture(
-        useHdr: Boolean,
-        minimal: Boolean,
-        options: PhotoOptions? = null,
-    ): PhotoResult {
-        val session = captureSession ?: throw Exception("No active session")
-
-        val wantsFlash = !minimal && !torchEnabled && (flashMode == 1L || flashMode == 2L)
-
-        // Flash-equipped camera (back): run the AE PRECAPTURE sequence on the
-        // LIVE repeating stream BEFORE stopping it — this is what actually arms
-        // the flash for the still (both flash=on and flash=auto need it).
-        if (wantsFlash && hasFlashUnit) {
-            runFlashPrecapture(session)
-        }
-
-        // Flash-less camera (front): "flash" = screen fill. Emit the shutter
-        // event EARLY so the app's white FlashOverlay is up during exposure,
-        // boost the window to max brightness, and give the display + AE a
-        // moment to light the subject. Brightness restored in the finally.
-        val screenFlash = wantsFlash && !hasFlashUnit
-        var previousBrightness: Float? = null
-        if (screenFlash) {
-            Log.i("NitroCamera", "Screen-flash capture: flashMode=$flashMode (no flash unit)")
-            onEvent?.invoke(CameraEventType.PHOTOCAPTURESHUTTER, InterruptionReason.NONE, "")
-            previousBrightness = boostWindowBrightness()
-            delay(SCREEN_FLASH_ILLUMINATION_MS)
-        }
-
-        try {
-            // Stop the preview repeating request to prepare for the still capture.
-            try { session.stopRepeating() } catch (_: Exception) {}
-
-            val builder = cameraDevice.createCaptureRequest(
-                android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
-            builder.addTarget(mediaManager.photoReader.surface)
-
-            val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
-
-            // PhotoOptions.qualityPrioritization → JPEG compression level
-            // (0 = speed, 1 = balanced, 2 = quality).
-            if (options != null) {
-                val quality: Byte = when (options.qualityPrioritization) {
-                    0L -> 85
-                    2L -> 100
-                    else -> 92
-                }
-                builder.set(CaptureRequest.JPEG_QUALITY, quality)
-            }
-
-            if (minimal) {
-                builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            } else {
-                // Sets AE_MODE_ON_ALWAYS_FLASH (on) / ON_AUTO_FLASH (auto) — with
-                // STILL_CAPTURE intent + the completed precapture above, the HAL
-                // fires the flash for this frame. (No TRIGGER_START here: the old
-                // trigger-on-the-still bug captured the frame before the flash.)
-                applySessionSettings(builder)
-                // HDR still (scene mode) when requested + supported.
-                if (useHdr) {
-                    val sceneModes = characteristics.get(
-                        CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES) ?: intArrayOf()
-                    if (sceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_HDR)) {
-                        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
-                        builder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
-                    }
-                }
-                // Auto red-eye reduction — only meaningful with auto-flash on a
-                // flash-equipped camera advertising the REDEYE AE mode.
-                if (options?.enableAutoRedEyeReduction == 1L && flashMode == 2L && hasFlashUnit) {
-                    val aeModes = characteristics.get(
-                        CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
-                    if (aeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)) {
-                        builder.set(CaptureRequest.CONTROL_AE_MODE,
-                            CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH_REDEYE)
-                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                    }
-                }
-            }
-
-            // The shutter moment (drives the app's shutter-flash animation).
-            // The screen-flash path already emitted it before the illumination delay.
-            if (!screenFlash) {
-                onEvent?.invoke(CameraEventType.PHOTOCAPTURESHUTTER, InterruptionReason.NONE, "")
-            }
-
-            return mediaManager.takePhotoWithRequest(
-                session = session,
-                request = builder.build(),
-                renderer = renderer,
-                shader = lastRawShader ?: "",
-                options = options,
-            ) {
-                // Resume the preview repeating request after capture.
-                cameraHandler.post { triggerUpdate() }
-            }
-        } finally {
-            if (screenFlash) restoreWindowBrightness(previousBrightness)
-        }
-    }
-
-    /**
-     * RAW (DNG) still capture — PhotoOptions.outputFormat == 1.
-     *
-     * RAW_SENSOR can't be piggybacked onto the normal preview/JPEG/YUV stream
-     * combination on most devices, so this reconfigures a TEMPORARY capture
-     * session over [preview, RAW], captures one frame together with its
-     * TotalCaptureResult, writes the DNG via DngCreator, and restores the normal
-     * preview session (the existing startPreview() configuration path) in a
-     * finally block. Acceptable for stills; the preview freezes briefly.
-     */
-    suspend fun takeDngPhoto(options: PhotoOptions): PhotoResult {
-        if (isClosed) throw IllegalStateException("Camera session is closed")
-        if (mediaManager.isRecording) {
-            throw IllegalStateException("Cannot capture DNG while recording video")
-        }
-        val caps = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-            ?: intArrayOf()
-        if (!caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
-            throw IllegalStateException("RAW capture not supported by this camera")
-        }
-
-        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val rawSize = map?.getOutputSizes(ImageFormat.RAW_SENSOR)
-            ?.maxByOrNull { it.width.toLong() * it.height }
-            ?: characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)?.let {
-                android.util.Size(it.width, it.height)
-            }
-            ?: throw IllegalStateException("No RAW_SENSOR output size available")
-
-        val pSurface = previewSurface
-            ?: throw IllegalStateException("Preview surface not ready for RAW capture")
-
-        val rawReader = ImageReader.newInstance(
-            rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
-        var rawSession: CameraCaptureSession? = null
-
-        // Tear down the normal session — it is restored in the finally block.
-        try { captureSession?.stopRepeating() } catch (_: Exception) {}
-        try { captureSession?.close() } catch (_: Exception) {}
-        captureSession = null
-
-        try {
-            rawSession = suspendCancellableCoroutine<CameraCaptureSession> { cont ->
-                try {
-                    cameraDevice.createCaptureSession(
-                        listOf(pSurface, rawReader.surface),
-                        object : CameraCaptureSession.StateCallback() {
-                            override fun onConfigured(session: CameraCaptureSession) {
-                                if (cont.isActive) cont.resume(session)
-                            }
-                            override fun onConfigureFailed(session: CameraCaptureSession) {
-                                session.close()
-                                if (cont.isActive) cont.resumeWith(Result.failure(
-                                    IllegalStateException("RAW capture session configuration failed")))
-                            }
-                        },
-                        cameraHandler,
-                    )
-                } catch (e: Exception) {
-                    if (cont.isActive) cont.resumeWith(Result.failure(e))
-                }
-            }
-
-            val imageDeferred = CompletableDeferred<android.media.Image>()
-            val resultDeferred = CompletableDeferred<TotalCaptureResult>()
-            rawReader.setOnImageAvailableListener({ reader ->
-                val img = try {
-                    reader.acquireNextImage()
-                } catch (e: Exception) {
-                    imageDeferred.completeExceptionally(e)
-                    null
-                }
-                if (img != null && !imageDeferred.complete(img)) img.close()
-            }, cameraHandler)
-
-            val builder = cameraDevice.createCaptureRequest(
-                android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE)
-            builder.addTarget(rawReader.surface)
-            builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-
-            if (options.enableShutterSound == 1L) mediaManager.playShutterSound()
-
-            rawSession.capture(builder.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    result: TotalCaptureResult,
-                ) { resultDeferred.complete(result) }
-
-                override fun onCaptureFailed(
-                    session: CameraCaptureSession,
-                    request: CaptureRequest,
-                    failure: CaptureFailure,
-                ) {
-                    val e = IllegalStateException("RAW capture failed (reason ${failure.reason})")
-                    resultDeferred.completeExceptionally(e)
-                    imageDeferred.completeExceptionally(e)
-                }
-            }, cameraHandler)
-
-            val image = withTimeout(10_000) { imageDeferred.await() }
-            val totalResult = try {
-                withTimeout(10_000) { resultDeferred.await() }
-            } catch (e: Exception) {
-                image.close()
-                throw e
-            }
-
-            val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
-                CameraCharacteristics.LENS_FACING_FRONT
-
-            val file = withContext(Dispatchers.IO) {
-                val dng = DngCreator(characteristics, totalResult)
-                try {
-                    dng.setOrientation(when (sensorOrientation) {
-                        90 -> android.media.ExifInterface.ORIENTATION_ROTATE_90
-                        180 -> android.media.ExifInterface.ORIENTATION_ROTATE_180
-                        270 -> android.media.ExifInterface.ORIENTATION_ROTATE_270
-                        else -> android.media.ExifInterface.ORIENTATION_NORMAL
-                    })
-                    if (options.hasLocation == 1L && options.skipMetadata == 0L) {
-                        dng.setLocation(android.location.Location("nitro_camera").apply {
-                            latitude = options.latitude
-                            longitude = options.longitude
-                            altitude = options.altitude
-                        })
-                    }
-                    val out = java.io.File(context.cacheDir, "cap_${System.currentTimeMillis()}.dng")
-                    java.io.FileOutputStream(out).use { dng.writeImage(it, image) }
-                    out
-                } finally {
-                    try { dng.close() } catch (_: Exception) {}
-                    try { image.close() } catch (_: Exception) {}
-                }
-            }
-
-            return PhotoResult(
-                path        = file.absolutePath,
-                width       = rawSize.width.toLong(),
-                height      = rawSize.height.toLong(),
-                fileSize    = file.length(),
-                orientation = sensorOrientation.toLong(),
-                isMirrored  = if (isFront) 1L else 0L,
-                timestamp   = System.currentTimeMillis(),
-            )
-        } catch (e: Exception) {
-            throw IllegalStateException("DNG capture failed: ${e.message}", e)
-        } finally {
-            try { rawSession?.close() } catch (_: Exception) {}
-            try { rawReader.close() } catch (_: Exception) {}
-            // Restore the normal preview session via the existing config path.
-            if (!isClosed) startPreview()
-        }
-    }
+    // ── Recording (session orchestration; recorder mechanics in VideoOutput) ────
 
     suspend fun startVideoRecording(outputPath: String, options: RecordingOptions) {
         if (isClosed) throw IllegalStateException("Camera session is closed")
         // Auto-stop (maxDuration/maxFileSize) → finalise + emit a `stopped` event
         // carrying the path (no pending stopVideoRecording call in that path).
         // stopVideoRecording() routes both the persistent-surface and GL paths.
-        mediaManager.onMaxReached = {
+        videoOutput.onMaxReached = {
             val result = stopVideoRecording()
             onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, result.path)
         }
@@ -1377,11 +1052,11 @@ class NitraCameraSession(
                     // target-then-start is safe.)
                     val session = captureSession
                     val persistent = if (persistentSurfaceInSession && !persistentSurfaceUnusable) {
-                        mediaManager.persistentRecorderSurfaceOrNull
+                        videoOutput.persistentRecorderSurfaceOrNull
                     } else null
                     if (session != null && persistent != null) {
                         try {
-                            mediaManager.prepareVideoRecorder(
+                            videoOutput.prepareVideoRecorder(
                                 outputPath,
                                 codec = options.codec.toInt(),
                                 bitRate = options.bitRate.toInt(),
@@ -1394,7 +1069,7 @@ class NitraCameraSession(
                             )
                             recordingViaSessionSurface = persistent
                             sendPreviewRequest(session) // repeating request now feeds the recorder
-                            mediaManager.startVideoRecorder()
+                            videoOutput.startVideoRecorder()
                             Log.d("NitroCamera", "Video recording started on persistent session surface")
                             if (cont.isActive) cont.resume(Unit)
                             return@post
@@ -1405,7 +1080,7 @@ class NitraCameraSession(
                             Log.w("NitroCamera",
                                 "Persistent-surface recording failed (${e.message}); falling back to GL pipeline")
                             recordingViaSessionSurface = null
-                            try { mediaManager.stopVideoRecording() } catch (_: Exception) {}
+                            try { videoOutput.stopVideoRecording() } catch (_: Exception) {}
                             try { sendPreviewRequest(session) } catch (_: Exception) {}
                         }
                     }
@@ -1413,7 +1088,7 @@ class NitraCameraSession(
                     // FALLBACK — GL pipeline (previous behaviour): the renderer copies
                     // frames into the recorder-owned surface.
                     // 1. Prepare recorder + surface (throws if the encoder rejects the config)
-                    val recSurface = mediaManager.prepareVideoRecorder(
+                    val recSurface = videoOutput.prepareVideoRecorder(
                         outputPath,
                         codec = options.codec.toInt(),
                         bitRate = options.bitRate.toInt(),
@@ -1424,7 +1099,7 @@ class NitraCameraSession(
                         hasLocation = options.hasLocation != 0L,
                     )
                     // 2. Start the hardware recorder FIRST (important for some drivers)
-                    mediaManager.startVideoRecorder()
+                    videoOutput.startVideoRecorder()
                     // 3. Enable the surface on the GL thread ONLY after the recorder is active
                     glHandler.post { renderer.setRecordingSurface(recSurface) }
                     Log.d("NitroCamera", "Video recording started on GPU pipeline")
@@ -1453,7 +1128,7 @@ class NitraCameraSession(
                     captureSession?.let { if (!isClosed) sendPreviewRequest(it) }
                 } catch (_: Exception) {}
             }
-            return mediaManager.stopVideoRecording()
+            return videoOutput.stopVideoRecording()
         }
 
         // GL pipeline path:
@@ -1466,7 +1141,7 @@ class NitraCameraSession(
         try { latch.await(200, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
 
         // 2. Now safe to stop the actual recorder
-        return mediaManager.stopVideoRecording()
+        return videoOutput.stopVideoRecording()
     }
 
     /** Runs [block] on the camera thread; inline when already on it (avoids a
@@ -1478,8 +1153,8 @@ class NitraCameraSession(
         try { latch.await(300, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
     }
 
-    fun pauseVideoRecording()  { mediaManager.pauseVideoRecording() }
-    fun resumeVideoRecording() { mediaManager.resumeVideoRecording() }
+    fun pauseVideoRecording()  { videoOutput.pauseVideoRecording() }
+    fun resumeVideoRecording() { videoOutput.resumeVideoRecording() }
     fun cancelVideoRecording() {
         if (recordingViaSessionSurface != null) {
             // Persistent path: restores the preview repeating request; the capture
@@ -1488,38 +1163,7 @@ class NitraCameraSession(
             return
         }
         glHandler.post { renderer.setRecordingSurface(null) }
-        mediaManager.stopVideoRecording()
+        videoOutput.stopVideoRecording()
         startPreview()
-    }
-
-    private fun emitFrame(image: android.media.Image) {
-        val cb = onFrame ?: return
-        try {
-            frameCounter++
-            if (frameCounter % samplingRate != 0L) return
-            val plane = image.planes[0]
-            val src = plane.buffer
-            val size = src.remaining().toLong()
-            var buffer = directBuffer
-            if (buffer == null || buffer.capacity() < src.remaining()) {
-                buffer = ByteBuffer.allocateDirect(src.remaining()); directBuffer = buffer
-            }
-            buffer!!.clear(); buffer.put(src); buffer.flip()
-            val orientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-            val rotation = when (orientation) {
-                90 -> 90
-                270 -> 270
-                180 -> 180
-                else -> 0
-            }
-            // The frame reader delivers YUV_420_888; plane[0] is the luma plane,
-            // whose row stride (`rowStride`) may exceed width due to alignment.
-            val isFront = characteristics.get(CameraCharacteristics.LENS_FACING) ==
-                CameraCharacteristics.LENS_FACING_FRONT
-
-            cb(CameraFrame(buffer, size, image.width.toLong(), image.height.toLong(),
-                System.currentTimeMillis(), rotation.toLong(), textureId,
-                plane.rowStride.toLong(), 0L /* YUV luma */, if (isFront) 1L else 0L))
-        } catch (_: Exception) { }
     }
 }

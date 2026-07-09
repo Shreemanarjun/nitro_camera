@@ -1,7 +1,10 @@
-package dev.shreeman.nitro_camera
+package dev.shreeman.nitro_camera.utils
 
 /**
  * Pure, unit-testable geometry for the GL preview transform (no Android deps).
+ *
+ * vision-camera analogue: none 1:1 (their preview is a CameraX PreviewView —
+ * no custom GL transform); lives in utils/ following their utils/ style.
  *
  * The preview-stretch bugs came from the renderer computing an aspect crop that
  * didn't match the displayed (rotated) content. This isolates that math so it can

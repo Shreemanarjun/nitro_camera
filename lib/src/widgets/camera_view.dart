@@ -223,7 +223,14 @@ class _CameraViewState extends State<CameraView> {
       widget.onEvent?.call(e);
       if (e.isError) {
         final err = StateError(e.message.isEmpty ? 'camera error' : e.message);
-        if (mounted) setState(() => _error = err);
+        // An error EVENT while a live controller is still streaming is
+        // recoverable/transient (heavy-format transitions, e.g. 4K, emit a
+        // generic AVFoundation error that the session survives) — replacing a
+        // WORKING preview with the errorBuilder here is exactly the
+        // "switched resolution → no preview" bug. Keep the preview mounted;
+        // surface the error through onError. Only a missing controller
+        // (session actually gone) flips the view into its error state.
+        if (_controller == null && mounted) setState(() => _error = err);
         widget.onError?.call(err);
       }
     });

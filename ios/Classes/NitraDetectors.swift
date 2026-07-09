@@ -4,6 +4,9 @@ import Vision
 
 /// Native ML detector runner (barcode / face) via the built-in Vision framework.
 ///
+/// vision-camera analogue: none — v5 dropped built-in detection (classic had
+/// community frame-processor plugins); this stays as a nitro_camera extra.
+///
 /// iOS analogue of Android's `NitraDetectors` (which probes for optional ML Kit
 /// artifacts at runtime). Vision ships with the OS, so there is no dependency
 /// probe here: a detector name is either known ("barcode" / "face") or rejected

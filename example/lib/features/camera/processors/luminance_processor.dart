@@ -20,6 +20,11 @@ class LuminanceFrameProcessor implements FrameProcessor {
   /// Mean luminance of the last processed frame, 0..1.
   final luminance = signal(0.0);
 
+  /// Frames processed since the last attach. This is the DELIVERY signal —
+  /// luminance can legitimately be 0.0 (covered lens / black scene), so
+  /// "are frames flowing?" must be answered by this counter, not the value.
+  final framesProcessed = signal(0);
+
   /// Whether the processor is currently attached to a live session.
   final attached = signal(false);
 
@@ -36,6 +41,7 @@ class LuminanceFrameProcessor implements FrameProcessor {
 
   @override
   void processFrame(CameraFrame frame) {
+    framesProcessed.value++;
     final px = frame.pixels;
     if (px.isEmpty) return;
 
@@ -66,6 +72,7 @@ class LuminanceFrameProcessor implements FrameProcessor {
   void onDetach() {
     attached.value = false;
     luminance.value = 0.0;
+    framesProcessed.value = 0;
   }
 }
 

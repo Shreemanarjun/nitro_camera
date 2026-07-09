@@ -1,4 +1,4 @@
-package dev.shreeman.nitro_camera
+package dev.shreeman.nitro_camera.utils
 
 import android.hardware.camera2.CameraCharacteristics
 import android.media.Image
@@ -16,6 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Native ML detector runner (barcode / face via Google ML Kit).
+ *
+ * vision-camera analogue: none 1:1 — vision-camera v5 delegates detection to
+ * frame-processor plugins; this lives in utils/ (their utils/ style) as a
+ * self-contained helper the session's FrameOutput dispatches into.
  *
  * ML Kit is an OPTIONAL dependency: the plugin compiles against it
  * (`compileOnly`), but host apps opt in by adding the implementation artifact

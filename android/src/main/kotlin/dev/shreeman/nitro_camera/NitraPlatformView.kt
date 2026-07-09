@@ -15,6 +15,8 @@ import io.flutter.plugin.platform.PlatformView
  * A SurfaceView here either falls back to Virtual Display (scaled → slightly
  * squeezed preview) or, under Hybrid Composition, punches through BEHIND the
  * Flutter content (black preview). This mirrors vision-camera's COMPATIBLE mode.
+ *
+ * vision-camera analogue: android/.../views/HybridPreviewView.kt.
  */
 class NitraPlatformView(
     context: Context,

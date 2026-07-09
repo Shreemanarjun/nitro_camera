@@ -127,7 +127,8 @@ class CameraFrame {
   final int timestamp; // ms since epoch
   final int orientation; // degrees: 0 / 90 / 180 / 270
   final int textureId; // identifies which camera session this frame belongs to
-  final int bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
+  final int
+  bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
   final int pixelFormat; // 0 = YUV_420 (plane 0 = luma), 1 = BGRA_8888
   final int isMirrored; // 0 / 1 (front camera)
 
@@ -173,11 +174,22 @@ class RecordingResult {
   final String path; // absolute file path
   final int durationMs;
   final int fileSize; // bytes
+  final int width;
+  final int height;
+  final int codec; // VideoCodec index
+  final int fileType; // VideoFileType index
+  /// 0 = stopped, 1 = maxDurationReached, 2 = maxFileSizeReached.
+  final int finishedReason;
 
   const RecordingResult({
     required this.path,
     required this.durationMs,
     required this.fileSize,
+    this.width = 0,
+    this.height = 0,
+    this.codec = 0,
+    this.fileType = 0,
+    this.finishedReason = 0,
   });
 }
 
@@ -258,7 +270,8 @@ class PhotoOptions {
   final double longitude;
   final double altitude;
   final int hasLocation; // 0 / 1
-  final int outputFormat; // 0 = JPEG, 1 = DNG (RAW; requires supportsRawCapture)
+  final int
+  outputFormat; // 0 = JPEG, 1 = DNG (RAW; requires supportsRawCapture)
 
   const PhotoOptions({
     required this.flash,
@@ -332,7 +345,7 @@ abstract class NitroCamera extends HybridObject {
 
   /// Requests camera permission from the OS.
   /// Returns a [PermissionStatus] value.
-  @nitroAsync
+  @nitroNativeAsync
   Future<int> requestCameraPermission();
 
   /// Returns the current camera permission status without prompting.
@@ -340,7 +353,7 @@ abstract class NitroCamera extends HybridObject {
 
   /// Requests microphone permission from the OS.
   /// Returns a [PermissionStatus] value.
-  @nitroAsync
+  @nitroNativeAsync
   Future<int> requestMicrophonePermission();
 
   /// Returns the current microphone permission status without prompting.
@@ -348,7 +361,7 @@ abstract class NitroCamera extends HybridObject {
 
   // ---- Device enumeration ----
 
-  @nitroAsync
+  @nitroNativeAsync
   Future<String> getAvailableCameraDevicesJson();
 
   /// Returns a list of all available camera devices.
@@ -371,7 +384,7 @@ abstract class NitroCamera extends HybridObject {
   /// [width] / [height] — requested preview resolution.
   /// [fps] — target frame rate (e.g. 30 or 60).
   /// [enableAudio] — 1 to capture audio for video recording, 0 otherwise.
-  @nitroAsync
+  @nitroNativeAsync
   Future<int> openCamera(
     String deviceId,
     int width,
@@ -380,7 +393,7 @@ abstract class NitroCamera extends HybridObject {
     int enableAudio,
   );
 
-  @nitroAsync
+  @nitroNativeAsync
   Future<void> closeCamera(int textureId);
 
   /// Resumes the camera preview after [stopPreview].
@@ -417,6 +430,11 @@ abstract class NitroCamera extends HybridObject {
   void setHdr(int textureId, int enabled);
 
   // ---- Photo capture ----
+  //
+  // NOTE: capture methods stay @nitroAsync (isolate-pool dispatch) — the
+  // zero-hop @nitroNativeAsync path does not support record returns
+  // (PhotoResult / RecordingResult) or struct params (PhotoOptions /
+  // RecordingOptions / CameraConfig) in nitro_generator 0.5.6.
 
   @nitroAsync
   Future<PhotoResult> takePhoto(int textureId);
