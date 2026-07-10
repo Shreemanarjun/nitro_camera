@@ -104,6 +104,7 @@ public enum CameraEventType: Int64 {
   case deviceDisconnected = 10
   case orientationChanged = 11
   case detection = 12
+  case thermalStateChanged = 13
 }
 
 public enum InterruptionReason: Int64 {

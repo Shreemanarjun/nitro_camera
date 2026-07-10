@@ -91,6 +91,17 @@ final class VideoRecorder {
 
         let fileType: AVFileType = (options.fileType == 1) ? .mov : .mp4
         let url = URL(fileURLWithPath: path)
+        // Validate the destination SYNCHRONOUSLY so a bad path throws here
+        // (→ a typed RecorderException on the caller) instead of failing later
+        // at startWriting() on the frame queue, where the only channel would be
+        // a session-scoped error event. Matches Android's synchronous reject.
+        let parent = url.deletingLastPathComponent()
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDir),
+              isDir.boolValue else {
+            throw CameraError.recordingFailed(
+                "output directory does not exist: \(parent.path)")
+        }
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
 

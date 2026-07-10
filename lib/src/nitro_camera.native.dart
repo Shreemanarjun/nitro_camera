@@ -62,6 +62,7 @@ enum CameraEventType {
   deviceDisconnected, // a camera went away (hot-plug); `message` = deviceId
   orientationChanged, // physical device rotated; `reason` = degrees (0/90/180/270)
   detection, // native detector result; `message` = JSON array of detections
+  thermalStateChanged, // device thermal pressure changed; `reason` = level (0 nominal..3 critical)
 }
 
 /// Why the camera session was interrupted (mirrors AVFoundation reasons).
@@ -431,10 +432,15 @@ abstract class NitroCamera extends HybridObject {
 
   // ---- Photo capture ----
   //
-  // NOTE: capture methods stay @nitroAsync (isolate-pool dispatch) — the
-  // zero-hop @nitroNativeAsync path does not support record returns
-  // (PhotoResult / RecordingResult) or struct params (PhotoOptions /
-  // RecordingOptions / CameraConfig) in nitro_generator 0.5.6.
+  // Capture methods stay @nitroAsync (isolate-pool dispatch). The
+  // @nitroNativeAsync migration is BLOCKED by a generator gap CONFIRMED on
+  // device (nitro_generator 0.5.7): the Dart unpack side supports record
+  // returns (posts/decodes a buffer pointer), but the generated Kotlin/Swift
+  // native-async TRAMPOLINE discards the record result and calls
+  // postNullToPort() — so Dart decodes null → "Null is not a subtype of int".
+  // The fix belongs in nitro_generator: the native-async trampoline must
+  // serialize a record/struct return to a malloc'd buffer and post its pointer
+  // (kInt64), not null. Until then capture methods use the working isolate pool.
 
   @nitroAsync
   Future<PhotoResult> takePhoto(int textureId);

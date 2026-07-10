@@ -489,11 +489,24 @@ class CameraController extends ChangeNotifier {
     NitroCamera.instance.setDistortionCorrection(_textureId!, enabled ? 1 : 0);
   }
 
+  /// Starts a NATIVE ML Kit detector ([NativeDetector.barcode] /
+  /// [NativeDetector.face]) on this session's frames. Results arrive typed on
+  /// [detections]. Requires the host app to add the matching ML Kit dependency
+  /// (documented in the README).
+  void startDetector(NativeDetector detector) =>
+      setNativeDetector(detector.wire);
+
+  /// Stops the native detector.
+  void stopDetector() => setNativeDetector('');
+
+  /// Typed native-detector results for THIS session (vision-camera-style).
+  Stream<DetectionResult> get detections =>
+      nativeDetections.map(DetectionResult.fromJson).where((r) => r != null).cast();
+
   /// Runs a NATIVE ML Kit detector on this session's frames:
-  /// `"barcode"`, `"face"`, or `""` to stop. Results arrive as
-  /// [CameraEventType.detection] events (JSON in `message`) — see
-  /// [nativeDetections]. Requires the host app to add the matching ML Kit
-  /// dependency (documented in the README).
+  /// `"barcode"`, `"face"`, or `""` to stop.
+  ///
+  /// Prefer [startDetector] / [stopDetector] + the typed [detections] stream.
   void setNativeDetector(String detector) {
     _requireInitialized();
     NitroCamera.instance.setNativeDetector(_textureId!, detector);
@@ -501,6 +514,8 @@ class CameraController extends ChangeNotifier {
 
   /// Decoded native-detector results for THIS session, as parsed JSON maps
   /// (`{detector, width, height, rotation, results: [...]}`).
+  ///
+  /// Prefer the typed [detections] stream.
   Stream<Map<String, dynamic>> get nativeDetections =>
       NitroCamera.instance.eventStream
           .where((e) =>
@@ -660,6 +675,21 @@ class CameraController extends ChangeNotifier {
       NitroCamera.instance.eventStream
           .where(CameraSessionEvent.isKnownType)
           .map(CameraSessionEvent.fromNative);
+
+  /// Typed frame-drop reasons for **this** session (vision-camera's
+  /// `onFrameDropped`) — a sustained stream of these means the frame processor
+  /// can't keep up (drop-latest backpressure is discarding frames).
+  Stream<FrameDropReason> get frameDropReasons => events
+      .where((e) => e.type == CameraEventType.frameDropped)
+      .map((e) => FrameDropReason.fromMessage(e.message));
+
+  /// Device thermal-pressure changes while this session is open. Shed capture
+  /// load (fps / resolution / HDR) as this climbs toward
+  /// [ThermalState.critical] to avoid a HAL throttle or shutdown. Monitoring
+  /// auto-starts with the session (no enable call needed).
+  Stream<ThermalState> get thermalStates => CameraController.allEvents
+      .where((e) => e.type == CameraEventType.thermalStateChanged)
+      .map((e) => ThermalState.fromLevel(e.rawReason));
 
   /// Updates the GPU filter shader applied to the preview.
   void setFilterShader(String glslSource) {

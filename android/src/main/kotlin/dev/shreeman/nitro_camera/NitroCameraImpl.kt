@@ -130,6 +130,14 @@ class NitroCameraImpl(
     private var _emitDropped = 0L
     private fun frameEmitStats(textureId: Long, delivered: Boolean) {
         if (delivered) _emitOk++ else _emitDropped++
+        if (!delivered && _emitDropped % 30 == 1L) {
+            // Rate-limited frameDropped event (vision-camera onFrameDropped
+            // parity; iOS emits from captureOutput didDrop). "outOfBuffers" is
+            // the closest Android analogue — the Dart consumer isn't keeping up
+            // with the drop-latest broadcast, so buffers are discarded.
+            emitEvent(CameraEventType.FRAMEDROPPED, textureId = textureId,
+                message = "outOfBuffers")
+        }
         if ((delivered && _emitOk % 120 == 1L) || (!delivered && _emitDropped % 30 == 1L)) {
             Log.d(TAG, "frameEmit[$textureId]: ok=$_emitOk dropped=$_emitDropped " +
                 "subscribers=${_frameFlow.subscriptionCount.value}")
@@ -284,11 +292,57 @@ class NitroCameraImpl(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
+    // Device thermal monitoring (PowerManager, API 29+). Registered lazily on
+    // the first camera open and left running for the process lifetime — thermal
+    // pressure is device-wide (not per-session) and cheap to observe. Emits a
+    // THERMALSTATECHANGED event with the level normalized to 0..3 in `reason`
+    // (nominal/fair/serious/critical), so apps can shed load before a HAL
+    // throttle. vision-camera has no thermal handling — this is a net addition.
+    private var _thermalListener: android.os.PowerManager.OnThermalStatusChangedListener? = null
+    private fun normalizeThermal(status: Int): Long = when (status) {
+        android.os.PowerManager.THERMAL_STATUS_NONE -> 0L
+        android.os.PowerManager.THERMAL_STATUS_LIGHT,
+        android.os.PowerManager.THERMAL_STATUS_MODERATE -> 1L
+        android.os.PowerManager.THERMAL_STATUS_SEVERE,
+        android.os.PowerManager.THERMAL_STATUS_CRITICAL -> 2L
+        else -> 3L
+    }
+
+    private fun emitThermal(level: Long) {
+        // Raw normalized level directly in `reason` (same pattern as
+        // orientationChanged emitting degrees) — not an InterruptionReason.
+        _eventFlow.tryEmit(
+            CameraEvent(CameraEventType.THERMALSTATECHANGED.nativeValue, 0L, level, "")
+        )
+    }
+
+    private fun ensureThermalMonitoring() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            ?: return
+        if (_thermalListener == null) {
+            val listener = android.os.PowerManager.OnThermalStatusChangedListener { status ->
+                emitThermal(normalizeThermal(status))
+            }
+            try {
+                pm.addThermalStatusListener(listener)
+                _thermalListener = listener
+            } catch (e: Exception) {
+                Log.w(TAG, "thermal monitoring unavailable: ${e.message}")
+                return
+            }
+        }
+        // addThermalStatusListener only fires on CHANGE — publish the current
+        // status on every open so a consumer (or a reopen) always sees a value.
+        emitThermal(normalizeThermal(pm.currentThermalStatus))
+    }
+
     override suspend fun openCamera(
         deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long,
     ): Long {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) throw SecurityException("Camera permission not granted")
+        ensureThermalMonitoring()
 
         val openStart = android.os.SystemClock.elapsedRealtime()
 

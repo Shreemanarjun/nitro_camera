@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 
 import 'package:nitro_camera_example/features/camera/processors/luminance_processor.dart';
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 
+import '../support/frame_stats.dart';
 import 'module.dart';
 
 /// Example-app store flows — the Patrol port of the legacy
@@ -143,6 +145,132 @@ final class Store extends Module {
 
     cameraStore.clearFrameProcessor();
     return true;
+  }
+
+  Future<int> _streamFrameCount({
+    Duration duration = const Duration(seconds: 2),
+  }) async {
+    final c = cameraStore.activeController.value!;
+    c.setFrameProcessing(enabled: true);
+    await pumpFor(const Duration(milliseconds: 500));
+    final col = FrameStatsCollector()..attach(c.frameStream);
+    await pumpFor(duration);
+    final r = await col.stop();
+    c.setFrameProcessing(enabled: false);
+    return r.frameCount;
+  }
+
+  /// Device thermal monitoring: a thermal state must be published on (re)open
+  /// (auto-started, device-wide). Forces a reopen and asserts a typed
+  /// [ThermalState] arrives.
+  Future<void> thermalStatePublished() async {
+    final states = <ThermalState>[];
+    final sub = CameraController.allEvents
+        .where((e) => e.type == CameraEventType.thermalStateChanged)
+        .map((e) => ThermalState.fromLevel(e.rawReason))
+        .listen(states.add);
+
+    final beforeTid = cameraStore.activeTextureId.value;
+    cameraStore.setResolution(1280, 720); // force a reopen → re-publish thermal
+    await pumpUntil(
+      () =>
+          cameraStore.activeTextureId.value != beforeTid && states.isNotEmpty,
+      timeout: const Duration(seconds: 15),
+      reason: 'a thermal state was published on (re)open',
+    );
+    await sub.cancel();
+    expect(ThermalState.values, contains(states.first));
+    expect(cameraStore.errorMessage.value, isNull);
+    cameraStore.setResolution(1920, 1080); // restore
+    await pumpFor(const Duration(seconds: 1));
+  }
+
+  /// The typed event `map()` helper routes REAL on-device events (a reopen
+  /// emits stopped + started) to their typed branches without throwing.
+  Future<void> eventMapRoutesRealEvents() async {
+    final labels = <String>[];
+    final sub = CameraController.allEvents.listen((e) {
+      labels.add(e.map(
+        started: () => 'started',
+        stopped: () => 'stopped',
+        error: (m) => 'error:$m',
+        orientationChanged: (d) => 'orient:$d',
+        thermalChanged: (s) => 'thermal:${s.name}',
+        frameDropped: (r) => 'drop:${r.name}',
+        deviceHotplug: (id, on) => 'hotplug:$id:$on',
+        interruption: (_, ended) => 'interruption:$ended',
+        detection: (_) => 'detection',
+        orElse: () => 'other:${e.type.name}',
+      ));
+    });
+
+    final beforeTid = cameraStore.activeTextureId.value;
+    cameraStore.setResolution(1280, 720); // reopen → stopped + started
+    await pumpUntil(
+      () =>
+          cameraStore.activeTextureId.value != beforeTid && labels.isNotEmpty,
+      timeout: const Duration(seconds: 15),
+      reason: 'events routed through map() on reopen',
+    );
+    await sub.cancel();
+
+    // Every event produced a label (map never threw / left a gap), and the
+    // reopen surfaced at least a started event.
+    expect(labels, isNotEmpty);
+    expect(labels.every((l) => l.isNotEmpty), isTrue);
+    expect(labels.any((l) => l == 'started' || l == 'thermal:nominal'), isTrue,
+        reason: 'reopen should surface a started/thermal event ($labels)');
+    cameraStore.setResolution(1920, 1080); // restore
+    await pumpFor(const Duration(seconds: 1));
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// App background → foreground: the preview must come back (production
+  /// interruption handling). If frames don't resume, the session was left
+  /// dead on background — a real bug (vision-camera gates an `isActive` flag).
+  Future<void> backgroundResumeSurvives() async {
+    expect(cameraStore.status.value, CameraStatus.running);
+    await $.platform.mobile.pressHome();
+    // RAW delay while backgrounded — do NOT pump(): the Flutter engine is
+    // paused, so tester.pump() blocks until the app foregrounds again, which
+    // would deadlock before openApp() ever runs.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    await $.platform.mobile.openApp();
+    // Let the engine resume before pumping.
+    await Future<void>.delayed(const Duration(seconds: 1));
+
+    await pumpUntil(
+      () =>
+          cameraStore.status.value == CameraStatus.running &&
+          (cameraStore.activeController.value?.isInitialized ?? false),
+      timeout: const Duration(seconds: 25),
+      reason: 'preview running again after background then foreground',
+    );
+    expect(cameraStore.errorMessage.value, isNull);
+    final frames = await _streamFrameCount();
+    expect(frames, greaterThan(5),
+        reason: 'no frames after resume — preview stuck after backgrounding');
+  }
+
+  /// Rapid PHOTO/VIDEO/SCANNER churn (each flips pixel format → a session
+  /// reconfigure). The session must stay healthy and streaming after the
+  /// churn, with no error.
+  Future<void> rapidModeChurnSurvives() async {
+    const seq = ['PHOTO', 'VIDEO', 'SCANNER', 'VIDEO', 'PHOTO', 'SCANNER', 'PHOTO'];
+    for (final m in seq) {
+      await cameraStore.setMode(m);
+      await pumpFor(const Duration(milliseconds: 500));
+      expect(cameraStore.errorMessage.value, isNull,
+          reason: 'mode $m surfaced an error during churn');
+    }
+    await pumpUntil(
+      () => cameraStore.status.value == CameraStatus.running,
+      reason: 'session running after rapid mode churn',
+    );
+    final frames = await _streamFrameCount();
+    expect(frames, greaterThan(5),
+        reason: 'preview stalled after rapid mode churn');
+    expect(cameraStore.errorMessage.value, isNull);
   }
 
   /// STORE-level capture persists to the in-app library and the app survives

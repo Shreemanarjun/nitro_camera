@@ -1105,12 +1105,13 @@ class CameraSession(
                     Log.d("NitroCamera", "Video recording started on GPU pipeline")
                     if (cont.isActive) cont.resume(Unit)
                 } catch (e: Exception) {
+                    // Recorder-scoped failure: reject the caller's promise (which
+                    // surfaces as a typed RecorderException) — do NOT emit a
+                    // session-scoped CameraEventType.ERROR. A caller-side start
+                    // failure (bad path, unsupported codec) is not a session
+                    // error and must not trip session-level error UI. The camera
+                    // session itself is unharmed.
                     Log.e("NitroCamera", "startVideoRecording failed: ${e.message}")
-                    onEvent?.invoke(
-                        CameraEventType.ERROR,
-                        InterruptionReason.NONE,
-                        "startVideoRecording failed: ${e.message}",
-                    )
                     if (cont.isActive) cont.resumeWith(Result.failure(e))
                 }
             }

@@ -14,9 +14,11 @@ enum CameraError: Error, LocalizedError {
     case captureInProgress
     case sessionNotRunning
     case captureTimedOut
+    case recordingFailed(String)
 
     var errorDescription: String? {
         switch self {
+        case .recordingFailed(let detail): return "Recording failed: \(detail)"
         case .configurationFailed: return "Camera session configuration failed"
         case .captureFailed:       return "Capture failed"
         case .deviceNotFound:      return "Camera device not found"

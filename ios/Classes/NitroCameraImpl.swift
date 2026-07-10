@@ -44,6 +44,27 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         eventSubject.send(CameraEvent(type: type, textureId: textureId, reason: reason, message: message))
     }
 
+    // Device thermal monitoring (ProcessInfo.thermalState). Registered lazily
+    // on first open and left running — thermal pressure is device-wide. Emits
+    // thermalStateChanged with the level in `reason` (ProcessInfo.ThermalState
+    // maps 1:1 to nominal/fair/serious/critical = 0..3). vision-camera has no
+    // thermal handling — net addition so apps can shed load before a throttle.
+    private var thermalObserver: NSObjectProtocol?
+    private func emitThermal() {
+        emitEvent(13 /* thermalStateChanged */, textureId: 0,
+                  reason: Int64(ProcessInfo.processInfo.thermalState.rawValue))
+    }
+    private func ensureThermalMonitoring() {
+        if thermalObserver == nil {
+            thermalObserver = NotificationCenter.default.addObserver(
+                forName: ProcessInfo.thermalStateDidChangeNotification,
+                object: nil, queue: .main) { [weak self] _ in self?.emitThermal() }
+        }
+        // Publish the current state on every open (thermalStateDidChange only
+        // fires on CHANGE) so a consumer / reopen always sees a value.
+        emitThermal()
+    }
+
     // Physical-orientation events (vision-camera's DeviceOrientationManager).
     private lazy var orientationManager: OrientationManager = {
         let manager = OrientationManager()
@@ -162,6 +183,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             NSLog("NitroCamera openCamera FAILED: camera permission not authorized")
             throw CameraError.permissionDenied
         }
+        ensureThermalMonitoring()
         guard let avDevice = AVCaptureDevice(uniqueID: deviceId) else {
             NSLog("NitroCamera openCamera FAILED: no device with id %@", deviceId)
             throw CameraError.deviceNotFound
