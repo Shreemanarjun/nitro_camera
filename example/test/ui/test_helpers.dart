@@ -7,8 +7,8 @@ import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 /// model is a plain Dart class, so widget tests can drive the store directly.
 CameraDeviceInfo fakeDevice({
   String id = 'back-wide',
-  int position = 1, // 0 = front, 1 = back
-  int lensType = 1, // 1 = wide-angle
+  CameraPosition position = CameraPosition.back,
+  CameraLensType lensType = CameraLensType.wideAngle,
   double focalLength = 5.0,
   bool supportsRaw = false,
   bool with4K = false,

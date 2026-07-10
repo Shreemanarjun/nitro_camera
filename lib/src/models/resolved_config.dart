@@ -25,7 +25,7 @@ class ResolvedCameraConfig {
   final PixelFormat pixelFormat;
 
   /// The auto-focus system of the selected format.
-  final String autoFocusSystem;
+  final AutoFocusSystem autoFocusSystem;
 
   const ResolvedCameraConfig({
     required this.format,

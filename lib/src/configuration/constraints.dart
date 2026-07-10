@@ -178,10 +178,10 @@ class PhotoHdrConstraint extends CameraConstraint {
       (enabled && !format.supportsPhotoHdr) ? 1 : 0;
 }
 
-/// Prefer a format that supports the given video-stabilization [mode]
-/// (e.g. `"standard"`, `"cinematic"`). Penalty 1 if unsupported.
+/// Prefer a format that supports the given video-stabilization [mode].
+/// Penalty 1 if unsupported.
 class VideoStabilizationConstraint extends CameraConstraint {
-  final String mode;
+  final VideoStabilizationMode mode;
   const VideoStabilizationConstraint(this.mode);
 
   @override
@@ -189,10 +189,9 @@ class VideoStabilizationConstraint extends CameraConstraint {
       format.videoStabilizationModes.contains(mode) ? 0 : 1;
 }
 
-/// Prefer a format whose auto-focus system matches [system]
-/// (`"phase-detection"` / `"contrast-detection"` / `"none"`).
+/// Prefer a format whose auto-focus system matches [system].
 class AutoFocusConstraint extends CameraConstraint {
-  final String system;
+  final AutoFocusSystem system;
   const AutoFocusConstraint(this.system);
 
   @override

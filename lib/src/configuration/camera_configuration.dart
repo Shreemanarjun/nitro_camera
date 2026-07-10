@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show internal;
+
 import '../models/camera_device.dart';
 // Full import (not `show`) so the generated `nativeValue` enum extensions in the
 // `part` file are visible here.
@@ -200,6 +202,7 @@ class CameraConfiguration {
   /// numeric/boolean bundle the native `configure(textureId, …)` bridge applies
   /// atomically. (Device / format / fps / audio are not part of the live struct;
   /// they go through `openCamera`.)
+  @internal
   CameraConfig toNativeConfig() => CameraConfig(
         zoom: zoom,
         exposure: exposure,

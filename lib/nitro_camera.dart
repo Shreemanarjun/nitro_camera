@@ -13,8 +13,31 @@
 ///  * `widgets/`       — declarative `CameraView` + `CameraPreview`.
 library;
 
-// Native boundary (low-level FFI module — most apps use the layers below).
-export 'src/nitro_camera.native.dart';
+// Native boundary — CURATED vocabulary only: the enums that are part of the
+// public API plus the FFI types that still appear in high-level signatures.
+// The raw module (NitroCamera, FFI structs, codec extensions) is deliberately
+// not exported here; import `package:nitro_camera/native.dart` for it.
+export 'src/nitro_camera.native.dart'
+    show
+        // Public-vocabulary enums.
+        CameraPosition,
+        CameraLensType,
+        FlashMode,
+        AutoFocusMode,
+        PermissionStatus,
+        VideoStabilizationMode,
+        QualityPrioritization,
+        VideoCodec,
+        VideoFileType,
+        CameraEventType,
+        InterruptionReason,
+        // FFI types used in high-level signatures (stable Dart wrappers are
+        // planned — docs/API_IMPROVEMENT_PLAN.md §2.5).
+        CameraFrame,
+        CameraEvent,
+        PhotoResult,
+        RecordingResult,
+        RecordingOptions;
 
 // Data models.
 export 'src/models/models.dart';
@@ -39,7 +62,7 @@ export 'src/processing/frame_processor_plugin.dart';
 export 'src/scanner/code_scanner.dart';
 export 'src/scanner/scan_codes_plugin.dart';
 
-// Widgets.
+// Widgets. (Debug HUDs like the FPS graph live in
+// `package:nitro_camera/debug.dart`.)
 export 'src/widgets/camera_preview.dart';
 export 'src/widgets/camera_view.dart';
-export 'src/widgets/fps_graph.dart';

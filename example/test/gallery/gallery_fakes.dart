@@ -30,6 +30,13 @@ class FakeThumbnails implements VideoThumbnails {
   @override
   Future<Duration?> durationOf(String videoPath) async => duration;
 
+  final primed = <String, Duration>{};
+
+  @override
+  Future<void> primeDuration(String videoPath, Duration d) async {
+    primed[videoPath] = d;
+  }
+
   @override
   Future<Uint8List?> frameAt(String videoPath, Duration position) async {
     frameRequests++;

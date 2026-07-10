@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:nitro/nitro.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 
 import 'features/camera/processors/luminance_processor.dart';
 import 'features/camera/state/camera_store.dart';
@@ -126,8 +127,8 @@ class _ReproAppState extends State<_ReproApp> {
     await Future<void>.delayed(const Duration(milliseconds: 500));
 
     final devices = cameraStore.devices.value;
-    _log('devices=${devices.map((d) => "${d.name}|lens${d.lensType}|pos${d.position}").toList()}');
-    final uw = devices.where((d) => d.lensType == 2).toList();
+    _log('devices=${devices.map((d) => "${d.name}|lens${d.lensType.name}|pos${d.position.name}").toList()}');
+    final uw = devices.where((d) => d.lensType == CameraLensType.ultraWideAngle).toList();
     if (uw.isEmpty) {
       _log('NO ultra-wide device found — aborting');
       return;

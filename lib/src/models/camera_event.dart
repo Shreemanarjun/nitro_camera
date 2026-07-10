@@ -32,7 +32,17 @@ class CameraSessionEvent {
     required this.message,
   });
 
+  /// Whether [e]'s type index is known to this plugin version. A newer native
+  /// layer can emit indices this Dart side doesn't have yet (version skew) —
+  /// filter with this before [fromNative] instead of hitting a RangeError.
+  static bool isKnownType(CameraEvent e) =>
+      e.type >= 0 && e.type < CameraEventType.values.length;
+
   factory CameraSessionEvent.fromNative(CameraEvent e) {
+    if (!isKnownType(e)) {
+      throw ArgumentError.value(e.type, 'e.type',
+          'unknown CameraEventType index — native/plugin version skew?');
+    }
     final type = CameraEventType.values[e.type];
     // `reason` doubles as a generic integer payload (e.g. orientation
     // degrees), so only interpret it as an InterruptionReason where valid.

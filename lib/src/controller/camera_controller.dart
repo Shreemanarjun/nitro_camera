@@ -133,15 +133,15 @@ class CameraController extends ChangeNotifier {
           ? PixelFormat.fromNative(native.pixelFormat)
           : c.pixelFormat,
       autoFocusSystem: native != null
-          ? _afSystemName(native.autoFocusSystem)
+          ? _afSystemFrom(native.autoFocusSystem)
           : f.autoFocusSystem,
     );
   }
 
-  static String _afSystemName(int v) => switch (v) {
-        1 => 'contrast-detection',
-        2 => 'phase-detection',
-        _ => 'none',
+  static AutoFocusSystem _afSystemFrom(int v) => switch (v) {
+        1 => AutoFocusSystem.contrastDetection,
+        2 => AutoFocusSystem.phaseDetection,
+        _ => AutoFocusSystem.none,
       };
 
   // ---- Static device enumeration (mirrors Camera.getAvailableCameraDevices) ----
@@ -157,14 +157,21 @@ class CameraController extends ChangeNotifier {
   /// Shorthand: request camera permission and return the status.
   static Future<PermissionStatus> requestCameraPermission() async {
     final v = await NitroCamera.instance.requestCameraPermission();
-    return PermissionStatus.values[v];
+    return _permissionFrom(v);
   }
 
   /// Shorthand: request microphone permission and return the status.
   static Future<PermissionStatus> requestMicrophonePermission() async {
     final v = await NitroCamera.instance.requestMicrophonePermission();
-    return PermissionStatus.values[v];
+    return _permissionFrom(v);
   }
+
+  // An unknown status index (native/plugin version skew) is treated as denied
+  // rather than throwing a RangeError — the conservative interpretation.
+  static PermissionStatus _permissionFrom(int v) =>
+      (v >= 0 && v < PermissionStatus.values.length)
+          ? PermissionStatus.values[v]
+          : PermissionStatus.denied;
 
   // ---- Lifecycle ----
 
@@ -190,7 +197,7 @@ class CameraController extends ChangeNotifier {
     // rejection, ...). Treating 0 as a live session would publish a broken
     // controller — surface it as an error so callers can retry/back off.
     if (tid == 0) {
-      throw StateError('openCamera failed for device ${device.id}');
+      throw DeviceException.openFailed(device.id);
     }
     _textureId = tid;
     // The requested w/h are screen-matched, not the camera's real output size —
@@ -245,8 +252,7 @@ class CameraController extends ChangeNotifier {
       );
       if (tid == 0) {
         _textureId = null;
-        throw StateError(
-            'openCamera failed for device ${next.deviceId ?? device.id}');
+        throw DeviceException.openFailed(next.deviceId ?? device.id);
       }
       _textureId = tid;
       _width = w;
@@ -275,6 +281,7 @@ class CameraController extends ChangeNotifier {
   /// Also seeds [configuration] so a later [configure] call diffs against the
   /// current state (and applies as cheap live updates) instead of triggering a
   /// spurious reopen.
+  @internal
   void initializeWithTexture(int id, int width, int height, int sensorOrientation,
       {int fps = 30}) {
     _textureId = id;
@@ -497,7 +504,7 @@ class CameraController extends ChangeNotifier {
   Stream<Map<String, dynamic>> get nativeDetections =>
       NitroCamera.instance.eventStream
           .where((e) =>
-              CameraEventType.values[e.type] == CameraEventType.detection &&
+              e.type == CameraEventType.detection.index &&
               (e.textureId == _textureId || e.textureId == 0))
           .map((e) {
         try {
@@ -511,13 +518,16 @@ class CameraController extends ChangeNotifier {
   /// Each inner list is one combination that [initialize] can open as
   /// simultaneous [CameraController] instances. Empty when unsupported.
   static List<List<String>> getConcurrentCameraIds() {
+    final json = NitroCamera.instance.getConcurrentCameraIdsJson();
     try {
-      final raw = jsonDecode(NitroCamera.instance.getConcurrentCameraIdsJson());
+      final raw = jsonDecode(json);
       return (raw as List)
           .map((combo) => (combo as List).cast<String>())
           .toList();
-    } catch (_) {
-      return const [];
+    } catch (e) {
+      // A malformed payload must not masquerade as "multi-cam unsupported"
+      // (the native side reports that as a well-formed empty array).
+      throw SessionException.malformedPayload('concurrent-camera-IDs', e);
     }
   }
 
@@ -618,18 +628,27 @@ class CameraController extends ChangeNotifier {
   /// Disables raw frame delivery.
   void disableFrameProcessing() => setFrameProcessing(enabled: false);
 
-  /// Stream of raw camera frames (only active after [enableFrameProcessing]).
-  Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream;
+  /// Stream of raw camera frames for **this** session (only active after
+  /// [enableFrameProcessing]). Frames from other concurrently-open sessions
+  /// (multi-cam, the double-buffered switch window) are filtered out.
+  Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream
+      .where((f) => f.textureId == _textureId);
 
   /// Typed session events (started / stopped / error / interruption) for **this**
   /// session. Mirrors vision-camera's session listeners.
+  ///
+  /// Events with a type index unknown to this plugin version (native/plugin
+  /// version skew) are skipped rather than crashing the stream.
   Stream<CameraSessionEvent> get events => NitroCamera.instance.eventStream
+      .where(CameraSessionEvent.isKnownType)
       .map(CameraSessionEvent.fromNative)
       .where((e) => e.textureId == _textureId || e.textureId == 0);
 
   /// Typed session events across **all** open sessions.
   static Stream<CameraSessionEvent> get allEvents =>
-      NitroCamera.instance.eventStream.map(CameraSessionEvent.fromNative);
+      NitroCamera.instance.eventStream
+          .where(CameraSessionEvent.isKnownType)
+          .map(CameraSessionEvent.fromNative);
 
   /// Updates the GPU filter shader applied to the preview.
   void setFilterShader(String glslSource) {
@@ -642,7 +661,7 @@ class CameraController extends ChangeNotifier {
 
   void _requireInitialized() {
     if (!isInitialized || _isDisposed) {
-      throw StateError('CameraController is not initialised. Call initialize() first.');
+      throw SessionException.notInitialized();
     }
   }
 }

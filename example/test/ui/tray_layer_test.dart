@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 import 'package:nitro_camera_example/features/camera/ui/widgets/controls/filter_selector.dart';
 import 'package:nitro_camera_example/features/camera/ui/widgets/controls/sensor_tray.dart';
@@ -11,9 +12,9 @@ void main() {
   setUp(() {
     resetStore();
     cameraStore.devices.value = [
-      fakeDevice(id: 'back-wide', lensType: 1, focalLength: 5.0),
-      fakeDevice(id: 'back-ultra', lensType: 2, focalLength: 2.5),
-      fakeDevice(id: 'front-1', position: 0, focalLength: 3.0),
+      fakeDevice(id: 'back-wide', lensType: CameraLensType.wideAngle, focalLength: 5.0),
+      fakeDevice(id: 'back-ultra', lensType: CameraLensType.ultraWideAngle, focalLength: 2.5),
+      fakeDevice(id: 'front-1', position: CameraPosition.front, focalLength: 3.0),
     ];
     cameraStore.currentDevice.value = cameraStore.devices.value.first;
   });
@@ -118,7 +119,7 @@ void main() {
       await tester.tap(find.text('FRONT'));
       await tester.pumpAndSettle();
 
-      expect(cameraStore.currentDevice.value?.position, 0);
+      expect(cameraStore.currentDevice.value?.position, CameraPosition.front);
       expect(find.text('SELF'), findsOneWidget);
       expect(find.byTooltip('Selfie camera'), findsOneWidget);
     });

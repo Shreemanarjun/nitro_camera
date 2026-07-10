@@ -3,15 +3,17 @@ import 'package:nitro_camera/nitro_camera.dart';
 
 CameraDeviceInfo _device(
   String id, {
-  int position = DevicePosition.back,
-  String hardwareLevel = 'full',
-  List<String> physicalDevices = const ['wide-angle-camera'],
+  CameraPosition position = CameraPosition.back,
+  HardwareLevel hardwareLevel = HardwareLevel.full,
+  List<PhysicalDeviceType> physicalDevices = const [
+    PhysicalDeviceType.wideAngleCamera
+  ],
 }) =>
     CameraDeviceInfo(
       id: id,
       name: id,
       position: position,
-      lensType: 1,
+      lensType: CameraLensType.wideAngle,
       sensorOrientation: 90,
       minZoom: 1,
       maxZoom: 8,
@@ -28,26 +30,26 @@ void main() {
   group('selectCameraDevice', () {
     test('filters by position', () {
       final devices = [
-        _device('front', position: DevicePosition.front),
+        _device('front', position: CameraPosition.front),
         _device('back'),
       ];
       expect(
-        selectCameraDevice(devices, position: DevicePosition.back)?.id,
+        selectCameraDevice(devices, position: CameraPosition.back)?.id,
         'back',
       );
       expect(
-        selectCameraDevice(devices, position: DevicePosition.front)?.id,
+        selectCameraDevice(devices, position: CameraPosition.front)?.id,
         'front',
       );
       expect(
-        selectCameraDevice(devices, position: DevicePosition.external),
+        selectCameraDevice(devices, position: CameraPosition.external),
         isNull,
       );
     });
 
     test('prefers full hardware level', () {
       final devices = [
-        _device('legacy', hardwareLevel: 'legacy'),
+        _device('legacy', hardwareLevel: HardwareLevel.legacy),
         _device('full'),
       ];
       expect(selectCameraDevice(devices)?.id, 'full');
@@ -55,7 +57,7 @@ void main() {
 
     test('prefers wide-angle by default', () {
       final devices = [
-        _device('tele', physicalDevices: ['telephoto-camera']),
+        _device('tele', physicalDevices: [PhysicalDeviceType.telephotoCamera]),
         _device('wide'),
       ];
       expect(selectCameraDevice(devices)?.id, 'wide');
@@ -64,7 +66,7 @@ void main() {
     test('explicit non-wide request drops the wide-angle bonus', () {
       final devices = [
         _device('wide'),
-        _device('tele', physicalDevices: ['telephoto-camera']),
+        _device('tele', physicalDevices: [PhysicalDeviceType.telephotoCamera]),
       ];
       final picked = selectCameraDevice(
         devices,
@@ -76,11 +78,11 @@ void main() {
     test('exact lens match beats a logical camera with extra lenses', () {
       final devices = [
         _device('triple', physicalDevices: [
-          'ultra-wide-angle-camera',
-          'wide-angle-camera',
-          'telephoto-camera',
+          PhysicalDeviceType.ultraWideAngleCamera,
+          PhysicalDeviceType.wideAngleCamera,
+          PhysicalDeviceType.telephotoCamera,
         ]),
-        _device('ultrawide', physicalDevices: ['ultra-wide-angle-camera']),
+        _device('ultrawide', physicalDevices: [PhysicalDeviceType.ultraWideAngleCamera]),
       ];
       final picked = selectCameraDevice(
         devices,
@@ -94,9 +96,9 @@ void main() {
       final devices = [
         _device('wide'),
         _device('triple', physicalDevices: [
-          'ultra-wide-angle-camera',
-          'wide-angle-camera',
-          'telephoto-camera',
+          PhysicalDeviceType.ultraWideAngleCamera,
+          PhysicalDeviceType.wideAngleCamera,
+          PhysicalDeviceType.telephotoCamera,
         ]),
       ];
       final picked = selectCameraDevice(
@@ -113,7 +115,7 @@ void main() {
 
     test('extension sugar: backCamera / frontCamera', () {
       final devices = [
-        _device('front', position: DevicePosition.front),
+        _device('front', position: CameraPosition.front),
         _device('back'),
       ];
       expect(devices.backCamera()?.id, 'back');

@@ -9,8 +9,10 @@ CameraDeviceFormat fmt({
   double maxFps = 30,
   bool videoHdr = false,
   bool photoHdr = false,
-  List<String> stabilization = const ['off'],
-  String autoFocus = 'phase-detection',
+  List<VideoStabilizationMode> stabilization = const [
+    VideoStabilizationMode.off
+  ],
+  AutoFocusSystem autoFocus = AutoFocusSystem.phaseDetection,
 }) {
   return CameraDeviceFormat(
     photoWidth: width,
@@ -29,8 +31,8 @@ CameraDeviceFormat fmt({
 CameraDeviceInfo device(List<CameraDeviceFormat> formats) => CameraDeviceInfo(
       id: 'back',
       name: 'Back Camera',
-      position: 1,
-      lensType: 1,
+      position: CameraPosition.back,
+      lensType: CameraLensType.wideAngle,
       sensorOrientation: 90,
       minZoom: 1,
       maxZoom: 8,
@@ -116,19 +118,19 @@ void main() {
 
   group('FormatResolver priority ordering', () {
     // Two formats, each satisfies exactly one of two competing constraints.
-    final hdrOnly = fmt(videoHdr: true, stabilization: ['off']);
-    final stabOnly = fmt(videoHdr: false, stabilization: ['off', 'cinematic']);
+    final hdrOnly = fmt(videoHdr: true, stabilization: [VideoStabilizationMode.off]);
+    final stabOnly = fmt(videoHdr: false, stabilization: [VideoStabilizationMode.off, VideoStabilizationMode.cinematic]);
     final dev = device([hdrOnly, stabOnly]);
 
     test('higher-priority constraint (listed first) wins', () {
       final hdrFirst = FormatResolver.resolve(dev, const [
         VideoHdrConstraint(true),
-        VideoStabilizationConstraint('cinematic'),
+        VideoStabilizationConstraint(VideoStabilizationMode.cinematic),
       ]);
       expect(hdrFirst, same(hdrOnly));
 
       final stabFirst = FormatResolver.resolve(dev, const [
-        VideoStabilizationConstraint('cinematic'),
+        VideoStabilizationConstraint(VideoStabilizationMode.cinematic),
         VideoHdrConstraint(true),
       ]);
       expect(stabFirst, same(stabOnly));

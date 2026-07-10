@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
+import 'package:nitro_camera/debug.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../gallery/ui/media_viewer_screen.dart';

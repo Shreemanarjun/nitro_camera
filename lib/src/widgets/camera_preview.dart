@@ -17,8 +17,11 @@ enum PreviewMode {
   /// Renders using Flutter's [Texture] widget. Best for performance and layering.
   texture,
 
-  /// Renders using a native [AndroidView] or [UiKitView]. Uses hardware overlays
-  /// for better battery efficiency but harder to layer Flutter widgets on top.
+  /// Renders using a native [AndroidView]. Uses hardware overlays for better
+  /// battery efficiency but harder to layer Flutter widgets on top.
+  ///
+  /// **Android only** — no iOS platform view is registered, so on other
+  /// platforms this falls back to [texture].
   platformView,
 
   /// Renders using [Texture] but wrapped in an Impeller-optimized fragment shader.
@@ -60,8 +63,15 @@ class CameraPreview extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
+        // Platform views only exist on Android — elsewhere fall back to the
+        // Texture path instead of building an AndroidView that renders nothing.
+        final effectiveMode = (mode == PreviewMode.platformView &&
+                defaultTargetPlatform != TargetPlatform.android)
+            ? PreviewMode.texture
+            : mode;
+
         Widget preview;
-        switch (mode) {
+        switch (effectiveMode) {
           case PreviewMode.platformView:
             // Plain AndroidView + a TextureView-backed native view: Flutter
             // composites it via the Texture Layer path — correct aspect and
@@ -172,14 +182,17 @@ class PinchToZoomDetector extends StatefulWidget {
     super.key,
     required this.controller,
     required this.child,
-    this.minZoom = 1.0,
-    this.maxZoom = 8.0,
+    this.minZoom,
+    this.maxZoom,
   });
 
   final CameraController controller;
   final Widget child;
-  final double minZoom;
-  final double maxZoom;
+
+  /// Zoom clamp overrides. Default to the device's own
+  /// [CameraDeviceInfo.minZoom] / [CameraDeviceInfo.maxZoom] range.
+  final double? minZoom;
+  final double? maxZoom;
 
   @override
   State<PinchToZoomDetector> createState() => _PinchToZoomDetectorState();
@@ -193,9 +206,10 @@ class _PinchToZoomDetectorState extends State<PinchToZoomDetector> {
     return GestureDetector(
       onScaleStart: (_) => _baseZoom = widget.controller.zoom,
       onScaleUpdate: (details) {
+        final device = widget.controller.device;
         final newZoom = (_baseZoom * details.scale).clamp(
-          widget.minZoom,
-          widget.maxZoom,
+          widget.minZoom ?? device.minZoom,
+          widget.maxZoom ?? device.maxZoom,
         );
         widget.controller.setZoom(newZoom);
       },

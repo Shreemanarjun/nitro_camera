@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart' show internal;
+
 import '../nitro_camera.native.dart';
 
 /// The photo file container written by a capture.
@@ -46,6 +48,7 @@ class PhotoCaptureOptions {
   });
 
   /// Projects onto the FFI struct.
+  @internal
   PhotoOptions toNative() => PhotoOptions(
         flash: flash.nativeValue,
         qualityPrioritization: quality.nativeValue,

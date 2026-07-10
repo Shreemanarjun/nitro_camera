@@ -1,6 +1,6 @@
 name: nitro_camera
 description: "A new Flutter FFI plugin project."
-version: 0.0.1
+version: 0.1.0
 homepage:
 
 environment:
@@ -10,7 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  nitro: ^0.5.6
+  meta: ^1.12.0
+  nitro: ^0.5.7
   plugin_platform_interface: ^2.0.2
   zxing_lib: ^1.1.4
 
@@ -18,8 +19,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  build_runner: ^2.4.0
-  nitro_generator: ^0.5.6
+  build_runner: ^2.15.1
+  nitro_generator: ^0.5.7
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

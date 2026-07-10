@@ -264,8 +264,8 @@ void main() {
   group('ProStrip in TrayLayer', () {
     setUp(() {
       cameraStore.devices.value = [
-        fakeDevice(id: 'back-wide', lensType: 1, focalLength: 5.0),
-        fakeDevice(id: 'front-1', position: 0, focalLength: 3.0),
+        fakeDevice(id: 'back-wide', lensType: CameraLensType.wideAngle, focalLength: 5.0),
+        fakeDevice(id: 'front-1', position: CameraPosition.front, focalLength: 3.0),
       ];
       cameraStore.currentDevice.value = cameraStore.devices.value.first;
     });

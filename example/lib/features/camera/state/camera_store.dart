@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
+import 'package:nitro_camera/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
@@ -301,7 +302,7 @@ class CameraStore {
       }
     });
 
-    reapplyCurrentSettings();
+    unawaited(reapplyCurrentSettings());
   }
 
   /// Called by `CameraView.onClosing` — drop the (soon-disposed) controller.
@@ -323,26 +324,36 @@ class CameraStore {
 
   /// Re-applies every live setting to a freshly-opened session (needed after a
   /// device switch, which creates a brand-new native session).
-  void reapplyCurrentSettings() {
+  ///
+  /// ONE atomic native `configure()` instead of ~13 serialized FFI setters —
+  /// each setter is its own boundary crossing and native dispatch, and the
+  /// whole storm ran on every session-ready. The controller's declarative
+  /// diff path applies only what changed (and never reopens: only live fields
+  /// differ from the freshly-seeded configuration).
+  Future<void> reapplyCurrentSettings() async {
     final ctrl = activeController.value;
     if (ctrl == null || !ctrl.isInitialized) return;
-    // Native setters are already capability-guarded, but wrap defensively so a
-    // single unsupported control on an odd device can never abort session start.
+    // Native config is capability-guarded, but wrap defensively so a single
+    // unsupported control on an odd device can never abort session start.
     try {
-      ctrl
-        ..setPixelFormat(PixelFormat.fromNative(pixelFormat.value))
-        ..setSamplingRate(samplingRate.value)
-        ..setVideoStabilization(VideoStabilizationMode.values[videoStabilization.value])
-        ..setFilterShader(filters[currentFilterName.value] ?? '')
-        ..setFlash(flashMode.value)
-        ..setZoom(currentZoom.value)
-        ..setExposure(exposure.value)
-        ..setWhiteBalance(whiteBalanceKelvin.value)
-        ..setHdr(enabled: hdrEnabled.value)
-        ..setLowLightBoost(enabled: lowLightBoost.value)
-        ..setAutoFocus(autoFocusMode.value)
-        ..setTargetOrientation(targetOrientation.value)
-        ..setFrameProcessing(enabled: _frameDeliveryNeeded);
+      final base = ctrl.configuration ?? const CameraConfiguration();
+      await ctrl.configure(base.copyWith(
+        zoom: currentZoom.value,
+        exposure: exposure.value,
+        flash: flashMode.value,
+        whiteBalanceKelvin: whiteBalanceKelvin.value,
+        videoHdr: hdrEnabled.value,
+        lowLightBoost: lowLightBoost.value,
+        videoStabilization:
+            VideoStabilizationMode.values[videoStabilization.value],
+        autoFocus: autoFocusMode.value,
+        enableFrameProcessing: _frameDeliveryNeeded,
+        pixelFormat: PixelFormat.fromNative(pixelFormat.value),
+        samplingRate: samplingRate.value,
+        filterShader: filters[currentFilterName.value] ?? '',
+      ));
+      // Not part of the declarative config struct (yet) — keep imperative.
+      ctrl.setTargetOrientation(targetOrientation.value);
       // Fresh native session — re-adopt the custom processor (new controller,
       // new frame subscription).
       final p = frameProcessor.value;
@@ -390,7 +401,7 @@ class CameraStore {
         final loaded = await CameraController.getAvailableCameraDevices();
         devices.value = List.from(loaded);
         final backCam =
-            loaded.where((d) => d.position == 1).firstOrNull ?? loaded.firstOrNull;
+            loaded.where((d) => d.isBackCamera).firstOrNull ?? loaded.firstOrNull;
         if (backCam != null && currentDevice.value == null) {
           await selectDevice(backCam);
         }
@@ -627,7 +638,8 @@ class CameraStore {
         final path = result.path;
         final ok = path.isNotEmpty && File(path).existsSync() && result.fileSize > 0;
         if (ok) {
-          _onRecordingFinished(path);
+          _onRecordingFinished(path,
+              duration: Duration(milliseconds: result.durationMs));
         } else {
           _recordingTimer?.cancel();
           _recordingTimer = null;
@@ -676,18 +688,23 @@ class CameraStore {
 
   /// Shared finalisation for a completed recording (manual stop or native
   /// maxDuration/maxFileSize auto-stop).
-  void _onRecordingFinished(String path) {
+  void _onRecordingFinished(String path, {Duration? duration}) {
     _recordingTimer?.cancel();
     _recordingTimer = null;
     batch(() {
       isRecording.value = false;
       recordingDuration.value = 0;
     });
-    unawaited(_finishVideo(path));
+    unawaited(_finishVideo(path, duration: duration));
   }
 
-  Future<void> _finishVideo(String path) async {
+  Future<void> _finishVideo(String path, {Duration? duration}) async {
     final storedPath = await _persistCapture(path, isVideo: true);
+    // Seed the gallery's duration cache from the recorder result so the tile
+    // never has to probe the file (the probe was the iOS 26 crash path).
+    if (duration != null && duration > Duration.zero) {
+      unawaited(MediaServices.thumbnails.primeDuration(storedPath, duration));
+    }
     batch(() {
       lastCapturedPath.value = storedPath;
       isLastCapturedVideo.value = true;

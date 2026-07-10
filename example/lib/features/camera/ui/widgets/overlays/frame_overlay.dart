@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
+import 'package:nitro_camera/native.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';

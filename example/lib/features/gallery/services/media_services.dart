@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:gal/gal.dart';
 import 'package:get_thumbnail_video/index.dart';
 import 'package:get_thumbnail_video/video_thumbnail.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
@@ -38,6 +37,11 @@ abstract class VideoThumbnails {
 
   /// Cached clip duration (probed once, persisted as a `.dur` sidecar).
   Future<Duration?> durationOf(String videoPath);
+
+  /// Seeds the duration cache for a freshly-recorded clip whose length is
+  /// already known (from the recorder's result) — so [durationOf] never has
+  /// to probe the file at all.
+  Future<void> primeDuration(String videoPath, Duration duration);
 
   /// One-off scrub-preview frame at [position] (small JPEG, no caching).
   Future<Uint8List?> frameAt(String videoPath, Duration position);
@@ -99,19 +103,23 @@ class NativeVideoThumbnails implements VideoThumbnails {
     }
   }
 
-  Future<Duration?> _probeDuration(String videoPath) async {
-    final player = Player();
+  @override
+  Future<void> primeDuration(String videoPath, Duration duration) async {
+    if (duration <= Duration.zero) return;
+    _durations[videoPath] = duration;
     try {
-      await player.open(Media(videoPath), play: false);
-      return await player.stream.duration
-          .firstWhere((d) => d > Duration.zero)
-          .timeout(const Duration(seconds: 5));
-    } catch (_) {
-      return null;
-    } finally {
-      await player.dispose();
+      final sidecar = await _thumbFile(videoPath, '.dur');
+      await sidecar.writeAsString('${duration.inMilliseconds}', flush: true);
+    } catch (e) {
+      debugPrint('Duration sidecar write failed for $videoPath: $e');
     }
   }
+
+  // Pure-Dart MP4/MOV duration read (moov→mvhd box). Spinning up a media_kit
+  // Player for a metadata probe crashes on iOS 26 (see
+  // docs/PERF_MEMORY_ASYNC_PLAN.md, item 0) — and every capture path also
+  // primes the sidecar, so this only runs for pre-existing files.
+  Future<Duration?> _probeDuration(String videoPath) => probeMp4Duration(videoPath);
 
   @override
   Future<Uint8List?> frameAt(String videoPath, Duration position) async {
@@ -139,6 +147,89 @@ class NativeVideoThumbnails implements VideoThumbnails {
     }
   }
 }
+
+// ── Pure-Dart MP4/MOV duration probe ────────────────────────────────────────
+//
+// Walks the ISO-BMFF box tree with seeks (no full read — moov-at-end files
+// stay cheap) to moov→mvhd and computes duration/timescale. Handles 32- and
+// 64-bit box sizes and mvhd versions 0/1. Returns null for anything it does
+// not understand.
+
+/// Reads an MP4/MOV file's duration from its container header.
+Future<Duration?> probeMp4Duration(String path) async {
+  RandomAccessFile? f;
+  try {
+    f = await File(path).open();
+    return await _scanBoxes(f, 0, await f.length(), inMoov: false);
+  } catch (_) {
+    return null;
+  } finally {
+    await f?.close();
+  }
+}
+
+Future<Duration?> _scanBoxes(
+  RandomAccessFile f,
+  int start,
+  int end, {
+  required bool inMoov,
+}) async {
+  var offset = start;
+  while (offset + 8 <= end) {
+    await f.setPosition(offset);
+    final header = await f.read(16);
+    if (header.length < 8) return null;
+    var size = _be32(header, 0);
+    final type = String.fromCharCodes(header.sublist(4, 8));
+    var headerLen = 8;
+    if (size == 1) {
+      // 64-bit "largesize" box.
+      if (header.length < 16) return null;
+      size = _be64(header, 8);
+      headerLen = 16;
+    } else if (size == 0) {
+      size = end - offset; // box extends to the end of the enclosing scope
+    }
+    if (size < headerLen) return null; // corrupt — would loop forever
+    if (!inMoov && type == 'moov') {
+      final d =
+          await _scanBoxes(f, offset + headerLen, offset + size, inMoov: true);
+      if (d != null) return d;
+    } else if (inMoov && type == 'mvhd') {
+      return _parseMvhd(f, offset + headerLen, offset + size);
+    }
+    offset += size;
+  }
+  return null;
+}
+
+Future<Duration?> _parseMvhd(RandomAccessFile f, int start, int end) async {
+  await f.setPosition(start);
+  final len = end - start;
+  final b = await f.read(len < 32 ? len : 32);
+  if (b.isEmpty) return null;
+  final version = b[0];
+  final int timescale;
+  final int duration;
+  if (version == 1) {
+    // version+flags(4) creation(8) modification(8) timescale(4) duration(8)
+    if (b.length < 32) return null;
+    timescale = _be32(b, 20);
+    duration = _be64(b, 24);
+  } else {
+    // version+flags(4) creation(4) modification(4) timescale(4) duration(4)
+    if (b.length < 20) return null;
+    timescale = _be32(b, 12);
+    duration = _be32(b, 16);
+    if (duration == 0xFFFFFFFF) return null; // "unknown" sentinel
+  }
+  if (timescale <= 0 || duration <= 0) return null;
+  return Duration(microseconds: (duration * 1000000) ~/ timescale);
+}
+
+int _be32(List<int> b, int o) =>
+    (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
+int _be64(List<int> b, int o) => (_be32(b, o) << 32) | _be32(b, o + 4);
 
 // ── System gallery (Photos / MediaStore) ────────────────────────────────────
 

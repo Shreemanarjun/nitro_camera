@@ -52,6 +52,7 @@ class OrientationManager {
     if (_started) return;
     _started = true;
     _sub = _native.eventStream.listen((e) {
+      if (!CameraSessionEvent.isKnownType(e)) return;
       final evt = CameraSessionEvent.fromNative(e);
       final deg = evt.orientationDegrees;
       if (deg == null) return;
@@ -113,6 +114,7 @@ class CameraDevicesObserver {
     if (_started) return;
     _started = true;
     _sub = _native.eventStream.listen((e) {
+      if (!CameraSessionEvent.isKnownType(e)) return;
       final evt = CameraSessionEvent.fromNative(e);
       if (evt.type != CameraEventType.deviceConnected &&
           evt.type != CameraEventType.deviceDisconnected) {

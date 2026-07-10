@@ -222,7 +222,7 @@ class _CameraViewState extends State<CameraView> {
     _eventSub = controller.events.listen((e) {
       widget.onEvent?.call(e);
       if (e.isError) {
-        final err = StateError(e.message.isEmpty ? 'camera error' : e.message);
+        final err = SessionException.nativeError(e.message);
         // An error EVENT while a live controller is still streaming is
         // recoverable/transient (heavy-format transitions, e.g. 4K, emit a
         // generic AVFoundation error that the session survives) — replacing a

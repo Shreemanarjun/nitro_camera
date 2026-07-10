@@ -1,5 +1,84 @@
 import 'dart:convert';
 
+import 'camera_exception.dart';
+
+import '../nitro_camera.native.dart'
+    show CameraPosition, CameraLensType, VideoStabilizationMode;
+
+export '../nitro_camera.native.dart'
+    show CameraPosition, CameraLensType, VideoStabilizationMode;
+
+/// Camera2 `INFO_SUPPORTED_HARDWARE_LEVEL` tiers (always [full] on iOS).
+enum HardwareLevel {
+  legacy('legacy'),
+  limited('limited'),
+  full('full');
+
+  /// The JSON wire value (same string as vision-camera).
+  final String value;
+  const HardwareLevel(this.value);
+
+  static HardwareLevel fromValue(String? v) => values.firstWhere(
+        (e) => e.value == v,
+        orElse: () => HardwareLevel.full,
+      );
+}
+
+/// The auto-focus system of a capture format.
+enum AutoFocusSystem {
+  none('none'),
+  contrastDetection('contrast-detection'),
+  phaseDetection('phase-detection');
+
+  /// The JSON wire value (same string as vision-camera).
+  final String value;
+  const AutoFocusSystem(this.value);
+
+  static AutoFocusSystem fromValue(String? v) => values.firstWhere(
+        (e) => e.value == v,
+        orElse: () => AutoFocusSystem.none,
+      );
+}
+
+/// The physical lens types backing a (possibly logical) camera device.
+/// Wire values match vision-camera's `PhysicalCameraDeviceType`.
+enum PhysicalDeviceType {
+  ultraWideAngleCamera('ultra-wide-angle-camera'),
+  wideAngleCamera('wide-angle-camera'),
+  telephotoCamera('telephoto-camera');
+
+  final String value;
+  const PhysicalDeviceType(this.value);
+
+  static PhysicalDeviceType? tryFromValue(String v) {
+    for (final e in values) {
+      if (e.value == v) return e;
+    }
+    return null;
+  }
+}
+
+/// Vendor camera extensions (Android `CameraExtensionCharacteristics`,
+/// API 31+; always absent on iOS). Query-only for now — extension capture
+/// sessions are a planned feature.
+enum CameraExtension {
+  auto('auto'),
+  faceRetouch('face-retouch'),
+  bokeh('bokeh'),
+  hdr('hdr'),
+  night('night');
+
+  final String value;
+  const CameraExtension(this.value);
+
+  static CameraExtension? tryFromValue(String v) {
+    for (final e in values) {
+      if (e.value == v) return e;
+    }
+    return null;
+  }
+}
+
 /// Vision-camera-compatible camera device info, parsed from the native JSON.
 ///
 /// Obtain via [CameraController.getAvailableCameraDevices].
@@ -7,11 +86,11 @@ class CameraDeviceInfo {
   final String id;
   final String name;
 
-  /// 0 = front, 1 = back, 2 = external
-  final int position;
+  /// Which way the camera faces.
+  final CameraPosition position;
 
-  /// 0 = unknown, 1 = wide-angle, 2 = ultra-wide, 3 = telephoto
-  final int lensType;
+  /// The lens kind (wide / ultra-wide / telephoto) of this device.
+  final CameraLensType lensType;
 
   /// Degrees: 0 / 90 / 180 / 270
   final int sensorOrientation;
@@ -44,16 +123,14 @@ class CameraDeviceInfo {
   final bool supportsRawCapture;
   final bool supportsFocus;
 
-  /// "legacy" | "limited" | "full"
-  final String hardwareLevel;
+  final HardwareLevel hardwareLevel;
 
-  /// Identifiers of the underlying physical cameras (e.g. "wide-angle-camera").
-  final List<String> physicalDevices;
+  /// The underlying physical lenses (one entry for a plain camera; the
+  /// constituent lenses for a logical multi-cam device).
+  final List<PhysicalDeviceType> physicalDevices;
 
-  /// Vendor camera extensions available on this device (API 31+):
-  /// "night" | "hdr" | "bokeh" | "face-retouch" | "auto". Query-only for now
-  /// (extension capture sessions are a planned feature).
-  final List<String> extensions;
+  /// Vendor camera extensions available on this device (API 31+).
+  final List<CameraExtension> extensions;
 
   final double focalLength;
   final double aperture;
@@ -81,7 +158,7 @@ class CameraDeviceInfo {
     this.supportsLowLightBoost = false,
     this.supportsRawCapture = false,
     this.supportsFocus = true,
-    this.hardwareLevel = 'full',
+    this.hardwareLevel = HardwareLevel.full,
     this.physicalDevices = const [],
     this.extensions = const [],
     this.formats = const [],
@@ -89,17 +166,40 @@ class CameraDeviceInfo {
     this.aperture = 1.8,
   });
 
+  // Unknown wire indices (native/plugin version skew) parse to a safe default
+  // instead of a RangeError.
+  static CameraPosition _positionFrom(int i) =>
+      (i >= 0 && i < CameraPosition.values.length)
+          ? CameraPosition.values[i]
+          : CameraPosition.external;
+
+  static CameraLensType _lensTypeFrom(int i) =>
+      (i >= 0 && i < CameraLensType.values.length)
+          ? CameraLensType.values[i]
+          : CameraLensType.unknown;
+
   factory CameraDeviceInfo.fromJson(Map<String, dynamic> json) {
     final fmts = (json['formats'] as List? ?? [])
         .cast<Map<String, dynamic>>()
         .map(CameraDeviceFormat.fromJson)
         .toList();
-    final physical = (json['physicalDevices'] as List? ?? []).cast<String>();
+    // Unknown lens/extension wire strings are skipped, not errors — a newer
+    // native layer may report kinds this Dart side doesn't know yet.
+    final physical = (json['physicalDevices'] as List? ?? [])
+        .cast<String>()
+        .map(PhysicalDeviceType.tryFromValue)
+        .nonNulls
+        .toList();
+    final extensions = (json['extensions'] as List? ?? [])
+        .cast<String>()
+        .map(CameraExtension.tryFromValue)
+        .nonNulls
+        .toList();
     return CameraDeviceInfo(
       id:                  json['id'] as String,
       name:                json['name'] as String,
-      position:            (json['position'] as num).toInt(),
-      lensType:            (json['lensType'] as num).toInt(),
+      position:            _positionFrom((json['position'] as num).toInt()),
+      lensType:            _lensTypeFrom((json['lensType'] as num).toInt()),
       sensorOrientation:   (json['sensorOrientation'] as num).toInt(),
       minZoom:             (json['minZoom'] as num).toDouble(),
       maxZoom:             (json['maxZoom'] as num).toDouble(),
@@ -115,9 +215,9 @@ class CameraDeviceInfo {
       supportsLowLightBoost: json['supportsLowLightBoost'] == true,
       supportsRawCapture:  json['supportsRawCapture'] == true,
       supportsFocus:       json['supportsFocus'] != false,
-      hardwareLevel:       json['hardwareLevel'] as String? ?? 'full',
+      hardwareLevel:       HardwareLevel.fromValue(json['hardwareLevel'] as String?),
       physicalDevices:     physical,
-      extensions:          (json['extensions'] as List? ?? []).cast<String>(),
+      extensions:          extensions,
       formats:             fmts,
       focalLength:         (json['focalLength'] as num? ?? 3.5).toDouble(),
       aperture:            (json['aperture'] as num? ?? 1.8).toDouble(),
@@ -125,20 +225,24 @@ class CameraDeviceInfo {
   }
 
   /// Parse a JSON array string returned by [NitroCamera.getAvailableCameraDevicesJson].
+  ///
+  /// Throws a [SessionException] (`session/malformed-payload`) on a malformed
+  /// payload — an empty list always means "no cameras", never a swallowed
+  /// parse error.
   static List<CameraDeviceInfo> listFromJson(String jsonStr) {
     try {
       final list = jsonDecode(jsonStr) as List;
       return list.cast<Map<String, dynamic>>().map(CameraDeviceInfo.fromJson).toList();
-    } catch (_) {
-      return [];
+    } catch (e) {
+      throw SessionException.malformedPayload('camera-device', e);
     }
   }
 
-  /// Convenience: back-facing cameras sorted by descending zoom (wide → tele).
-  bool get isBackCamera => position == 1;
+  /// Convenience: whether this device faces away from the user.
+  bool get isBackCamera => position == CameraPosition.back;
 
-  /// Convenience: front-facing camera.
-  bool get isFrontCamera => position == 0;
+  /// Convenience: whether this device faces the user.
+  bool get isFrontCamera => position == CameraPosition.front;
 
   @override
   String toString() => 'CameraDeviceInfo($id, $name)';
@@ -164,11 +268,11 @@ class CameraDeviceFormat {
   final bool supportsPhotoHdr;
   final bool supportsDepthCapture;
 
-  /// "none" | "contrast-detection" | "phase-detection"
-  final String autoFocusSystem;
+  final AutoFocusSystem autoFocusSystem;
 
-  /// e.g. ["off", "standard", "cinematic"]
-  final List<String> videoStabilizationModes;
+  /// Which stabilization modes this format supports (always contains
+  /// [VideoStabilizationMode.off]).
+  final List<VideoStabilizationMode> videoStabilizationModes;
 
   const CameraDeviceFormat({
     required this.photoWidth,
@@ -183,12 +287,25 @@ class CameraDeviceFormat {
     this.supportsVideoHdr = false,
     this.supportsPhotoHdr = false,
     this.supportsDepthCapture = false,
-    this.autoFocusSystem = 'none',
-    this.videoStabilizationModes = const ['off'],
+    this.autoFocusSystem = AutoFocusSystem.none,
+    this.videoStabilizationModes = const [VideoStabilizationMode.off],
   });
 
+  // Wire strings for VideoStabilizationMode (same as vision-camera).
+  static const _stabilizationValues = {
+    'off': VideoStabilizationMode.off,
+    'standard': VideoStabilizationMode.standard,
+    'cinematic': VideoStabilizationMode.cinematic,
+    'cinematic-extended': VideoStabilizationMode.cinematicExtended,
+    'auto': VideoStabilizationMode.auto,
+  };
+
   factory CameraDeviceFormat.fromJson(Map<String, dynamic> json) {
-    final modes = (json['videoStabilizationModes'] as List? ?? ['off']).cast<String>();
+    final modes = (json['videoStabilizationModes'] as List? ?? ['off'])
+        .cast<String>()
+        .map((s) => _stabilizationValues[s])
+        .nonNulls
+        .toList();
     return CameraDeviceFormat(
       photoWidth:              (json['photoWidth'] as num).toInt(),
       photoHeight:             (json['photoHeight'] as num).toInt(),
@@ -202,12 +319,13 @@ class CameraDeviceFormat {
       supportsVideoHdr:        json['supportsVideoHdr'] == true,
       supportsPhotoHdr:        json['supportsPhotoHdr'] == true,
       supportsDepthCapture:    json['supportsDepthCapture'] == true,
-      autoFocusSystem:         json['autoFocusSystem'] as String? ?? 'none',
-      videoStabilizationModes: modes,
+      autoFocusSystem:
+          AutoFocusSystem.fromValue(json['autoFocusSystem'] as String?),
+      videoStabilizationModes:
+          modes.isEmpty ? const [VideoStabilizationMode.off] : modes,
     );
   }
 
-  @override
   @override
   String toString() => 'CameraDeviceFormat(${videoWidth}x$videoHeight@${maxFps}fps)';
 }

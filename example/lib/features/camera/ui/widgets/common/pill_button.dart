@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nitro_camera/nitro_camera.dart';
+import 'package:nitro_camera/native.dart';
 
 /// Small glassy pill button (SETTINGS entry point etc.).
 class PillButton extends StatelessWidget {

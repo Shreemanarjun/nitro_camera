@@ -16,7 +16,7 @@ class SensorTray extends StatelessWidget {
     if (cams.isEmpty) return;
     // Prefer the 1.0× baseline lens of the chosen side.
     final baseline = cams.firstWhere(
-      (d) => d.lensType == 1,
+      (d) => d.lensType == CameraLensType.wideAngle,
       orElse: () => cams.first,
     );
     cameraStore.selectDevice(baseline);
@@ -29,13 +29,13 @@ class SensorTray extends StatelessWidget {
       final currentDevice = cameraStore.currentDevice.value;
       if (devices.isEmpty) return const SizedBox.shrink();
 
-      final backCameras = devices.where((d) => d.position == 1).toList();
-      final frontCameras = devices.where((d) => d.position == 0).toList();
-      final isFront = currentDevice?.position == 0;
+      final backCameras = devices.where((d) => d.isBackCamera).toList();
+      final frontCameras = devices.where((d) => d.isFrontCamera).toList();
+      final isFront = currentDevice?.isFrontCamera == true;
       final activeCameras = (isFront ? frontCameras : backCameras);
 
       final baselineLens = backCameras.firstWhere(
-        (d) => d.lensType == 1,
+        (d) => d.lensType == CameraLensType.wideAngle,
         orElse: () =>
             backCameras.isNotEmpty ? backCameras.first : devices.first,
       );
@@ -79,7 +79,7 @@ class SensorTray extends StatelessWidget {
                           !(digital2xActive && d.id == baselineLens.id);
 
                       String label;
-                      if (d.position == 0) {
+                      if (d.isFrontCamera) {
                         // Front side: distinguish multiple front lenses if present.
                         label = frontCameras.length > 1
                             ? "${(d.focalLength / (frontCameras.first.focalLength)).toStringAsFixed(1)}×"
@@ -93,7 +93,7 @@ class SensorTray extends StatelessWidget {
 
                       return _LensChip(
                         label: label,
-                        tooltip: d.position == 0
+                        tooltip: d.isFrontCamera
                             ? 'Selfie camera'
                             : 'Lens $label',
                         selected: isSelected,

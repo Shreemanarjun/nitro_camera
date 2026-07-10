@@ -25,7 +25,7 @@ class SessionPanel extends StatelessWidget {
                 ? '—'
                 : '${resolved.videoWidth}×${resolved.videoHeight} @ ${resolved.selectedFps}fps'
                     ' · ${resolved.pixelFormat.name}'
-                    ' · af:${resolved.autoFocusSystem}'
+                    ' · af:${resolved.autoFocusSystem.value}'
                     '${resolved.videoHdrEnabled ? ' · HDR' : ''}',
             style: _mono,
           ),

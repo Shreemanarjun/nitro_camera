@@ -5,21 +5,10 @@ library;
 
 import '../models/camera_device.dart';
 
-/// The physical lens types backing a (possibly logical) camera device.
-/// String values match vision-camera's `PhysicalCameraDeviceType`.
-enum PhysicalDeviceType {
-  ultraWideAngleCamera('ultra-wide-angle-camera'),
-  wideAngleCamera('wide-angle-camera'),
-  telephotoCamera('telephoto-camera');
-
-  final String value;
-  const PhysicalDeviceType(this.value);
-}
-
 /// Picks the best [CameraDeviceInfo] from [devices], mirroring vision-camera's
 /// `getCameraDevice` ranking:
 ///
-///  * a `full` hardware level always beats `limited`/`legacy` (+4);
+///  * a [HardwareLevel.full] device always beats limited/legacy (+4);
 ///  * unless the caller *explicitly* asks for non-wide-angle physical devices,
 ///    a device containing the wide-angle lens is preferred (+2 — the sensible
 ///    default lens);
@@ -28,12 +17,11 @@ enum PhysicalDeviceType {
 ///    match beats a do-it-all logical camera, and a logical triple camera wins
 ///    only when all its lenses were asked for.
 ///
-/// [position] pre-filters by facing (a [CameraDeviceInfo.position] value:
-/// 0 front / 1 back / 2 external) — the equivalent of `useCameraDevice`'s
+/// [position] pre-filters by facing — the equivalent of `useCameraDevice`'s
 /// positional argument. Returns `null` when no device matches.
 CameraDeviceInfo? selectCameraDevice(
   List<CameraDeviceInfo> devices, {
-  int? position,
+  CameraPosition? position,
   List<PhysicalDeviceType>? physicalDevices,
 }) {
   var candidates = devices;
@@ -42,16 +30,15 @@ CameraDeviceInfo? selectCameraDevice(
   }
   if (candidates.isEmpty) return null;
 
-  final wanted = physicalDevices?.map((t) => t.value).toSet();
-  final explicitlyWantsNonWide = wanted != null &&
-      !wanted.contains(PhysicalDeviceType.wideAngleCamera.value);
+  final wanted = physicalDevices?.toSet();
+  final explicitlyWantsNonWide =
+      wanted != null && !wanted.contains(PhysicalDeviceType.wideAngleCamera);
 
   int score(CameraDeviceInfo d) {
     var points = 0;
-    if (d.hardwareLevel == 'full') points += 4;
+    if (d.hardwareLevel == HardwareLevel.full) points += 4;
     if (!explicitlyWantsNonWide &&
-        d.physicalDevices
-            .contains(PhysicalDeviceType.wideAngleCamera.value)) {
+        d.physicalDevices.contains(PhysicalDeviceType.wideAngleCamera)) {
       points += 2;
     }
     if (wanted != null) {
@@ -68,27 +55,19 @@ CameraDeviceInfo? selectCameraDevice(
   return candidates.reduce((best, d) => score(d) > score(best) ? d : best);
 }
 
-/// Position filters for [CameraDeviceSelection] (`useCameraDevice`'s first
-/// argument). Values match [CameraDeviceInfo.position].
-abstract final class DevicePosition {
-  static const int front = 0;
-  static const int back = 1;
-  static const int external = 2;
-}
-
 /// Fluent selection sugar over a device list.
 extension CameraDeviceSelection on List<CameraDeviceInfo> {
   /// The best back camera (optionally restricted to [physicalDevices]).
   CameraDeviceInfo? backCamera({List<PhysicalDeviceType>? physicalDevices}) =>
       selectCameraDevice(this,
-          position: DevicePosition.back, physicalDevices: physicalDevices);
+          position: CameraPosition.back, physicalDevices: physicalDevices);
 
   /// The best front camera.
   CameraDeviceInfo? frontCamera({List<PhysicalDeviceType>? physicalDevices}) =>
       selectCameraDevice(this,
-          position: DevicePosition.front, physicalDevices: physicalDevices);
+          position: CameraPosition.front, physicalDevices: physicalDevices);
 
   /// The best external (USB) camera, if any.
   CameraDeviceInfo? externalCamera() =>
-      selectCameraDevice(this, position: DevicePosition.external);
+      selectCameraDevice(this, position: CameraPosition.external);
 }
