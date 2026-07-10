@@ -45,7 +45,7 @@ dependencies:
   path_provider: ^2.1.5
   zxing_lib: ^1.1.4
   signals: ^6.3.0
-  nitro: ^0.5.3
+  nitro: ^0.5.9
   signals_flutter: ^6.3.0
   # media_kit replaces video_player (video_player_avfoundation is CocoaPods-only
   # and is fragile under the SPM-based iOS build).

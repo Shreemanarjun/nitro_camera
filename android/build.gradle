@@ -22,7 +22,12 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    defaultConfig { minSdk = 24 }
+    defaultConfig {
+        minSdk = 24
+        // Ship keep rules to consuming apps so R8 never renames / strips /
+        // mis-optimises the JNI-referenced Nitro bridge + impl classes.
+        consumerProguardFiles "consumer-rules.pro"
+    }
 
     sourceSets {
         main {

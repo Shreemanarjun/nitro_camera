@@ -432,29 +432,28 @@ abstract class NitroCamera extends HybridObject {
 
   // ---- Photo capture ----
   //
-  // Capture methods stay @nitroAsync (isolate-pool dispatch). The
-  // @nitroNativeAsync migration is BLOCKED by a generator gap CONFIRMED on
-  // device (nitro_generator 0.5.7): the Dart unpack side supports record
-  // returns (posts/decodes a buffer pointer), but the generated Kotlin/Swift
-  // native-async TRAMPOLINE discards the record result and calls
-  // postNullToPort() — so Dart decodes null → "Null is not a subtype of int".
-  // The fix belongs in nitro_generator: the native-async trampoline must
-  // serialize a record/struct return to a malloc'd buffer and post its pointer
-  // (kInt64), not null. Until then capture methods use the working isolate pool.
+  // Capture methods use @nitroNativeAsync (zero-hop native dispatch, ~146µs vs
+  // the isolate pool's ~930µs). Two generator gaps that blocked this are now
+  // closed: 0.5.8 encodes record/struct returns (and decodes struct params) and
+  // posts the buffer pointer as kInt64 (was: discard + postNullToPort); 0.5.9
+  // adds the native-async ERROR channel — a thrown native exception is written
+  // to the error slot (reportNativeAsyncError) and re-thrown Dart-side as a
+  // HybridException, so failures propagate (e.g. startVideoRecording's bad-path
+  // error surfaces as a catchable RecorderException) instead of being swallowed.
 
-  @nitroAsync
+  @nitroNativeAsync
   Future<PhotoResult> takePhoto(int textureId);
 
   // ---- Video recording ----
 
-  @nitroAsync
+  @nitroNativeAsync
   Future<void> startVideoRecording(
     int textureId,
     String outputPath,
     RecordingOptions options,
   );
 
-  @nitroAsync
+  @nitroNativeAsync
   Future<RecordingResult> stopVideoRecording(int textureId);
 
   /// Pauses an active video recording without finalising the file.
@@ -506,7 +505,7 @@ abstract class NitroCamera extends HybridObject {
   /// pass and returns what was actually applied. The declarative analogue of the
   /// individual setters above — does NOT reopen the session (device/format/fps
   /// changes must go through [openCamera]).
-  @nitroAsync
+  @nitroNativeAsync
   Future<ResolvedConfig> configure(int textureId, CameraConfig config);
 
   /// Returns the live session state (running, fps, resolution, pixelFormat) as a
@@ -562,12 +561,12 @@ abstract class NitroCamera extends HybridObject {
   String getConcurrentCameraIdsJson();
 
   /// Captures a photo using explicit [options] (flash, quality, shutter sound).
-  @nitroAsync
+  @nitroNativeAsync
   Future<PhotoResult> takePhotoWithOptions(int textureId, PhotoOptions options);
 
   /// Captures the current preview frame as a fast JPEG snapshot (no full
   /// still-capture round-trip).
-  @nitroAsync
+  @nitroNativeAsync
   Future<PhotoResult> takeSnapshot(int textureId);
 
   /// Resets the native camera metadata caches and releases overall hardware locks.

@@ -9,11 +9,11 @@ import 'package:patrol/src/platform/contracts/contracts.dart';
 import 'package:test_api/src/backend/invoker.dart';
 
 // START: GENERATED TEST IMPORTS
+import 'api/recording_errors_test.dart' as api__recording_errors_test;
 import 'api/recording_controls_test.dart' as api__recording_controls_test;
-import 'api/capture_events_test.dart' as api__capture_events_test;
-import 'perf/back_to_back_capture_test.dart' as perf__back_to_back_capture_test;
-import 'api/photo_burst_test.dart' as api__photo_burst_test;
+import 'api/photo_variants_test.dart' as api__photo_variants_test;
 import 'api/session_configure_test.dart' as api__session_configure_test;
+import 'perf/snapshot_latency_test.dart' as perf__snapshot_latency_test;
 // END: GENERATED TEST IMPORTS
 
 Future<void> main() async {
@@ -76,11 +76,11 @@ Future<void> main() async {
   });
 
 // START: GENERATED TEST GROUPS
+  group('api.recording_errors_test', api__recording_errors_test.main);
   group('api.recording_controls_test', api__recording_controls_test.main);
-  group('api.capture_events_test', api__capture_events_test.main);
-  group('perf.back_to_back_capture_test', perf__back_to_back_capture_test.main);
-  group('api.photo_burst_test', api__photo_burst_test.main);
+  group('api.photo_variants_test', api__photo_variants_test.main);
   group('api.session_configure_test', api__session_configure_test.main);
+  group('perf.snapshot_latency_test', perf__snapshot_latency_test.main);
 // END: GENERATED TEST GROUPS
 
   final dartTestGroup = await testExplorationCompleter.future;
