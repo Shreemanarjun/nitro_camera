@@ -565,11 +565,22 @@ class CameraController extends ChangeNotifier {
   }) async {
     _requireInitialized();
     if (_isRecording) return;
-    await NitroCamera.instance.startVideoRecording(
-      _textureId!,
-      outputPath,
-      options ?? const RecordingOptions(),
-    );
+    try {
+      await NitroCamera.instance.startVideoRecording(
+        _textureId!,
+        outputPath,
+        options ?? const RecordingOptions(),
+      );
+    } on CameraException {
+      rethrow;
+    } catch (e) {
+      // A native recorder failure (e.g. an unsupported codec — no HEVC encoder
+      // — or a bad output path) surfaces as a bare FFI error. Wrap it in the
+      // typed hierarchy so callers can match on it (RecorderException) instead
+      // of a raw StateError. The session is unharmed; recording just didn't start.
+      throw RecorderException('recorder/start-failed',
+          'Failed to start recording: $e', cause: e);
+    }
     _isRecording = true;
     _isRecordingPaused = false;
     notifyListeners();

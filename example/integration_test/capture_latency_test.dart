@@ -1,9 +1,13 @@
 // On-device photo / video capture latency integration tests.
 //
-// Run on a connected device (camera + mic permission must be granted first —
-// on iOS accept the system dialogs on first launch; the boot helper waits up
-// to 90s for that):
+// Run on a connected device:
 //   cd example && flutter test integration_test/capture_latency_test.dart -d <device>
+//
+// Every test boots through the shared harness, which ASKS for camera/mic
+// permission via the app's own request flow when missing — accept the system
+// dialog on the device (the wait allows 90s). A grant persists across `-r`
+// reinstalls; run `integration_test/support/reset_permissions.sh <serial>` to
+// force the prompt again. The Patrol suite accepts the dialogs natively.
 //
 // The tests drive the real example app (CameraScreen + cameraStore) against
 // the real capture stack and assert that captures RETURN — and return fast:
@@ -19,92 +23,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:nitro/nitro.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
-import 'package:nitro_camera_example/features/camera/ui/camera_screen.dart';
 
-bool _runtimeInitialized = false;
+import 'support/harness.dart';
 
-/// Mirrors `main()`'s one-time runtime setup (safe to call once per process).
-void _ensureRuntime() {
-  if (_runtimeInitialized) return;
-  _runtimeInitialized = true;
-  MediaKit.ensureInitialized();
-  NitroConfig.instance.enable(
-    slowCallThresholdMs: 200,
-    level: NitroLogLevel.verbose,
-  );
-  NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
-}
-
-/// Pumps real frames until [condition] holds, failing after [timeout].
-Future<void> pumpUntil(
-  WidgetTester tester,
-  bool Function() condition, {
-  Duration timeout = const Duration(seconds: 10),
-  required String reason,
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) {
-      fail(
-        'Timed out after ${timeout.inSeconds}s waiting for: $reason '
-        '(status=${cameraStore.status.value}, '
-        'error=${cameraStore.errorMessage.value})',
-      );
-    }
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
-  await tester.pump();
-}
-
-/// Lets the app run (real time + frames) for [duration].
-Future<void> pumpFor(WidgetTester tester, Duration duration) async {
-  final deadline = DateTime.now().add(duration);
-  while (DateTime.now().isBefore(deadline)) {
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-  }
-}
-
-/// Mounts the example app (idempotent across tests — the camera keeps running
-/// between testWidgets bodies) and waits for a live preview session.
-Future<void> bootApp(WidgetTester tester) async {
-  _ensureRuntime();
-  await tester.pumpWidget(
-    const MaterialApp(debugShowCheckedModeBanner: false, home: CameraScreen()),
-  );
-  await pumpUntil(
-    tester,
-    () => cameraStore.cameraPermission.value != 0,
-    timeout: const Duration(seconds: 5),
-    reason: 'camera permission status resolved',
-  );
-  if (cameraStore.cameraPermission.value != 1) {
-    unawaited(cameraStore.grantPermission());
-    await pumpUntil(
-      tester,
-      () => cameraStore.cameraPermission.value == 1,
-      timeout: const Duration(seconds: 90),
-      reason:
-          'CAMERA permission granted (accept the system dialog on the '
-          'device on first launch)',
-    );
-  }
-  await pumpUntil(
-    tester,
-    () =>
-        cameraStore.status.value == CameraStatus.running &&
-        (cameraStore.activeController.value?.isInitialized ?? false),
-    timeout: const Duration(seconds: 10),
-    reason: 'camera preview running with a published controller after boot',
-  );
-}
 
 /// Awaits [run] while KEEPING FRAMES PUMPING, failing with [label] if it does
 /// not complete within [deadline]. Returns (result, elapsed).
@@ -159,18 +84,7 @@ void main() {
 
   // See camera_lifecycle_test.dart: filter the platform-driven SemanticsHandle
   // flake; every other exception still fails the test normally.
-  final defaultReporter = reportTestException;
-  reportTestException = (details, testDescription) {
-    final e = details.exception;
-    if (e is FlutterError &&
-        e.message.startsWith('A SemanticsHandle was active')) {
-      debugPrint(
-        'Ignored platform-driven SemanticsHandle flake in "$testDescription"',
-      );
-      return;
-    }
-    defaultReporter(details, testDescription);
-  };
+  installSemanticsFlakeFilter();
 
   testWidgets(
     '1. photo capture returns within 4s (x3, flash off, balanced)',

@@ -1156,14 +1156,27 @@ class CameraSession(
     fun pauseVideoRecording()  { videoOutput.pauseVideoRecording() }
     fun resumeVideoRecording() { videoOutput.resumeVideoRecording() }
     fun cancelVideoRecording() {
-        if (recordingViaSessionSurface != null) {
-            // Persistent path: restores the preview repeating request; the capture
-            // session stays as-is (no reconfiguration needed).
+        // Stop the recorder on whichever path is active, capturing the output
+        // path so the PARTIAL file can be discarded — cancel must not leave a
+        // file behind (vision-camera semantics; the Dart contract is
+        // "cancelRecording deletes the temporary file").
+        val result: RecordingResult = if (recordingViaSessionSurface != null) {
+            // Persistent path: restores the preview repeating request; the
+            // capture session stays as-is (no reconfiguration needed).
             stopVideoRecording()
-            return
+        } else {
+            glHandler.post { renderer.setRecordingSurface(null) }
+            val r = videoOutput.stopVideoRecording()
+            startPreview()
+            r
         }
-        glHandler.post { renderer.setRecordingSurface(null) }
-        videoOutput.stopVideoRecording()
-        startPreview()
+        if (result.path.isNotEmpty()) {
+            try {
+                val f = java.io.File(result.path)
+                if (f.exists()) f.delete()
+            } catch (e: Exception) {
+                Log.w("NitroCamera", "cancelVideoRecording: delete failed: ${e.message}")
+            }
+        }
     }
 }

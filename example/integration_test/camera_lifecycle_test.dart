@@ -1,113 +1,30 @@
 // On-device camera lifecycle integration tests.
 //
-// Run on a connected device (camera + mic permission must be granted first):
-//   adb shell pm grant dev.shreeman.nitro_camera_example android.permission.CAMERA
-//   adb shell pm grant dev.shreeman.nitro_camera_example android.permission.RECORD_AUDIO
+// Run on a connected device:
 //   cd example && flutter test integration_test/camera_lifecycle_test.dart -d <serial>
+//
+// Every test boots through the shared harness, which ASKS for camera/mic
+// permission via the app's own request flow when missing — accept the system
+// dialog on the device (the wait allows 90s). A grant from an earlier run
+// PERSISTS across `-r` reinstalls, so re-run
+// `integration_test/support/reset_permissions.sh <serial>` to see the prompt
+// again. The Patrol suite (patrol_test/) starts each test revoked (orchestrator
+// clearPackageData) and accepts the dialogs natively.
 //
 // The tests drive the real example app (CameraScreen + cameraStore) against
 // the real camera HAL, covering the session-lifecycle discipline:
 // boot-to-preview, rapid device switching, scanner/native-detector handover
 // and resolution reopen.
 
-import 'dart:async';
-import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:nitro/nitro.dart';
 
 import 'package:nitro_camera_example/features/camera/processors/luminance_processor.dart';
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
-import 'package:nitro_camera_example/features/camera/ui/camera_screen.dart';
 
-bool _runtimeInitialized = false;
+import 'support/harness.dart';
 
-/// Mirrors `main()`'s one-time runtime setup (safe to call once per process).
-void _ensureRuntime() {
-  if (_runtimeInitialized) return;
-  _runtimeInitialized = true;
-  MediaKit.ensureInitialized();
-  NitroConfig.instance.enable(
-    slowCallThresholdMs: 200,
-    level: NitroLogLevel.verbose,
-  );
-  NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
-}
-
-/// Pumps real frames until [condition] holds, failing after [timeout].
-Future<void> pumpUntil(
-  WidgetTester tester,
-  bool Function() condition, {
-  Duration timeout = const Duration(seconds: 10),
-  required String reason,
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) {
-      fail('Timed out after ${timeout.inSeconds}s waiting for: $reason '
-          '(status=${cameraStore.status.value}, '
-          'error=${cameraStore.errorMessage.value})');
-    }
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
-  await tester.pump();
-}
-
-/// Lets the app run (real time + frames) for [duration].
-Future<void> pumpFor(WidgetTester tester, Duration duration) async {
-  final deadline = DateTime.now().add(duration);
-  while (DateTime.now().isBefore(deadline)) {
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-  }
-}
-
-/// Mounts the example app (idempotent across tests — the camera keeps running
-/// between testWidgets bodies) and waits for a live preview session.
-Future<void> bootApp(WidgetTester tester) async {
-  _ensureRuntime();
-  await tester.pumpWidget(
-    const MaterialApp(debugShowCheckedModeBanner: false, home: CameraScreen()),
-  );
-  // Some OEMs (ColorOS) drop adb-granted runtime permissions on every
-  // reinstall and block `pm grant` from shell. When the permission is
-  // missing, request it through the app's own flow — the system dialog can
-  // then be accepted manually or by a host-side watcher that taps "Allow"
-  // (e.g. via `uiautomator dump` + `input tap`).
-  await pumpUntil(
-    tester,
-    () => cameraStore.cameraPermission.value != 0,
-    timeout: const Duration(seconds: 5),
-    reason: 'camera permission status resolved',
-  );
-  if (cameraStore.cameraPermission.value != 1) {
-    unawaited(cameraStore.grantPermission());
-    await pumpUntil(
-      tester,
-      () => cameraStore.cameraPermission.value == 1,
-      timeout: const Duration(seconds: 90),
-      reason: 'CAMERA permission granted (accept the system dialog on the '
-          'device, or pre-grant with: adb install -r -g <test-apk>)',
-    );
-  }
-  // Gate on the PUBLISHED controller too, not just the status signal: during
-  // a session settle/swap the status can read `running` while the fresh
-  // controller (and its reapply pass) hasn't landed yet — tests that install
-  // processors/settings during that window attach to the dying session and
-  // then race the self-healing re-attach.
-  await pumpUntil(
-    tester,
-    () =>
-        cameraStore.status.value == CameraStatus.running &&
-        (cameraStore.activeController.value?.isInitialized ?? false),
-    timeout: const Duration(seconds: 10),
-    reason: 'camera preview running with a published controller after boot',
-  );
-}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -121,17 +38,7 @@ void main() {
   // app under test creates semantics handles (semanticsEnabled: false below),
   // so that specific verifier failure is filtered here; every other exception
   // still fails the test normally.
-  final defaultReporter = reportTestException;
-  reportTestException = (details, testDescription) {
-    final e = details.exception;
-    if (e is FlutterError &&
-        e.message.startsWith('A SemanticsHandle was active')) {
-      debugPrint(
-          'Ignored platform-driven SemanticsHandle flake in "$testDescription"');
-      return;
-    }
-    defaultReporter(details, testDescription);
-  };
+  installSemanticsFlakeFilter();
 
   // semanticsEnabled: false on every test: the default per-test SemanticsHandle
   // races the pipeline owner's asynchronous semantics detach on real devices,

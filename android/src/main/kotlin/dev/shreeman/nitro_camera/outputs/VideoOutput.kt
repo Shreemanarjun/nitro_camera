@@ -33,6 +33,13 @@ class VideoOutput(
     // Video recording state
     private var mediaRecorder: MediaRecorder? = null
     private var recordingStartMs = 0L
+    // Pause bookkeeping: MediaRecorder.pause() stops writing frames, so the
+    // MEDIA duration excludes paused time — but a naive wall-clock
+    // (now - startMs) would count it. Track the accumulated pause span and
+    // subtract it so durationMs reflects recorded media (matching iOS, which
+    // shifts sample timestamps by its totalPauseOffset).
+    private var pausedAccumulatedMs = 0L
+    private var pauseStartMs = 0L
     private var recordingWidth = 0
     private var recordingHeight = 0
     private var recordingCodec = 0L
@@ -204,6 +211,8 @@ class VideoOutput(
         recordingFileType = 0L // MediaRecorder writes MPEG-4; .mov requests map to mp4 on Android.
         recordingFinishedReason = 0L
         recordingStartMs = System.currentTimeMillis()
+        pausedAccumulatedMs = 0L
+        pauseStartMs = 0L
         isRecording = true
         // getSurface() throws when a persistent input surface is set.
         return inputSurface ?: recorder.surface
@@ -215,7 +224,11 @@ class VideoOutput(
 
     fun pauseVideoRecording() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try { mediaRecorder?.pause() } catch (e: Exception) {
+            try {
+                mediaRecorder?.pause()
+                // Open a pause span (ignore a redundant pause while paused).
+                if (pauseStartMs == 0L) pauseStartMs = System.currentTimeMillis()
+            } catch (e: Exception) {
                 Log.w("NitroCamera", "pauseVideoRecording: ${e.message}")
             }
         }
@@ -223,7 +236,14 @@ class VideoOutput(
 
     fun resumeVideoRecording() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try { mediaRecorder?.resume() } catch (e: Exception) {
+            try {
+                mediaRecorder?.resume()
+                // Close the pause span, folding it into the accumulated total.
+                if (pauseStartMs > 0L) {
+                    pausedAccumulatedMs += System.currentTimeMillis() - pauseStartMs
+                    pauseStartMs = 0L
+                }
+            } catch (e: Exception) {
                 Log.w("NitroCamera", "resumeVideoRecording: ${e.message}")
             }
         }
@@ -250,7 +270,14 @@ class VideoOutput(
         }
 
         val path = recordingOutputPath
-        val duration = System.currentTimeMillis() - recordingStartMs
+        // Stopped while paused: close the open span first, then exclude ALL
+        // paused time so durationMs is the recorded-media length.
+        val now = System.currentTimeMillis()
+        if (pauseStartMs > 0L) {
+            pausedAccumulatedMs += now - pauseStartMs
+            pauseStartMs = 0L
+        }
+        val duration = (now - recordingStartMs - pausedAccumulatedMs).coerceAtLeast(0L)
         val file = File(path)
         val size = if (file.exists()) file.length() else 0L
 

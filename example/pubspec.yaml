@@ -64,6 +64,7 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  patrol: 4.7.0-dev.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -115,3 +116,11 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+patrol:
+  app_name: nitro_camera_example
+  test_directory: patrol_test
+  android:
+    package_name: dev.shreeman.nitro_camera_example
+  ios:
+    bundle_id: dev.shreeman.nitroCameraExample

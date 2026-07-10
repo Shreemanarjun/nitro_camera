@@ -28,6 +28,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Patrol (patrol.leancode.co): native automation runner for the
+        // on-device suites in patrol_test/.
+        testInstrumentationRunner = "pl.leancode.patrol.PatrolJUnitRunner"
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
+    }
+
+    testOptions {
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
 
     buildTypes {
@@ -35,6 +43,14 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+        debug {
+            // Patrol (patrol.leancode.co) runs the instrumentation against the
+            // DEBUG build — keep R8/ProGuard off so Patrol's classes are never
+            // stripped (ClassNotFoundException at runtime). These are already
+            // the debug defaults; set explicitly per the Patrol setup guide.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
@@ -48,4 +64,6 @@ dependencies {
     // declares them compileOnly — see docs/VISION_CAMERA_PARITY.md).
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    // Patrol's per-test isolation (pairs with ANDROIDX_TEST_ORCHESTRATOR above).
+    androidTestUtil("androidx.test:orchestrator:1.5.1")
 }
