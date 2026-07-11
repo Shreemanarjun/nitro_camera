@@ -287,13 +287,28 @@ public class CameraSession: NSObject {
         // the capture pool can be torn down (otherwise a reopened session leaks
         // its predecessor's buffers + pool).
         frameOutput.teardown()
+        // Drain the serial frame queue so any in-flight captureOutput has
+        // finished BEFORE we unregister the texture below. teardown() detaches
+        // the delegate + latches `closed`, but a frame already dispatched here
+        // could still be mid-flight; without this barrier it would call
+        // textureFrameAvailable(textureId) on a freed texture →
+        // EXC_BAD_ACCESS inside FlutterEngine on the 'frames' queue.
+        frameQueue.sync {}
         // Abort any in-flight recording so the writer doesn't outlive the
         // session, and fail its pending stop continuation.
         recorder.interrupt()
         // Resolve any in-flight photo continuation so its awaiting task
         // doesn't hang forever when the session is torn down mid-capture.
         photoOutput.cancelPending()
-        textureRegistry?.unregisterTexture(textureId)
+        // Unregister on the MAIN thread. register() runs on MainActor (openCamera),
+        // and Flutter's FlutterTextureRegistry must be mutated on the platform
+        // thread — unregistering from the FFI thread corrupts the registry, so a
+        // LATER textureFrameAvailable derefs freed state (EXC_BAD_ACCESS on the
+        // frames queue). The teardown()+frameQueue.sync above already stopped this
+        // session's own frames, so a deferred unregister is safe.
+        let reg = textureRegistry
+        let tid = textureId
+        DispatchQueue.main.async { reg?.unregisterTexture(tid) }
     }
 
     // MARK: - Camera controls
@@ -441,15 +456,32 @@ public class CameraSession: NSObject {
             guard let self = self,
                   let conn = self.frameOutput.output.connection(with: .video),
                   conn.isVideoStabilizationSupported else { return }
-            conn.preferredVideoStabilizationMode = (mode == 0) ? .off : .auto
+            // No-op guard: the configure() re-apply pass calls this with the
+            // current value, and re-assigning still reconfigures the connection
+            // (a visible preview hitch). Skip when it wouldn't change anything.
+            let target: AVCaptureVideoStabilizationMode = (mode == 0) ? .off : .auto
+            guard conn.preferredVideoStabilizationMode != target else { return }
+            conn.preferredVideoStabilizationMode = target
         }
     }
 
     func setLowLightBoost(_ enabled: Bool) {
         guard device.isLowLightBoostSupported else { return }
-        try? device.lockForConfiguration()
-        device.automaticallyEnablesLowLightBoostWhenAvailable = enabled
-        device.unlockForConfiguration()
+        // Toggling low-light boost makes AVFoundation reconfigure the active
+        // format's pipeline (like video HDR) — a slow hardware op. Running it
+        // inline on the calling (platform/FFI) thread froze the camera for a
+        // moment; hop to the serial sessionQueue so the FFI call returns
+        // immediately while the change still applies (same recipe as setHdr).
+        sessionQueue.async { [weak self] in
+            guard let self = self, self.device.isLowLightBoostSupported else { return }
+            do {
+                try self.device.lockForConfiguration()
+                self.device.automaticallyEnablesLowLightBoostWhenAvailable = enabled
+                self.device.unlockForConfiguration()
+            } catch {
+                NSLog("NitroCamera setLowLightBoost failed: %@", error.localizedDescription)
+            }
+        }
     }
 
     /// Lens geometric-distortion-correction toggle (default on — set at session

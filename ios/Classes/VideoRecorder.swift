@@ -37,6 +37,12 @@ final class VideoRecorder {
     private var isWriting = false
     private var recordingPaused = false
 
+    /// True while a recording is actively writing frames (read on `frameQueue`
+    /// by FrameOutput to decide whether to spend GPU rendering the shader-filtered
+    /// frame — the live preview is filtered on the Flutter layer, so the native
+    /// filter is only needed for the recorded video).
+    var isRecordingActive: Bool { isWriting && !recordingPaused }
+
     /// Pending stop continuation. Serialised by `continuationLock` so it is
     /// never leaked (set-but-never-resumed) or double-resumed (which is fatal)
     /// when a stop / finalise / teardown race.

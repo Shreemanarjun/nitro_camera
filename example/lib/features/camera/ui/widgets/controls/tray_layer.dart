@@ -31,6 +31,14 @@ class TrayLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Watch((context) {
+      // SCANNER mode has its own dedicated overlay (code-type chips, 1×/2×/3×
+      // zoom, torch, one-shot) plus the top-left stats card and the bottom-right
+      // flip button — so the general camera trays here are redundant AND their
+      // lens chips collided with the scanner's code-type list. Hide the whole
+      // tray layer while scanning so the scanner overlay owns the bottom region.
+      if (cameraStore.mode.value == 'SCANNER') {
+        return const SizedBox.shrink();
+      }
       final showFilters = cameraStore.showFilters.value;
       return Stack(
         children: [

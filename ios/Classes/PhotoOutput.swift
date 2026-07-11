@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import ImageIO
 
 /// Photo capture for one camera session: settings construction, capture
@@ -49,6 +50,69 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
     // Pending GPS geotag for the next photo (EXIF injection in the delegate).
     private var pendingPhotoLocation: (lat: Double, lon: Double, alt: Double)?
     private let ciContext = CIContext()
+
+    /// Active GLSL preview filter from `setFilterShader` (Android parity). iOS
+    /// previously ignored it entirely, so a filtered photo SAVED unfiltered.
+    /// When set, captured stills are rendered through the matching Core Image
+    /// filter (the app's shaders are simple colour ops that map to built-ins).
+    var filterShader: String = ""
+
+    /// Maps one of the example app's GLSL colour shaders to a Core Image filter.
+    /// Returns nil for shaders we don't recognise (unfiltered — same as before),
+    /// so this never makes a capture worse. Full arbitrary-GLSL support would
+    /// need a GL/Metal pass; these built-ins cover the shipped filter set.
+    static func filteredImage(_ input: CIImage, shader: String) -> CIImage? {
+        let s = shader
+        if s.contains("1.0 - c.rgb") { // INVERT
+            // Invert via CIColorControls with contrast -1: output =
+            // (input - 0.5) * -1 + 0.5 = 1 - input. CIColorInvert and CIColorMatrix
+            // render UNCHANGED through CIContext.render(to:) on the camera buffer
+            // (the preview path), but CIColorControls survives it — it's the SAME
+            // filter GRAYSCALE uses, which is confirmed working in the preview.
+            let f = CIFilter.colorControls(); f.inputImage = input; f.contrast = -1.0
+            return f.outputImage
+        }
+        if s.contains("vec3(luma)") && s.contains("0.299") { // GRAYSCALE
+            let f = CIFilter.colorControls(); f.inputImage = input; f.saturation = 0; return f.outputImage
+        }
+        if s.contains("0.393, 0.769") { // SEPIA
+            let f = CIFilter.sepiaTone(); f.inputImage = input; f.intensity = 1.0; return f.outputImage
+        }
+        if s.contains("smoothstep(0.8, 0.3") { // VIGNETTE
+            let f = CIFilter.vignette(); f.inputImage = input; f.intensity = 2.0; f.radius = 2.0; return f.outputImage
+        }
+        if s.contains("pink") { // CYBERPUNK: luma → blue↔pink gradient
+            let mono = CIFilter.photoEffectMono(); mono.inputImage = input
+            let fc = CIFilter.falseColor(); fc.inputImage = mono.outputImage
+            fc.color0 = CIColor(red: 0, green: 1, blue: 1)
+            fc.color1 = CIColor(red: 1, green: 0, blue: 1)
+            return fc.outputImage
+        }
+        return nil
+    }
+
+    /// Renders [jpegData] through the [shader]'s Core Image filter and RE-ATTACHES
+    /// the source EXIF orientation, so a filtered still orients EXACTLY like the
+    /// unfiltered capture. We decode with CGImageSourceCreateImageAtIndex (which
+    /// does NOT auto-apply orientation) and pass RAW pixels through the filter,
+    /// then write the output with the original orientation tag — never baking
+    /// rotation into pixels (that double-rotated). Returns nil if the shader
+    /// isn't recognised or decoding fails — capture then saves the raw JPEG.
+    static func applyFilter(to jpegData: Data, shader: String, ciContext: CIContext) -> Data? {
+        guard let src = CGImageSourceCreateWithData(jpegData as CFData, nil),
+              let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let orientation = (CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any])?[
+            kCGImagePropertyOrientation] as? UInt32 ?? 1
+        guard let filtered = filteredImage(CIImage(cgImage: cg), shader: shader),
+              let outCG = ciContext.createCGImage(filtered, from: filtered.extent) else { return nil }
+        let outData = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(
+                outData, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(
+            dest, outCG, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return outData as Data
+    }
 
     init(device: AVCaptureDevice,
          session: AVCaptureSession,
@@ -355,10 +419,20 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
         guard let raw = photo.fileDataRepresentation() else {
             cont.resume(throwing: CameraError.captureFailed); return
         }
-        // Inject GPS EXIF if a geotag was supplied.
+        // Bake the active GLSL filter into the saved still (iOS previously
+        // ignored setFilterShader, so filtered photos saved unfiltered).
+        // applyFilter re-attaches the source EXIF orientation, so orientation is
+        // unchanged from the unfiltered path (device-based, below).
+        var filteredRaw = raw
+        if !filterShader.isEmpty,
+           let filtered = Self.applyFilter(to: raw, shader: filterShader, ciContext: ciContext) {
+            filteredRaw = filtered
+        }
+        // Inject GPS EXIF if a geotag was supplied (after filtering, which
+        // re-encodes and would otherwise drop it).
         let data = location.flatMap {
-            Self.jpegWithGPS(raw, lat: $0.lat, lon: $0.lon, alt: $0.alt)
-        } ?? raw
+            Self.jpegWithGPS(filteredRaw, lat: $0.lat, lon: $0.lon, alt: $0.alt)
+        } ?? filteredRaw
 
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".jpg")

@@ -524,6 +524,25 @@ class PhotoOutput(private val session: CameraSession) {
                     val tmp = File(session.context.cacheDir, "cap_${System.currentTimeMillis()}.jpg")
                     FileOutputStream(tmp).use { it.write(filteredBytes) }
 
+                    // The GL filter pass decodes + re-encodes the JPEG (NitraRenderer
+                    // .applyFilterToStill), which DROPS the EXIF orientation the camera
+                    // wrote via JPEG_ORIENTATION. The raw pixels are in sensor
+                    // orientation and rely on that tag, so a filtered still would save
+                    // rotated. Re-attach the source orientation so a filtered photo
+                    // orients exactly like an unfiltered one. (vision-camera never hits
+                    // this: CameraX bakes orientation into the JPEG and does no GL still
+                    // post-processing.)
+                    if (shader.isNotEmpty()) {
+                        val srcOrientation = ExifInterface(java.io.ByteArrayInputStream(bytes))
+                            .getAttribute(ExifInterface.TAG_ORIENTATION)
+                        if (srcOrientation != null) {
+                            ExifInterface(tmp.absolutePath).apply {
+                                setAttribute(ExifInterface.TAG_ORIENTATION, srcOrientation)
+                                saveAttributes()
+                            }
+                        }
+                    }
+
                     // GPS EXIF tags from PhotoOptions (skipped when skipMetadata=1).
                     if (options != null && options.skipMetadata == 0L && options.hasLocation == 1L) {
                         writeExifGps(tmp, options)

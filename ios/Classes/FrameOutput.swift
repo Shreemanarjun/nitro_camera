@@ -2,6 +2,8 @@ import Foundation
 import AVFoundation
 import CoreVideo
 import CoreMedia
+import CoreImage
+import Metal
 import Flutter
 
 /// Video-data-output plumbing for one camera session: publishes frames to the
@@ -37,6 +39,10 @@ final class FrameOutput: NSObject, FlutterTexture,
     // Latest camera frame (GPU path → Flutter Texture)
     private var latestPixelBuffer: CVPixelBuffer?
     private let pixelLock = NSLock()
+    // Latched true in teardown() (under pixelLock). Once set, captureOutput must
+    // NOT call textureFrameAvailable — the texture is about to be unregistered,
+    // and signalling a freed texture crashes FlutterEngine (EXC_BAD_ACCESS).
+    private var closed = false
 
     // CPU path — ONE reused frame buffer (never per-frame allocate; that leaks
     // the whole camera stream. Mirrors the Android `directBuffer`. Freed in deinit.)
@@ -69,6 +75,89 @@ final class FrameOutput: NSObject, FlutterTexture,
     // Modernized properties for per-frame analysis
     var samplingRate: Int64 = 1
     var pixelFormat: Int64 = 1 // 0: YUV/Luma, 1: BGRA
+
+    /// Active GLSL preview/video filter (Android parity). When set AND the
+    /// stream is BGRA (i.e. NOT scanner/YUV mode), the preview texture and the
+    /// recorded video are rendered through the matching Core Image filter so the
+    /// live preview + video match the filtered photo. Every path falls back to
+    /// the raw buffer on failure, so preview/recording can never break.
+    private var filterShader: String = ""
+    /// Thread-safe setter: written from the FFI thread, read on the frame queue.
+    func setPreviewFilterShader(_ shader: String) {
+        pixelLock.lock(); filterShader = shader; pixelLock.unlock()
+    }
+    // GPU-backed so the per-frame preview render is fast enough (a CPU CIContext
+    // starves the frame queue → the texture looks unfiltered / frozen).
+    private let filterContext: CIContext = {
+        if let dev = MTLCreateSystemDefaultDevice() {
+            return CIContext(mtlDevice: dev, options: [.cacheIntermediates: false])
+        }
+        return CIContext(options: [.cacheIntermediates: false])
+    }()
+    private var filterPool: CVPixelBufferPool?
+    private var filterPoolW = 0
+    private var filterPoolH = 0
+
+    /// Renders [src] through the current filter into a pooled BGRA buffer, or nil
+    /// if there's no filter / it fails (caller then uses the raw buffer).
+    private func renderFilter(_ src: CVPixelBuffer, shader: String) -> CVPixelBuffer? {
+        let w = CVPixelBufferGetWidth(src), h = CVPixelBufferGetHeight(src)
+        if filterPool == nil || filterPoolW != w || filterPoolH != h {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: w,
+                kCVPixelBufferHeightKey as String: h,
+                kCVPixelBufferMetalCompatibilityKey as String: true,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
+            filterPool = pool; filterPoolW = w; filterPoolH = h
+        }
+        guard let pool = filterPool else { return nil }
+        var out: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
+        guard let outBuf = out,
+              let filtered = PhotoOutput.filteredImage(CIImage(cvPixelBuffer: src), shader: shader)
+        else { return nil }
+        // Render into DeviceRGB (sRGB) — the SAME space the working photo path
+        // uses (jpegRepresentation). A Metal-backed CIContext queues render work
+        // and returns BEFORE the buffer is written, so a plain render(to:) can
+        // hand a half-rendered frame to the recorder (visible as flicker/partial
+        // frames). Use CIRenderDestination + waitUntilCompleted to force GPU
+        // completion, so the appended frame is always fully filtered.
+        let dest = CIRenderDestination(pixelBuffer: outBuf)
+        dest.colorSpace = CGColorSpaceCreateDeviceRGB()
+        do {
+            try filterContext.startTask(toRender: filtered, from: filtered.extent,
+                                        to: dest, at: .zero).waitUntilCompleted()
+        } catch {
+            filterContext.render(filtered, to: outBuf, bounds: filtered.extent,
+                                 colorSpace: CGColorSpaceCreateDeviceRGB())
+        }
+        // Carry the camera buffer's colour attachments so the recorder muxes the
+        // filtered frame with the same colour handling as the raw stream.
+        CVBufferPropagateAttachments(src, outBuf)
+        return outBuf
+    }
+
+    /// Wraps a filtered pixel buffer in a CMSampleBuffer that carries [original]'s
+    /// timing, so the recorder can append the filtered frame. nil on failure
+    /// (caller then records the raw sample buffer — unfiltered but never broken).
+    private func wrapSampleBuffer(_ pb: CVPixelBuffer, like original: CMSampleBuffer) -> CMSampleBuffer? {
+        var fmt: CMFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault, imageBuffer: pb, formatDescriptionOut: &fmt) == noErr,
+              let format = fmt else { return nil }
+        var timing = CMSampleTimingInfo()
+        CMSampleBufferGetSampleTimingInfo(original, at: 0, timingInfoOut: &timing)
+        var out: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(
+                allocator: kCFAllocatorDefault, imageBuffer: pb,
+                formatDescription: format, sampleTiming: &timing,
+                sampleBufferOut: &out) == noErr else { return nil }
+        return out
+    }
     private var frameCounter: Int64 = 0
 
     init(device: AVCaptureDevice,
@@ -120,6 +209,7 @@ final class FrameOutput: NSObject, FlutterTexture,
         nativeDetector = ""
         NitraDetectors.stop(textureId: textureId)
         pixelLock.lock()
+        closed = true
         latestPixelBuffer = nil
         pixelLock.unlock()
     }
@@ -152,14 +242,39 @@ final class FrameOutput: NSObject, FlutterTexture,
                   CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer))
         }
 
-        // GPU path — update Flutter texture
+        // Shader filtering. The LIVE PREVIEW is filtered on the Flutter layer
+        // (the example's FilteredPreview / ColorFiltered) — filtering the texture
+        // NATIVELY too would apply the filter TWICE and cancel it out (INVERT of
+        // an inverted frame is the original: exactly the "photo inverts, preview
+        // doesn't" bug). So the texture always shows the RAW frame; the native
+        // filter is applied only to the RECORDED video, which the Flutter layer
+        // can't reach. Only render while actually recording (GPU per-frame cost),
+        // and only in BGRA mode — scanner/YUV needs the raw luma plane. Any
+        // failure falls back to raw, so this can't break preview or recording.
         pixelLock.lock()
-        latestPixelBuffer = pixelBuffer
+        if closed { pixelLock.unlock(); return }
+        let shader = filterShader
         pixelLock.unlock()
-        textureRegistry?.textureFrameAvailable(textureId)
+        let filteredForRecording: CVPixelBuffer? =
+            (recorder?.isRecordingActive == true && !shader.isEmpty && pixelFormat == 1)
+                ? renderFilter(pixelBuffer, shader: shader) : nil
+
+        // GPU path — the texture shows the RAW frame (Flutter filters the preview).
+        pixelLock.lock()
+        if closed { pixelLock.unlock(); return }
+        latestPixelBuffer = pixelBuffer
+        let reg = textureRegistry
+        pixelLock.unlock()
+        reg?.textureFrameAvailable(textureId)
 
         // Recording path — feed the AVAssetWriter (runs on this same frameQueue).
-        recorder?.appendVideo(sampleBuffer)
+        // Record the natively-FILTERED frame (wrapped with the original timing)
+        // when a filter is active; otherwise the raw sample buffer.
+        if let fb = filteredForRecording, let sb = wrapSampleBuffer(fb, like: sampleBuffer) {
+            recorder?.appendVideo(sb)
+        } else {
+            recorder?.appendVideo(sampleBuffer)
+        }
 
         // Native ML detector path (Vision) — throttled + drop-while-busy inside
         // the runner. Runs even when frame processing is off (the Android

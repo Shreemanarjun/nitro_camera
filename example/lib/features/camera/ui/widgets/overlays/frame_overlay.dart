@@ -338,18 +338,22 @@ class _FrameOverlayState extends State<FrameOverlay> {
                   ),
                 ),
 
-              // 4. Detected Result (Floating Glass Card)
-              if (_lastResult != null)
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 280),
-                    child: _QRResultCard(result: _lastResult!),
-                  ),
-                ),
             ],
           ),
         ),
+
+        // 4. Detected Result (Floating Glass Card) — kept OUTSIDE the
+        // IgnorePointer above so the copy button actually receives taps. While
+        // nested inside the ignore layer its onPressed never fired, so "copy
+        // result code" did nothing on both Android and iOS.
+        if (_lastResult != null)
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 280),
+              child: _QRResultCard(result: _lastResult!),
+            ),
+          ),
 
         // 5. Format family selector (QR / 1D / 2D / ALL) — tappable.
         Align(

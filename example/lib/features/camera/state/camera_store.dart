@@ -439,6 +439,12 @@ class CameraStore {
 
   Future<void> setMode(String m) async {
     if (mode.value == m) return;
+    // Video-only effects must not bleed into PHOTO/SCANNER: reset video
+    // stabilization when leaving VIDEO (leaving it on also costs a preview
+    // hitch each reconfigure). Format-time settings (codec) apply at record.
+    if (m != 'VIDEO' && videoStabilization.value != 0) {
+      setVideoStabilization(0);
+    }
     mode.value = m;
     final scanning = m == 'SCANNER';
     isProcessingFrames.value = scanning;

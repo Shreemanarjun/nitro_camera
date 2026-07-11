@@ -417,7 +417,12 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func setFilterShader(textureId: Int64, shaderSource: String) {
-        // GPU preview filter is Android-only for now; reserved on iOS.
+        // Apply the shader across all three outputs via Core Image (iOS used to
+        // ignore it entirely): the STILL (PhotoOutput.applyFilter), and the live
+        // PREVIEW + recorded VIDEO (FrameOutput filters each frame in BGRA mode).
+        guard let s = session(for: textureId) else { return }
+        s.photoOutput.filterShader = shaderSource
+        s.frameOutput.setPreviewFilterShader(shaderSource)
     }
 
     public func updateOverlay(textureId: Int64, overlayData: Data) {
