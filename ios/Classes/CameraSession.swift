@@ -359,23 +359,31 @@ public class CameraSession: NSObject {
 
     func setWhiteBalance(temperature: Int64) throws {
         try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
         if temperature == 0 {
             if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                 device.whiteBalanceMode = .continuousAutoWhiteBalance
             }
-        } else {
-            guard device.isWhiteBalanceModeSupported(.locked) else {
-                device.unlockForConfiguration()
-                return
-            }
-            let currentGains = device.deviceWhiteBalanceGains
-            var temp = device.temperatureAndTintValues(for: currentGains)
-            temp.temperature = Float(temperature)
-            temp.tint = 0.0
-            let gains = device.deviceWhiteBalanceGains(for: temp)
-            device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+            return
         }
-        device.unlockForConfiguration()
+        guard device.isWhiteBalanceModeSupported(.locked) else { return }
+        // Build the target temperature DIRECTLY — do not read the device's
+        // current gains and round-trip them through temperatureAndTintValues(for:).
+        // On a just-opened / mid-switch device those gains are in a transitional
+        // state AVFoundation rejects, raising an NSInvalidArgumentException — an
+        // Obj-C exception `try?`/do-catch can't catch, so it aborts (SIGABRT).
+        // This is the back→front switch crash whenever a WB temperature was set.
+        let target = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+            temperature: Float(temperature), tint: 0.0)
+        var gains = device.deviceWhiteBalanceGains(for: target)
+        // Gains for a given temperature can exceed the device's maximum (the
+        // front camera's maxWhiteBalanceGain is lower than the back's) — clamp to
+        // [1.0, max] or setWhiteBalanceModeLocked(with:) throws the same way.
+        let maxGain = device.maxWhiteBalanceGain
+        gains.redGain = min(max(gains.redGain, 1.0), maxGain)
+        gains.greenGain = min(max(gains.greenGain, 1.0), maxGain)
+        gains.blueGain = min(max(gains.blueGain, 1.0), maxGain)
+        device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
     }
 
     func setHdr(enabled: Bool) {
