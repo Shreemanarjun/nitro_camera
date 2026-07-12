@@ -1,7 +1,18 @@
 name: nitro_camera
-description: "A new Flutter FFI plugin project."
+description: >-
+  High-performance vision-camera-style plugin built on the Nitro FFI bridge —
+  photo/video capture, code scanning, frame processing, and GPU filters with
+  zero method-channel overhead.
 version: 0.1.0
-homepage:
+homepage: https://github.com/Shreemanarjun/nitro_camera
+repository: https://github.com/Shreemanarjun/nitro_camera
+issue_tracker: https://github.com/Shreemanarjun/nitro_camera/issues
+topics:
+  - camera
+  - vision-camera
+  - ffi
+  - qr-code
+  - barcode-scanner
 
 environment:
   sdk: ^3.11.3

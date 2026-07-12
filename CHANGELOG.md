@@ -1,7 +1,6 @@
 ## 0.1.0
 
-First curated API release — one batched set of breaking changes; see
-`MIGRATION.md` for the mechanical mapping.
+First curated API release — one batched set of breaking changes.
 
 ### Breaking
 

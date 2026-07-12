@@ -31,3 +31,10 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 /build/
 /coverage/
+
+# Internal working documents (local-only; also excluded from pub via .pubignore)
+PLAN.md
+RULES.md
+ARCHITECTURE.md
+IMPROVEMENTS.md
+MIGRATION.md
