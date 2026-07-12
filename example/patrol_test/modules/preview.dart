@@ -378,8 +378,9 @@ final class Preview extends Module {
   ///   couldn't engage it — caller skips).
   Future<String> verifyHdrImage() async {
     final c = _ctrl;
-    if (!c.device.formats.any((f) => f.supportsVideoHdr))
+    if (!c.device.formats.any((f) => f.supportsVideoHdr)) {
       return 'no-hdr-format';
+    }
 
     final base = c.configuration;
     if (base == null) return 'no-hdr-format';

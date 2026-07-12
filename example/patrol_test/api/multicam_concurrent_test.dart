@@ -11,7 +11,8 @@ void main() {
   ) async {
     await modules.camera.openAppToPreview();
     final supported = await modules.cameraApis.verifyMulticamConcurrent();
-    if (!supported)
+    if (!supported) {
       markTestSkipped('no concurrent combo with the active device');
+    }
   });
 }

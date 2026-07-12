@@ -91,8 +91,9 @@ class NativeVideoThumbnails implements VideoThumbnails {
       final sidecar = await _thumbFile(videoPath, '.dur');
       if (await sidecar.exists()) {
         final ms = int.tryParse(await sidecar.readAsString());
-        if (ms != null)
+        if (ms != null) {
           return _durations[videoPath] = Duration(milliseconds: ms);
+        }
       }
       final d = await _probeDuration(videoPath);
       if (d == null) return null;
