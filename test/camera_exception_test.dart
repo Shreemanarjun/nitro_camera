@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 
-/// The 0.1.0 error contract: stable `domain/code` strings, sealed hierarchy
+/// The 0.0.1 error contract: stable `domain/code` strings, sealed hierarchy
 /// (exhaustive switch), and typed factories. Codes are API — this test is the
 /// tripwire against accidental renames.
 void main() {

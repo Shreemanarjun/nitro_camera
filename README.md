@@ -32,7 +32,7 @@ A high-performance, [vision-camera](https://github.com/mrousavy/react-native-vis
 
 ```yaml
 dependencies:
-  nitro_camera: ^0.1.0
+  nitro_camera: ^0.0.1
 ```
 
 Or from the terminal:

@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 
-/// Boundary-parse contract of the typed device model (0.1.0): unknown wire
+/// Boundary-parse contract of the typed device model (0.0.1): unknown wire
 /// values from a NEWER native layer clamp/skip safely, and malformed payloads
 /// throw typed errors instead of masquerading as "no cameras".
 Map<String, dynamic> _deviceJson({

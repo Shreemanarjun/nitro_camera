@@ -96,7 +96,7 @@ void main() {
       for (final d in devices) {
         expect(d.id, isNotEmpty);
         expect(d.name, isNotEmpty);
-        // Typed model: enums, never raw ints/strings (0.1.0 contract).
+        // Typed model: enums, never raw ints/strings (0.0.1 contract).
         expect(CameraPosition.values, contains(d.position));
         expect(CameraLensType.values, contains(d.lensType));
         expect(HardwareLevel.values, contains(d.hardwareLevel));
@@ -577,7 +577,7 @@ void main() {
       await bootApp(tester);
 
       // session/not-initialized: any control call before initialize() throws
-      // the TYPED exception with its stable code (0.1.0 error contract). A
+      // the TYPED exception with its stable code (0.0.1 error contract). A
       // deliberately bogus openCamera is NOT exercised on-device: probing
       // nonexistent ids can wedge constrained HALs (OnePlus storms).
       final fresh = CameraController(device: ctrl().device);

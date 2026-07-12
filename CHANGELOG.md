@@ -1,8 +1,4 @@
-## 0.1.0
-
-First curated API release — one batched set of breaking changes.
-
-### Breaking
+## 0.0.1
 
 * **Export split**: `nitro_camera.dart` now exports a curated surface only.
   The raw FFI layer (`NitroCamera`, FFI structs, codec extensions) moved to
@@ -38,7 +34,4 @@ First curated API release — one batched set of breaking changes.
   `CameraConfiguration.toNativeConfig` and `PhotoCaptureOptions.toNative` are
   annotated `@internal`.
 
-## 0.0.1
 
-* Initial development release: vision-camera-style camera engine (photo /
-  video / frame processing / code scanning) on the nitro FFI bridge.

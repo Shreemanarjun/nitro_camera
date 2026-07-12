@@ -3,7 +3,7 @@ description: >-
   High-performance vision-camera-style plugin built on the Nitro FFI bridge —
   photo/video capture, code scanning, frame processing, and GPU filters with
   zero method-channel overhead.
-version: 0.1.0
+version: 0.0.1
 homepage: https://github.com/Shreemanarjun/nitro_camera
 repository: https://github.com/Shreemanarjun/nitro_camera
 issue_tracker: https://github.com/Shreemanarjun/nitro_camera/issues
