@@ -45,9 +45,11 @@ Future<void> pumpUntil(
   final deadline = DateTime.now().add(timeout);
   while (!condition()) {
     if (DateTime.now().isAfter(deadline)) {
-      fail('Timed out after ${timeout.inSeconds}s waiting for: $reason '
-          '(status=${cameraStore.status.value}, '
-          'error=${cameraStore.errorMessage.value})');
+      fail(
+        'Timed out after ${timeout.inSeconds}s waiting for: $reason '
+        '(status=${cameraStore.status.value}, '
+        'error=${cameraStore.errorMessage.value})',
+      );
     }
     await tester.pump();
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -101,9 +103,11 @@ Future<void> bootApp(
   // run the flow when NOT already granted, since nothing can accept a dialog
   // automatically. The native query returns granted(1)/denied(2) only — never
   // notDetermined(0) — so gate on granted, not "!= 0".
-  debugPrint(alreadyGranted
-      ? 'NitroCamera test: CAMERA already granted (alwaysRequest=$alwaysRequest).'
-      : 'NitroCamera test: CAMERA not granted — running the request flow.');
+  debugPrint(
+    alreadyGranted
+        ? 'NitroCamera test: CAMERA already granted (alwaysRequest=$alwaysRequest).'
+        : 'NitroCamera test: CAMERA not granted — running the request flow.',
+  );
   if (alwaysRequest || !alreadyGranted) {
     // grantPermission() requests CAMERA then MICROPHONE (recording tests need
     // mic) and only publishes cameraPermission after both — so accepting both
@@ -123,7 +127,8 @@ Future<void> bootApp(
         tester,
         () => cameraStore.cameraPermission.value == granted,
         timeout: const Duration(seconds: 90),
-        reason: 'CAMERA + MIC permission granted (accept BOTH system dialogs '
+        reason:
+            'CAMERA + MIC permission granted (accept BOTH system dialogs '
             'on the device, or pre-grant with: adb install -r -g <test-apk>)',
       );
     }
@@ -155,7 +160,8 @@ void installSemanticsFlakeFilter() {
     if (e is FlutterError &&
         e.message.startsWith('A SemanticsHandle was active')) {
       debugPrint(
-          'Ignored platform-driven SemanticsHandle flake in "$testDescription"');
+        'Ignored platform-driven SemanticsHandle flake in "$testDescription"',
+      );
       return;
     }
     defaultReporter(details, testDescription);

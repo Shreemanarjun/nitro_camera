@@ -15,8 +15,7 @@ enum PixelFormat {
   /// The integer sent across the FFI bridge.
   final int nativeValue;
 
-  static PixelFormat fromNative(int value) =>
-      value == 0 ? PixelFormat.yuv420 : PixelFormat.bgra;
+  static PixelFormat fromNative(int value) => value == 0 ? PixelFormat.yuv420 : PixelFormat.bgra;
 }
 
 /// A typed snapshot of the live native camera session — the parsed form of
@@ -61,6 +60,5 @@ class SessionState {
   }
 
   @override
-  String toString() =>
-      'SessionState(running: $running, ${width}x$height@${fps}fps, ${pixelFormat.name})';
+  String toString() => 'SessionState(running: $running, ${width}x$height@${fps}fps, ${pixelFormat.name})';
 }

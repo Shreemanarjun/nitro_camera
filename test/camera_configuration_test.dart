@@ -1,15 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 
-CameraDeviceFormat fmt({int w = 1920, int h = 1080, double maxFps = 30}) =>
-    CameraDeviceFormat(
-      photoWidth: w,
-      photoHeight: h,
-      videoWidth: w,
-      videoHeight: h,
-      minFps: 30,
-      maxFps: maxFps,
-    );
+CameraDeviceFormat fmt({int w = 1920, int h = 1080, double maxFps = 30}) => CameraDeviceFormat(
+  photoWidth: w,
+  photoHeight: h,
+  videoWidth: w,
+  videoHeight: h,
+  minFps: 30,
+  maxFps: maxFps,
+);
 
 void main() {
   group('CameraConfiguration.copyWith', () {
@@ -60,9 +59,7 @@ void main() {
     });
 
     test('multiple live changes are all reported, none reopen', () {
-      final d = base
-          .copyWith(torch: true, flash: FlashMode.on, samplingRate: 2)
-          .diff(base);
+      final d = base.copyWith(torch: true, flash: FlashMode.on, samplingRate: 2).diff(base);
       expect(d.torch, isTrue);
       expect(d.flash, isTrue);
       expect(d.samplingRate, isTrue);

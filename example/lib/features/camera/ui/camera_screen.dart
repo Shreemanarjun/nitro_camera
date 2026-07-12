@@ -195,7 +195,8 @@ class _CameraScreenState extends State<CameraScreen>
                   return ar == null
                       ? filtered
                       : Center(
-                          child: AspectRatio(aspectRatio: ar, child: filtered));
+                          child: AspectRatio(aspectRatio: ar, child: filtered),
+                        );
                 }),
               ),
             ),
@@ -312,8 +313,9 @@ class _CameraScreenState extends State<CameraScreen>
               return Positioned(
                 right: 16,
                 bottom: 200,
-                child:
-                    CameraFpsGraph(targetFps: cameraStore.fps.value.toDouble()),
+                child: CameraFpsGraph(
+                  targetFps: cameraStore.fps.value.toDouble(),
+                ),
               );
             }),
 

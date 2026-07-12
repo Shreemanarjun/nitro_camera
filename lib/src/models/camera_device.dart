@@ -2,11 +2,9 @@ import 'dart:convert';
 
 import 'camera_exception.dart';
 
-import '../nitro_camera.native.dart'
-    show CameraPosition, CameraLensType, VideoStabilizationMode;
+import '../nitro_camera.native.dart' show CameraPosition, CameraLensType, VideoStabilizationMode;
 
-export '../nitro_camera.native.dart'
-    show CameraPosition, CameraLensType, VideoStabilizationMode;
+export '../nitro_camera.native.dart' show CameraPosition, CameraLensType, VideoStabilizationMode;
 
 /// Camera2 `INFO_SUPPORTED_HARDWARE_LEVEL` tiers (always [full] on iOS).
 enum HardwareLevel {
@@ -19,9 +17,9 @@ enum HardwareLevel {
   const HardwareLevel(this.value);
 
   static HardwareLevel fromValue(String? v) => values.firstWhere(
-        (e) => e.value == v,
-        orElse: () => HardwareLevel.full,
-      );
+    (e) => e.value == v,
+    orElse: () => HardwareLevel.full,
+  );
 }
 
 /// The auto-focus system of a capture format.
@@ -35,9 +33,9 @@ enum AutoFocusSystem {
   const AutoFocusSystem(this.value);
 
   static AutoFocusSystem fromValue(String? v) => values.firstWhere(
-        (e) => e.value == v,
-        orElse: () => AutoFocusSystem.none,
-      );
+    (e) => e.value == v,
+    orElse: () => AutoFocusSystem.none,
+  );
 }
 
 /// The physical lens types backing a (possibly logical) camera device.
@@ -168,59 +166,42 @@ class CameraDeviceInfo {
 
   // Unknown wire indices (native/plugin version skew) parse to a safe default
   // instead of a RangeError.
-  static CameraPosition _positionFrom(int i) =>
-      (i >= 0 && i < CameraPosition.values.length)
-          ? CameraPosition.values[i]
-          : CameraPosition.external;
+  static CameraPosition _positionFrom(int i) => (i >= 0 && i < CameraPosition.values.length) ? CameraPosition.values[i] : CameraPosition.external;
 
-  static CameraLensType _lensTypeFrom(int i) =>
-      (i >= 0 && i < CameraLensType.values.length)
-          ? CameraLensType.values[i]
-          : CameraLensType.unknown;
+  static CameraLensType _lensTypeFrom(int i) => (i >= 0 && i < CameraLensType.values.length) ? CameraLensType.values[i] : CameraLensType.unknown;
 
   factory CameraDeviceInfo.fromJson(Map<String, dynamic> json) {
-    final fmts = (json['formats'] as List? ?? [])
-        .cast<Map<String, dynamic>>()
-        .map(CameraDeviceFormat.fromJson)
-        .toList();
+    final fmts = (json['formats'] as List? ?? []).cast<Map<String, dynamic>>().map(CameraDeviceFormat.fromJson).toList();
     // Unknown lens/extension wire strings are skipped, not errors — a newer
     // native layer may report kinds this Dart side doesn't know yet.
-    final physical = (json['physicalDevices'] as List? ?? [])
-        .cast<String>()
-        .map(PhysicalDeviceType.tryFromValue)
-        .nonNulls
-        .toList();
-    final extensions = (json['extensions'] as List? ?? [])
-        .cast<String>()
-        .map(CameraExtension.tryFromValue)
-        .nonNulls
-        .toList();
+    final physical = (json['physicalDevices'] as List? ?? []).cast<String>().map(PhysicalDeviceType.tryFromValue).nonNulls.toList();
+    final extensions = (json['extensions'] as List? ?? []).cast<String>().map(CameraExtension.tryFromValue).nonNulls.toList();
     return CameraDeviceInfo(
-      id:                  json['id'] as String,
-      name:                json['name'] as String,
-      position:            _positionFrom((json['position'] as num).toInt()),
-      lensType:            _lensTypeFrom((json['lensType'] as num).toInt()),
-      sensorOrientation:   (json['sensorOrientation'] as num).toInt(),
-      minZoom:             (json['minZoom'] as num).toDouble(),
-      maxZoom:             (json['maxZoom'] as num).toDouble(),
-      neutralZoom:         (json['neutralZoom'] as num? ?? 1).toDouble(),
-      hasFlash:            json['hasFlash'] == true || json['hasFlash'] == 1,
-      hasTorch:            json['hasTorch'] == true || json['hasTorch'] == 1,
-      maxPhotoWidth:       (json['maxPhotoWidth'] as num).toInt(),
-      maxPhotoHeight:      (json['maxPhotoHeight'] as num).toInt(),
-      minExposure:         (json['minExposure'] as num? ?? -4).toDouble(),
-      maxExposure:         (json['maxExposure'] as num? ?? 4).toDouble(),
-      minFocusDistanceCm:  (json['minFocusDistanceCm'] as num? ?? 0).toDouble(),
-      isMultiCam:          json['isMultiCam'] == true,
+      id: json['id'] as String,
+      name: json['name'] as String,
+      position: _positionFrom((json['position'] as num).toInt()),
+      lensType: _lensTypeFrom((json['lensType'] as num).toInt()),
+      sensorOrientation: (json['sensorOrientation'] as num).toInt(),
+      minZoom: (json['minZoom'] as num).toDouble(),
+      maxZoom: (json['maxZoom'] as num).toDouble(),
+      neutralZoom: (json['neutralZoom'] as num? ?? 1).toDouble(),
+      hasFlash: json['hasFlash'] == true || json['hasFlash'] == 1,
+      hasTorch: json['hasTorch'] == true || json['hasTorch'] == 1,
+      maxPhotoWidth: (json['maxPhotoWidth'] as num).toInt(),
+      maxPhotoHeight: (json['maxPhotoHeight'] as num).toInt(),
+      minExposure: (json['minExposure'] as num? ?? -4).toDouble(),
+      maxExposure: (json['maxExposure'] as num? ?? 4).toDouble(),
+      minFocusDistanceCm: (json['minFocusDistanceCm'] as num? ?? 0).toDouble(),
+      isMultiCam: json['isMultiCam'] == true,
       supportsLowLightBoost: json['supportsLowLightBoost'] == true,
-      supportsRawCapture:  json['supportsRawCapture'] == true,
-      supportsFocus:       json['supportsFocus'] != false,
-      hardwareLevel:       HardwareLevel.fromValue(json['hardwareLevel'] as String?),
-      physicalDevices:     physical,
-      extensions:          extensions,
-      formats:             fmts,
-      focalLength:         (json['focalLength'] as num? ?? 3.5).toDouble(),
-      aperture:            (json['aperture'] as num? ?? 1.8).toDouble(),
+      supportsRawCapture: json['supportsRawCapture'] == true,
+      supportsFocus: json['supportsFocus'] != false,
+      hardwareLevel: HardwareLevel.fromValue(json['hardwareLevel'] as String?),
+      physicalDevices: physical,
+      extensions: extensions,
+      formats: fmts,
+      focalLength: (json['focalLength'] as num? ?? 3.5).toDouble(),
+      aperture: (json['aperture'] as num? ?? 1.8).toDouble(),
     );
   }
 
@@ -301,28 +282,22 @@ class CameraDeviceFormat {
   };
 
   factory CameraDeviceFormat.fromJson(Map<String, dynamic> json) {
-    final modes = (json['videoStabilizationModes'] as List? ?? ['off'])
-        .cast<String>()
-        .map((s) => _stabilizationValues[s])
-        .nonNulls
-        .toList();
+    final modes = (json['videoStabilizationModes'] as List? ?? ['off']).cast<String>().map((s) => _stabilizationValues[s]).nonNulls.toList();
     return CameraDeviceFormat(
-      photoWidth:              (json['photoWidth'] as num).toInt(),
-      photoHeight:             (json['photoHeight'] as num).toInt(),
-      videoWidth:              (json['videoWidth'] as num).toInt(),
-      videoHeight:             (json['videoHeight'] as num).toInt(),
-      minFps:                  (json['minFps'] as num).toDouble(),
-      maxFps:                  (json['maxFps'] as num).toDouble(),
-      minISO:                  (json['minISO'] as num? ?? 25).toDouble(),
-      maxISO:                  (json['maxISO'] as num? ?? 3200).toDouble(),
-      fieldOfView:             (json['fieldOfView'] as num? ?? 69.4).toDouble(),
-      supportsVideoHdr:        json['supportsVideoHdr'] == true,
-      supportsPhotoHdr:        json['supportsPhotoHdr'] == true,
-      supportsDepthCapture:    json['supportsDepthCapture'] == true,
-      autoFocusSystem:
-          AutoFocusSystem.fromValue(json['autoFocusSystem'] as String?),
-      videoStabilizationModes:
-          modes.isEmpty ? const [VideoStabilizationMode.off] : modes,
+      photoWidth: (json['photoWidth'] as num).toInt(),
+      photoHeight: (json['photoHeight'] as num).toInt(),
+      videoWidth: (json['videoWidth'] as num).toInt(),
+      videoHeight: (json['videoHeight'] as num).toInt(),
+      minFps: (json['minFps'] as num).toDouble(),
+      maxFps: (json['maxFps'] as num).toDouble(),
+      minISO: (json['minISO'] as num? ?? 25).toDouble(),
+      maxISO: (json['maxISO'] as num? ?? 3200).toDouble(),
+      fieldOfView: (json['fieldOfView'] as num? ?? 69.4).toDouble(),
+      supportsVideoHdr: json['supportsVideoHdr'] == true,
+      supportsPhotoHdr: json['supportsPhotoHdr'] == true,
+      supportsDepthCapture: json['supportsDepthCapture'] == true,
+      autoFocusSystem: AutoFocusSystem.fromValue(json['autoFocusSystem'] as String?),
+      videoStabilizationModes: modes.isEmpty ? const [VideoStabilizationMode.off] : modes,
     );
   }
 

@@ -23,8 +23,7 @@ class LumaMeanPlugin extends FrameProcessorPlugin {
   }
 }
 
-FrameProcessorPlugin createLumaMeanPlugin(Map<String, Object?> options) =>
-    LumaMeanPlugin(options);
+FrameProcessorPlugin createLumaMeanPlugin(Map<String, Object?> options) => LumaMeanPlugin(options);
 
 /// Plugin that always returns null (never emits).
 class SilentPlugin extends FrameProcessorPlugin {
@@ -33,16 +32,15 @@ class SilentPlugin extends FrameProcessorPlugin {
   Object? callback(FrameData frame) => null;
 }
 
-FrameProcessorPlugin createSilentPlugin(Map<String, Object?> options) =>
-    SilentPlugin(options);
+FrameProcessorPlugin createSilentPlugin(Map<String, Object?> options) => SilentPlugin(options);
 
 FrameData _grayFrame(int value) => FrameData(
-      bytes: Uint8List.fromList(List.filled(64, value)),
-      width: 8,
-      height: 8,
-      format: 0,
-      timestamp: 1,
-    );
+  bytes: Uint8List.fromList(List.filled(64, value)),
+  width: 8,
+  height: 8,
+  format: 0,
+  timestamp: 1,
+);
 
 void main() {
   group('FrameProcessorPlugins registry', () {
@@ -66,8 +64,7 @@ void main() {
   });
 
   group('FrameProcessorPluginRunner', () {
-    test('instantiates the plugin on the worker with options and runs it',
-        () async {
+    test('instantiates the plugin on the worker with options and runs it', () async {
       FrameProcessorPlugins.register('lumaMean', createLumaMeanPlugin);
       final runner = FrameProcessorPlugins.init('lumaMean', {'step': 2});
       await runner.start();
@@ -79,8 +76,7 @@ void main() {
       await runner.dispose();
     });
 
-    test('plugin state persists across frames (worker-isolate instance)',
-        () async {
+    test('plugin state persists across frames (worker-isolate instance)', () async {
       FrameProcessorPlugins.register('lumaMean', createLumaMeanPlugin);
       final runner = FrameProcessorPlugins.init('lumaMean');
       await runner.start();
@@ -97,8 +93,7 @@ void main() {
       await runner.dispose();
     });
 
-    test('null returns are filtered from results but timed in stats',
-        () async {
+    test('null returns are filtered from results but timed in stats', () async {
       FrameProcessorPlugins.register('silent', createSilentPlugin);
       final runner = FrameProcessorPlugins.init('silent');
       await runner.start();

@@ -35,20 +35,16 @@ class CameraSessionEvent {
   /// Whether [e]'s type index is known to this plugin version. A newer native
   /// layer can emit indices this Dart side doesn't have yet (version skew) —
   /// filter with this before [fromNative] instead of hitting a RangeError.
-  static bool isKnownType(CameraEvent e) =>
-      e.type >= 0 && e.type < CameraEventType.values.length;
+  static bool isKnownType(CameraEvent e) => e.type >= 0 && e.type < CameraEventType.values.length;
 
   factory CameraSessionEvent.fromNative(CameraEvent e) {
     if (!isKnownType(e)) {
-      throw ArgumentError.value(e.type, 'e.type',
-          'unknown CameraEventType index — native/plugin version skew?');
+      throw ArgumentError.value(e.type, 'e.type', 'unknown CameraEventType index — native/plugin version skew?');
     }
     final type = CameraEventType.values[e.type];
     // `reason` doubles as a generic integer payload (e.g. orientation
     // degrees), so only interpret it as an InterruptionReason where valid.
-    final reason = (e.reason >= 0 && e.reason < InterruptionReason.values.length)
-        ? InterruptionReason.values[e.reason]
-        : InterruptionReason.none;
+    final reason = (e.reason >= 0 && e.reason < InterruptionReason.values.length) ? InterruptionReason.values[e.reason] : InterruptionReason.none;
     return CameraSessionEvent(
       type: type,
       textureId: e.textureId,
@@ -59,30 +55,20 @@ class CameraSessionEvent {
   }
 
   bool get isError => type == CameraEventType.error;
-  bool get isInterruption =>
-      type == CameraEventType.interruptionStarted ||
-      type == CameraEventType.interruptionEnded;
+  bool get isInterruption => type == CameraEventType.interruptionStarted || type == CameraEventType.interruptionEnded;
 
   /// Degrees for [CameraEventType.orientationChanged] events, else null.
-  int? get orientationDegrees =>
-      type == CameraEventType.orientationChanged ? rawReason : null;
+  int? get orientationDegrees => type == CameraEventType.orientationChanged ? rawReason : null;
 
   /// The connected/disconnected camera id for hot-plug events, else null.
-  String? get deviceId => (type == CameraEventType.deviceConnected ||
-          type == CameraEventType.deviceDisconnected)
-      ? message
-      : null;
+  String? get deviceId => (type == CameraEventType.deviceConnected || type == CameraEventType.deviceDisconnected) ? message : null;
 
   /// The typed reason for a [CameraEventType.frameDropped] event, else null.
-  FrameDropReason? get frameDropReason => type == CameraEventType.frameDropped
-      ? FrameDropReason.fromMessage(message)
-      : null;
+  FrameDropReason? get frameDropReason => type == CameraEventType.frameDropped ? FrameDropReason.fromMessage(message) : null;
 
   /// The device thermal state for a [CameraEventType.thermalStateChanged]
   /// event, else null.
-  ThermalState? get thermalState => type == CameraEventType.thermalStateChanged
-      ? ThermalState.fromLevel(rawReason)
-      : null;
+  ThermalState? get thermalState => type == CameraEventType.thermalStateChanged ? ThermalState.fromLevel(rawReason) : null;
 
   /// Exhaustive, typed handling of an event — the ergonomic form of a sealed
   /// hierarchy (API plan §2.2) without a parallel type: each branch receives
@@ -126,11 +112,9 @@ class CameraSessionEvent {
       case CameraEventType.deviceDisconnected:
         return deviceHotplug?.call(message, false) ?? orElse();
       case CameraEventType.frameDropped:
-        return frameDropped?.call(FrameDropReason.fromMessage(message)) ??
-            orElse();
+        return frameDropped?.call(FrameDropReason.fromMessage(message)) ?? orElse();
       case CameraEventType.thermalStateChanged:
-        return thermalChanged?.call(ThermalState.fromLevel(rawReason)) ??
-            orElse();
+        return thermalChanged?.call(ThermalState.fromLevel(rawReason)) ?? orElse();
       case CameraEventType.detection:
         return detection?.call(message) ?? orElse();
       case CameraEventType.photoCaptureBegan:
@@ -195,6 +179,5 @@ enum ThermalState {
   critical;
 
   /// Maps a native thermal level (0..3) to a [ThermalState].
-  static ThermalState fromLevel(int level) =>
-      (level >= 0 && level < values.length) ? values[level] : nominal;
+  static ThermalState fromLevel(int level) => (level >= 0 && level < values.length) ? values[level] : nominal;
 }

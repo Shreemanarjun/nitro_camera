@@ -111,8 +111,7 @@ class CameraConfiguration {
       lowLightBoost: lowLightBoost ?? this.lowLightBoost,
       videoStabilization: videoStabilization ?? this.videoStabilization,
       autoFocus: autoFocus ?? this.autoFocus,
-      enableFrameProcessing:
-          enableFrameProcessing ?? this.enableFrameProcessing,
+      enableFrameProcessing: enableFrameProcessing ?? this.enableFrameProcessing,
       pixelFormat: pixelFormat ?? this.pixelFormat,
       samplingRate: samplingRate ?? this.samplingRate,
       filterShader: filterShader ?? this.filterShader,
@@ -126,10 +125,7 @@ class CameraConfiguration {
       return const CameraConfigurationDiff._all();
     }
     // A device/format/fps/audio change requires tearing down the session.
-    final device = deviceId != previous.deviceId ||
-        fps != previous.fps ||
-        enableAudio != previous.enableAudio ||
-        _formatKey(format) != _formatKey(previous.format);
+    final device = deviceId != previous.deviceId || fps != previous.fps || enableAudio != previous.enableAudio || _formatKey(format) != _formatKey(previous.format);
     return CameraConfigurationDiff._(
       device: device,
       isActive: isActive != previous.isActive,
@@ -138,21 +134,16 @@ class CameraConfiguration {
       flash: flash != previous.flash,
       torch: torch != previous.torch,
       whiteBalance: whiteBalanceKelvin != previous.whiteBalanceKelvin,
-      videoHdr: videoHdr != previous.videoHdr ||
-          lowLightBoost != previous.lowLightBoost ||
-          videoStabilization != previous.videoStabilization,
+      videoHdr: videoHdr != previous.videoHdr || lowLightBoost != previous.lowLightBoost || videoStabilization != previous.videoStabilization,
       autoFocus: autoFocus != previous.autoFocus,
-      frameProcessing:
-          enableFrameProcessing != previous.enableFrameProcessing,
+      frameProcessing: enableFrameProcessing != previous.enableFrameProcessing,
       pixelFormat: pixelFormat != previous.pixelFormat,
       samplingRate: samplingRate != previous.samplingRate,
       filter: filterShader != previous.filterShader,
     );
   }
 
-  static String _formatKey(CameraDeviceFormat? f) => f == null
-      ? ''
-      : '${f.videoWidth}x${f.videoHeight}@${f.maxFps}/${f.photoWidth}x${f.photoHeight}';
+  static String _formatKey(CameraDeviceFormat? f) => f == null ? '' : '${f.videoWidth}x${f.videoHeight}@${f.maxFps}/${f.photoWidth}x${f.photoHeight}';
 
   @override
   bool operator ==(Object other) =>
@@ -178,25 +169,25 @@ class CameraConfiguration {
 
   @override
   int get hashCode => Object.hash(
-        deviceId,
-        _formatKey(format),
-        fps,
-        enableAudio,
-        isActive,
-        zoom,
-        exposure,
-        flash,
-        torch,
-        whiteBalanceKelvin,
-        videoHdr,
-        lowLightBoost,
-        videoStabilization,
-        autoFocus,
-        enableFrameProcessing,
-        pixelFormat,
-        samplingRate,
-        filterShader,
-      );
+    deviceId,
+    _formatKey(format),
+    fps,
+    enableAudio,
+    isActive,
+    zoom,
+    exposure,
+    flash,
+    torch,
+    whiteBalanceKelvin,
+    videoHdr,
+    lowLightBoost,
+    videoStabilization,
+    autoFocus,
+    enableFrameProcessing,
+    pixelFormat,
+    samplingRate,
+    filterShader,
+  );
 
   /// Projects this configuration onto the FFI [CameraConfig] struct — the
   /// numeric/boolean bundle the native `configure(textureId, …)` bridge applies
@@ -204,21 +195,21 @@ class CameraConfiguration {
   /// they go through `openCamera`.)
   @internal
   CameraConfig toNativeConfig() => CameraConfig(
-        zoom: zoom,
-        exposure: exposure,
-        flash: flash.nativeValue,
-        torch: torch ? 1 : 0,
-        torchLevel: torch ? 1.0 : 0.0,
-        whiteBalanceKelvin: whiteBalanceKelvin,
-        videoHdr: videoHdr ? 1 : 0,
-        lowLightBoost: lowLightBoost ? 1 : 0,
-        autoFocus: autoFocus.nativeValue,
-        videoStabilization: videoStabilization.nativeValue,
-        active: isActive ? 1 : 0,
-        enableFrameProcessing: enableFrameProcessing ? 1 : 0,
-        pixelFormat: pixelFormat.nativeValue,
-        samplingRate: samplingRate,
-      );
+    zoom: zoom,
+    exposure: exposure,
+    flash: flash.nativeValue,
+    torch: torch ? 1 : 0,
+    torchLevel: torch ? 1.0 : 0.0,
+    whiteBalanceKelvin: whiteBalanceKelvin,
+    videoHdr: videoHdr ? 1 : 0,
+    lowLightBoost: lowLightBoost ? 1 : 0,
+    autoFocus: autoFocus.nativeValue,
+    videoStabilization: videoStabilization.nativeValue,
+    active: isActive ? 1 : 0,
+    enableFrameProcessing: enableFrameProcessing ? 1 : 0,
+    pixelFormat: pixelFormat.nativeValue,
+    samplingRate: samplingRate,
+  );
 }
 
 /// The set of fields that changed between two [CameraConfiguration]s.
@@ -258,38 +249,25 @@ class CameraConfigurationDiff {
   });
 
   const CameraConfigurationDiff._all()
-      : device = true,
-        isActive = true,
-        zoom = true,
-        exposure = true,
-        flash = true,
-        torch = true,
-        whiteBalance = true,
-        videoHdr = true,
-        autoFocus = true,
-        frameProcessing = true,
-        pixelFormat = true,
-        samplingRate = true,
-        filter = true;
+    : device = true,
+      isActive = true,
+      zoom = true,
+      exposure = true,
+      flash = true,
+      torch = true,
+      whiteBalance = true,
+      videoHdr = true,
+      autoFocus = true,
+      frameProcessing = true,
+      pixelFormat = true,
+      samplingRate = true,
+      filter = true;
 
   /// Whether the session needs to be torn down and reopened.
   bool get requiresReopen => device;
 
   /// Whether nothing changed at all.
-  bool get isEmpty =>
-      !device &&
-      !isActive &&
-      !zoom &&
-      !exposure &&
-      !flash &&
-      !torch &&
-      !whiteBalance &&
-      !videoHdr &&
-      !autoFocus &&
-      !frameProcessing &&
-      !pixelFormat &&
-      !samplingRate &&
-      !filter;
+  bool get isEmpty => !device && !isActive && !zoom && !exposure && !flash && !torch && !whiteBalance && !videoHdr && !autoFocus && !frameProcessing && !pixelFormat && !samplingRate && !filter;
 
   @override
   String toString() {

@@ -134,12 +134,7 @@ class _CameraViewState extends State<CameraView> {
   static const Duration _initialRetryDelay = Duration(milliseconds: 250);
   static const Duration _maxRetryDelay = Duration(seconds: 4);
 
-  bool _lifecycleChanged(CameraView old) =>
-      old.device.id != widget.device.id ||
-      old.width != widget.width ||
-      old.height != widget.height ||
-      old.fps != widget.fps ||
-      old.audio != widget.audio;
+  bool _lifecycleChanged(CameraView old) => old.device.id != widget.device.id || old.width != widget.width || old.height != widget.height || old.fps != widget.fps || old.audio != widget.audio;
 
   @override
   void initState() {
@@ -184,8 +179,10 @@ class _CameraViewState extends State<CameraView> {
         if (attempt >= _maxOpenAttempts || !mounted || epoch != _epoch) {
           rethrow;
         }
-        debugPrint('CameraView: open attempt $attempt/$_maxOpenAttempts '
-            'failed ($e) — retrying in ${delay.inMilliseconds}ms');
+        debugPrint(
+          'CameraView: open attempt $attempt/$_maxOpenAttempts '
+          'failed ($e) — retrying in ${delay.inMilliseconds}ms',
+        );
         await Future<void>.delayed(delay);
         delay *= 2;
         if (delay > _maxRetryDelay) delay = _maxRetryDelay;
@@ -315,16 +312,14 @@ class _CameraViewState extends State<CameraView> {
       return widget.errorBuilder!(error, _retry);
     }
     final controller = _controller;
-    final active =
-        (controller != null && controller.isInitialized) ? controller : null;
+    final active = (controller != null && controller.isInitialized) ? controller : null;
     final retiring = _retiring;
 
     final Widget child;
     if (active == null && retiring == null) {
       child = KeyedSubtree(
         key: const ValueKey('nitra_camera_loading'),
-        child: widget.loading ??
-            const Center(child: CircularProgressIndicator()),
+        child: widget.loading ?? const Center(child: CircularProgressIndicator()),
       );
     } else {
       // ONE stable 'live' subtree hosts every running-preview state, so a
@@ -352,9 +347,7 @@ class _CameraViewState extends State<CameraView> {
             // device switch). Distinct key namespace + identity guard: a
             // failed open can leave both slots with the same textureId
             // (e.g. null), which would be a duplicate-key red screen.
-            if (retiring != null &&
-                !identical(retiring, active) &&
-                retiring.textureId != active?.textureId)
+            if (retiring != null && !identical(retiring, active) && retiring.textureId != active?.textureId)
               KeyedSubtree(
                 key: ValueKey('nitra_retiring_${retiring.textureId}'),
                 child: CameraPreview(

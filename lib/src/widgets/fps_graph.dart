@@ -29,8 +29,7 @@ class CameraFpsGraph extends StatefulWidget {
   State<CameraFpsGraph> createState() => _CameraFpsGraphState();
 }
 
-class _CameraFpsGraphState extends State<CameraFpsGraph>
-    with SingleTickerProviderStateMixin {
+class _CameraFpsGraphState extends State<CameraFpsGraph> with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   Duration _last = Duration.zero;
   final ValueNotifier<List<double>> _history = ValueNotifier<List<double>>([]);

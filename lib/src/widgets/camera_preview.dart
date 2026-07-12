@@ -65,10 +65,7 @@ class CameraPreview extends StatelessWidget {
 
         // Platform views only exist on Android — elsewhere fall back to the
         // Texture path instead of building an AndroidView that renders nothing.
-        final effectiveMode = (mode == PreviewMode.platformView &&
-                defaultTargetPlatform != TargetPlatform.android)
-            ? PreviewMode.texture
-            : mode;
+        final effectiveMode = (mode == PreviewMode.platformView && defaultTargetPlatform != TargetPlatform.android) ? PreviewMode.texture : mode;
 
         Widget preview;
         switch (effectiveMode) {
@@ -97,18 +94,13 @@ class CameraPreview extends StatelessWidget {
               // buffer's arbitrary aspect cancel out — same contract as iOS.
               // Content is upright, so swap stream dims when the sensor-vs-display
               // rotation leaves it portrait.
-              final isLandscapeDisplay =
-                  MediaQuery.of(context).orientation == Orientation.landscape;
+              final isLandscapeDisplay = MediaQuery.of(context).orientation == Orientation.landscape;
               final sensorRotated = controller.sensorOrientation % 180 != 0;
               final contentPortrait = sensorRotated != isLandscapeDisplay;
-              final logicalWidth =
-                  contentPortrait ? controller.height : controller.width;
-              final logicalHeight =
-                  contentPortrait ? controller.width : controller.height;
+              final logicalWidth = contentPortrait ? controller.height : controller.width;
+              final logicalHeight = contentPortrait ? controller.width : controller.height;
               preview = FittedBox(
-                fit: resizeMode == PreviewResizeMode.contain
-                    ? BoxFit.contain
-                    : BoxFit.cover,
+                fit: resizeMode == PreviewResizeMode.contain ? BoxFit.contain : BoxFit.cover,
                 clipBehavior: Clip.hardEdge,
                 child: SizedBox(
                   width: logicalWidth.toDouble(),
@@ -121,14 +113,10 @@ class CameraPreview extends StatelessWidget {
               // here: size a box to the (orientation-corrected) stream aspect and
               // cover/contain-fit it.
               final isPortrait = controller.sensorOrientation % 180 != 0;
-              final logicalWidth =
-                  isPortrait ? controller.height : controller.width;
-              final logicalHeight =
-                  isPortrait ? controller.width : controller.height;
+              final logicalWidth = isPortrait ? controller.height : controller.width;
+              final logicalHeight = isPortrait ? controller.width : controller.height;
               preview = FittedBox(
-                fit: resizeMode == PreviewResizeMode.contain
-                    ? BoxFit.contain
-                    : BoxFit.cover,
+                fit: resizeMode == PreviewResizeMode.contain ? BoxFit.contain : BoxFit.cover,
                 child: SizedBox(
                   width: logicalWidth.toDouble(),
                   height: logicalHeight.toDouble(),

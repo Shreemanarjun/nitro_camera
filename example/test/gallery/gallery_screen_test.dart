@@ -11,8 +11,9 @@ void main() {
   setUp(resetStore);
 
   group('GalleryScreen', () {
-    testWidgets('shows the empty state when there are no captures',
-        (tester) async {
+    testWidgets('shows the empty state when there are no captures', (
+      tester,
+    ) async {
       useGallerySandbox();
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const GalleryScreen()));
@@ -23,8 +24,9 @@ void main() {
       expect(find.byType(MediaTile), findsNothing);
     });
 
-    testWidgets('renders a grid of seeded photos and videos, newest first',
-        (tester) async {
+    testWidgets('renders a grid of seeded photos and videos, newest first', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       cameraStore.capturedMedia.value = [
@@ -71,8 +73,9 @@ void main() {
       expect(find.text('RAW'), findsOneWidget);
     });
 
-    testWidgets('long-press enters multi-select and taps toggle selection',
-        (tester) async {
+    testWidgets('long-press enters multi-select and taps toggle selection', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       cameraStore.capturedMedia.value = [

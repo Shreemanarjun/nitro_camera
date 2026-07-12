@@ -38,8 +38,7 @@ class FrameData {
 
   /// Effective row stride — falls back to a tightly-packed row when the native
   /// stride is unknown (`0`).
-  int get effectiveBytesPerRow =>
-      bytesPerRow > 0 ? bytesPerRow : width * (format == 1 ? 4 : 1);
+  int get effectiveBytesPerRow => bytesPerRow > 0 ? bytesPerRow : width * (format == 1 ? 4 : 1);
 }
 
 /// A frame-processing function. It runs on a background isolate, so it **must be
@@ -103,8 +102,7 @@ class _FrameWire {
   final int orientation;
   final int bytesPerRow;
   final bool isMirrored;
-  const _FrameWire(this.bytes, this.width, this.height, this.format,
-      this.timestamp, this.orientation, this.bytesPerRow, this.isMirrored);
+  const _FrameWire(this.bytes, this.width, this.height, this.format, this.timestamp, this.orientation, this.bytesPerRow, this.isMirrored);
 }
 
 /// Runs a [FrameHandler] on a dedicated background [Isolate], keeping heavy
@@ -133,8 +131,7 @@ class CameraFrameProcessor<R> {
   SendPort? _toWorker;
   final Completer<void> _ready = Completer<void>();
   final StreamController<R> _out = StreamController<R>.broadcast();
-  final StreamController<FrameProcessStats> _stats =
-      StreamController<FrameProcessStats>.broadcast();
+  final StreamController<FrameProcessStats> _stats = StreamController<FrameProcessStats>.broadcast();
 
   bool _busy = false;
   _FrameWire? _pending;
@@ -154,8 +151,7 @@ class CameraFrameProcessor<R> {
   Future<void> start() async {
     if (_disposed) throw StateError('CameraFrameProcessor already disposed');
     final rp = ReceivePort();
-    _isolate = await Isolate.spawn(
-        _entry<R>, _Init<R>(rp.sendPort, handler, workerInit, workerInitArg));
+    _isolate = await Isolate.spawn(_entry<R>, _Init<R>(rp.sendPort, handler, workerInit, workerInitArg));
     rp.listen((msg) {
       if (msg is SendPort) {
         _toWorker = msg;
@@ -167,11 +163,13 @@ class CameraFrameProcessor<R> {
       final reply = msg as _Reply<R>;
       if (!_out.isClosed) _out.add(reply.result);
       if (!_stats.isClosed) {
-        _stats.add(FrameProcessStats(
-          reply.elapsedMicros,
-          reply.frameTimestamp,
-          success: reply.result != null,
-        ));
+        _stats.add(
+          FrameProcessStats(
+            reply.elapsedMicros,
+            reply.frameTimestamp,
+            success: reply.result != null,
+          ),
+        );
       }
       final p = _pending;
       if (p != null) {
@@ -186,16 +184,18 @@ class CameraFrameProcessor<R> {
   /// any previously-pending frame (drop-latest).
   void submit(FrameData frame) {
     if (_disposed || !_ready.isCompleted) return;
-    _enqueue(_FrameWire(
-      TransferableTypedData.fromList([frame.bytes]),
-      frame.width,
-      frame.height,
-      frame.format,
-      frame.timestamp,
-      frame.orientation,
-      frame.bytesPerRow,
-      frame.isMirrored,
-    ));
+    _enqueue(
+      _FrameWire(
+        TransferableTypedData.fromList([frame.bytes]),
+        frame.width,
+        frame.height,
+        frame.format,
+        frame.timestamp,
+        frame.orientation,
+        frame.bytesPerRow,
+        frame.isMirrored,
+      ),
+    );
   }
 
   /// Subscribes to a [CameraFrame] stream, moving each frame's pixels to the
@@ -205,16 +205,18 @@ class CameraFrameProcessor<R> {
       if (_disposed || !_ready.isCompleted) return;
       // fromList copies the native view out *now* (while it is valid); the send
       // then transfers ownership without a second copy.
-      _enqueue(_FrameWire(
-        TransferableTypedData.fromList([f.pixels]),
-        f.width,
-        f.height,
-        f.pixelFormat,
-        f.timestamp,
-        f.orientation,
-        f.bytesPerRow,
-        f.isMirrored != 0,
-      ));
+      _enqueue(
+        _FrameWire(
+          TransferableTypedData.fromList([f.pixels]),
+          f.width,
+          f.height,
+          f.pixelFormat,
+          f.timestamp,
+          f.orientation,
+          f.bytesPerRow,
+          f.isMirrored != 0,
+        ),
+      );
     });
   }
 
@@ -253,16 +255,18 @@ class CameraFrameProcessor<R> {
         sw
           ..reset()
           ..start();
-        final result = init.handler(FrameData(
-          bytes: bytes,
-          width: msg.width,
-          height: msg.height,
-          format: msg.format,
-          timestamp: msg.timestamp,
-          orientation: msg.orientation,
-          bytesPerRow: msg.bytesPerRow,
-          isMirrored: msg.isMirrored,
-        ));
+        final result = init.handler(
+          FrameData(
+            bytes: bytes,
+            width: msg.width,
+            height: msg.height,
+            format: msg.format,
+            timestamp: msg.timestamp,
+            orientation: msg.orientation,
+            bytesPerRow: msg.bytesPerRow,
+            isMirrored: msg.isMirrored,
+          ),
+        );
         sw.stop();
         init.reply.send(_Reply<R>(result, sw.elapsedMicroseconds, msg.timestamp));
       }

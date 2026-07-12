@@ -18,7 +18,8 @@ class FilterSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     return Watch((context) {
       final activeFilters = filters ?? CameraStore.filters;
-      final activeCurrentName = currentFilterName ?? cameraStore.currentFilterName.value;
+      final activeCurrentName =
+          currentFilterName ?? cameraStore.currentFilterName.value;
       final filterNames = activeFilters.keys.toList();
 
       return Container(
@@ -51,22 +52,30 @@ class FilterSelector extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isSelected ? Colors.cyanAccent : Colors.white24,
+                          color: isSelected
+                              ? Colors.cyanAccent
+                              : Colors.white24,
                           width: isSelected ? 2 : 1,
                         ),
                         gradient: _getFilterGradient(name),
                         boxShadow: isSelected
                             ? [
                                 BoxShadow(
-                                  color: Colors.cyanAccent.withValues(alpha: 0.3),
+                                  color: Colors.cyanAccent.withValues(
+                                    alpha: 0.3,
+                                  ),
                                   blurRadius: 10,
                                   spreadRadius: 1,
-                                )
+                                ),
                               ]
                             : null,
                       ),
                       child: isSelected
-                          ? const Icon(Icons.check, color: Colors.cyanAccent, size: 16)
+                          ? const Icon(
+                              Icons.check,
+                              color: Colors.cyanAccent,
+                              size: 16,
+                            )
                           : null,
                     ),
                     const SizedBox(height: 6),
@@ -75,7 +84,9 @@ class FilterSelector extends StatelessWidget {
                       style: TextStyle(
                         color: isSelected ? Colors.cyanAccent : Colors.white60,
                         fontSize: 8,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                         letterSpacing: 0.8,
                       ),
                     ),
@@ -96,11 +107,22 @@ class FilterSelector extends StatelessWidget {
       case 'GRAYSCALE':
         return const LinearGradient(colors: [Colors.grey, Colors.blueGrey]);
       case 'SEPIA':
-        return const LinearGradient(colors: [Color(0xFF704214), Color(0xFFC0A080)]);
+        return const LinearGradient(
+          colors: [Color(0xFF704214), Color(0xFFC0A080)],
+        );
       case 'VIGNETTE':
-        return const LinearGradient(colors: [Colors.black, Colors.transparent], begin: Alignment.center, end: Alignment.bottomRight);
+        return const LinearGradient(
+          colors: [Colors.black, Colors.transparent],
+          begin: Alignment.center,
+          end: Alignment.bottomRight,
+        );
       default:
-        return LinearGradient(colors: [Colors.cyanAccent.withValues(alpha: 0.2), Colors.cyanAccent.withValues(alpha: 0.6)]);
+        return LinearGradient(
+          colors: [
+            Colors.cyanAccent.withValues(alpha: 0.2),
+            Colors.cyanAccent.withValues(alpha: 0.6),
+          ],
+        );
     }
   }
 }

@@ -47,8 +47,7 @@ CodeResult? decodeCodeFrame(
 }) {
   final win = _windowOf(f, windowCropFraction);
   final factor = win.side > 700 ? 2 : 1;
-  final hit = _decodePass(f, win, factor, kind.formats,
-      tryUpright: true, tryRotated: true);
+  final hit = _decodePass(f, win, factor, kind.formats, tryUpright: true, tryRotated: true);
   return _toResult(hit, f);
 }
 
@@ -75,8 +74,7 @@ _Window _windowOf(FrameData f, double fraction) {
     final side = f.width < f.height ? f.width : f.height;
     return _Window((f.width - side) ~/ 2, (f.height - side) ~/ 2, side);
   }
-  final side =
-      ((f.width < f.height ? f.width : f.height) * fraction).round();
+  final side = ((f.width < f.height ? f.width : f.height) * fraction).round();
   return _Window((f.width - side) ~/ 2, (f.height - side) ~/ 2, side);
 }
 
@@ -248,8 +246,7 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   // success.
   final lastFormat = _lastFormat;
   if (lastFormat != null && kind.formats.contains(lastFormat)) {
-    final hit = _decodePass(f, win, _lastFactor, {lastFormat},
-        tryUpright: !_lastRotated, tryRotated: _lastRotated);
+    final hit = _decodePass(f, win, _lastFactor, {lastFormat}, tryUpright: !_lastRotated, tryRotated: _lastRotated);
     if (hit != null) {
       _lastMisses = 0;
       return _toResult(hit, f);
@@ -258,15 +255,13 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   }
 
   // 1. Fast level.
-  var hit = _decodePass(f, win, fA, kind.formats,
-      tryUpright: true, tryRotated: true);
+  var hit = _decodePass(f, win, fA, kind.formats, tryUpright: true, tryRotated: true);
 
   // 2. Thorough level, every 2nd miss, BOTH orientations — small 1D codes
   // that level A can't resolve are often only readable rotated (portrait
   // phone), so B must retry rotation too.
   if (hit == null && fB < fA && _frameIdx % 2 == 0) {
-    hit = _decodePass(f, win, fB, kind.formats,
-        tryUpright: true, tryRotated: true);
+    hit = _decodePass(f, win, fB, kind.formats, tryUpright: true, tryRotated: true);
   }
 
   if (hit != null) {
@@ -306,13 +301,13 @@ RawDecode? _decodeWindow(
   // The built-in engines share one binarized window.
   GrayWindow? win;
   GrayWindow window() => win ??= GrayWindow(
-        bytes,
-        stride: stride,
-        left: left,
-        top: top,
-        width: w,
-        height: h,
-      );
+    bytes,
+    stride: stride,
+    left: left,
+    top: top,
+    width: w,
+    height: h,
+  );
 
   // 2. Postal engine (height-modulated).
   if (raw == null && formats.any((x) => x.isPostal)) {
@@ -322,9 +317,7 @@ RawDecode? _decodeWindow(
       if (formats.contains(CodeFormat.rm4scc)) {
         raw = decodeRm4scc(states);
       }
-      if (raw == null &&
-          (formats.contains(CodeFormat.postnet) ||
-              formats.contains(CodeFormat.planet))) {
+      if (raw == null && (formats.contains(CodeFormat.postnet) || formats.contains(CodeFormat.planet))) {
         raw = decodePostnetPlanet(classify2State(bars));
       }
       if (raw == null && formats.contains(CodeFormat.kix)) {
@@ -335,26 +328,16 @@ RawDecode? _decodeWindow(
 
   // 3. Width engine (MSI / Code 11 / Industrial 2-of-5 / Telepen /
   //    Pharmacode one-track).
-  final wantsWidth = formats.contains(CodeFormat.msi) ||
-      formats.contains(CodeFormat.code11) ||
-      formats.contains(CodeFormat.industrial2of5) ||
-      formats.contains(CodeFormat.telepen) ||
-      formats.contains(CodeFormat.pharmacode);
+  final wantsWidth = formats.contains(CodeFormat.msi) || formats.contains(CodeFormat.code11) || formats.contains(CodeFormat.industrial2of5) || formats.contains(CodeFormat.telepen) || formats.contains(CodeFormat.pharmacode);
   if (raw == null && wantsWidth) {
     for (final runs in extractScanlineRuns(window())) {
       final units = runsToUnits(runs);
       if (units == null) continue;
       raw ??= formats.contains(CodeFormat.msi) ? decodeMsi(units) : null;
-      raw ??=
-          formats.contains(CodeFormat.code11) ? decodeCode11(units) : null;
-      raw ??= formats.contains(CodeFormat.industrial2of5)
-          ? decodeIndustrial2of5(units)
-          : null;
-      raw ??=
-          formats.contains(CodeFormat.telepen) ? decodeTelepen(units) : null;
-      raw ??= formats.contains(CodeFormat.pharmacode)
-          ? decodePharmaOneTrack(units)
-          : null;
+      raw ??= formats.contains(CodeFormat.code11) ? decodeCode11(units) : null;
+      raw ??= formats.contains(CodeFormat.industrial2of5) ? decodeIndustrial2of5(units) : null;
+      raw ??= formats.contains(CodeFormat.telepen) ? decodeTelepen(units) : null;
+      raw ??= formats.contains(CodeFormat.pharmacode) ? decodePharmaOneTrack(units) : null;
       if (raw != null) break;
     }
   }
@@ -376,20 +359,18 @@ RawDecode? _decodeWindow(
 CodeResult? _scanQr(FrameData f) => scanFrameAdaptive(f, CodeScanKind.qr);
 CodeResult? _scan1D(FrameData f) => scanFrameAdaptive(f, CodeScanKind.oneD);
 CodeResult? _scan2D(FrameData f) => scanFrameAdaptive(f, CodeScanKind.twoD);
-CodeResult? _scanPostal(FrameData f) =>
-    scanFrameAdaptive(f, CodeScanKind.postal);
-CodeResult? _scanPharma(FrameData f) =>
-    scanFrameAdaptive(f, CodeScanKind.pharma);
+CodeResult? _scanPostal(FrameData f) => scanFrameAdaptive(f, CodeScanKind.postal);
+CodeResult? _scanPharma(FrameData f) => scanFrameAdaptive(f, CodeScanKind.pharma);
 CodeResult? _scanAll(FrameData f) => scanFrameAdaptive(f, CodeScanKind.all);
 
 FrameHandler<CodeResult?> _handlerFor(CodeScanKind kind) => switch (kind) {
-      CodeScanKind.qr => _scanQr,
-      CodeScanKind.oneD => _scan1D,
-      CodeScanKind.twoD => _scan2D,
-      CodeScanKind.postal => _scanPostal,
-      CodeScanKind.pharma => _scanPharma,
-      CodeScanKind.all => _scanAll,
-    };
+  CodeScanKind.qr => _scanQr,
+  CodeScanKind.oneD => _scan1D,
+  CodeScanKind.twoD => _scan2D,
+  CodeScanKind.postal => _scanPostal,
+  CodeScanKind.pharma => _scanPharma,
+  CodeScanKind.all => _scanAll,
+};
 
 /// Confirms detections across consecutive frames and de-duplicates emissions
 /// — pure logic, unit-testable without a camera.
@@ -464,8 +445,7 @@ class CodeScanner {
 
   final ScanConfirmer _confirmer;
   final CameraFrameProcessor<CodeResult?> _proc;
-  final StreamController<CodeResult> _confirmed =
-      StreamController<CodeResult>.broadcast();
+  final StreamController<CodeResult> _confirmed = StreamController<CodeResult>.broadcast();
   StreamSubscription<CameraFrame>? _sub;
   StreamSubscription<CodeResult?>? _rawSub;
   bool _started = false;
@@ -476,11 +456,11 @@ class CodeScanner {
     this.mode = ScanMode.continuous,
     int confirmationFrames = 2,
     Duration cooldown = const Duration(milliseconds: 1500),
-  })  : _confirmer = ScanConfirmer(
-          confirmationFrames: confirmationFrames,
-          cooldown: cooldown,
-        ),
-        _proc = CameraFrameProcessor<CodeResult?>(_handlerFor(kind));
+  }) : _confirmer = ScanConfirmer(
+         confirmationFrames: confirmationFrames,
+         cooldown: cooldown,
+       ),
+       _proc = CameraFrameProcessor<CodeResult?>(_handlerFor(kind));
 
   /// CONFIRMED results: same payload on N consecutive frames, deduplicated by
   /// the cooldown. In [ScanMode.oneShot], at most one until [resume].
@@ -488,8 +468,7 @@ class CodeScanner {
 
   /// Every raw per-frame detection (unconfirmed) — drive live highlights
   /// with this; act on [results].
-  Stream<CodeResult> get detections =>
-      _proc.results.where((r) => r != null).cast<CodeResult>();
+  Stream<CodeResult> get detections => _proc.results.where((r) => r != null).cast<CodeResult>();
 
   /// Per-frame decode timing — emitted for EVERY analysed frame (hit or
   /// miss). Feed to a benchmarking HUD: `stats.elapsedMillis` is how long the

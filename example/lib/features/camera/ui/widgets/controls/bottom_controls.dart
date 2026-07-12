@@ -27,8 +27,10 @@ class BottomControls extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                isRecording ? Colors.red.withValues(alpha: 0.1) : Colors.transparent,
-                Colors.black.withValues(alpha: 0.6)
+                isRecording
+                    ? Colors.red.withValues(alpha: 0.1)
+                    : Colors.transparent,
+                Colors.black.withValues(alpha: 0.6),
               ],
             ),
           ),
@@ -90,7 +92,10 @@ class BottomControls extends StatelessWidget {
               // RECORDING TIMER
               if (isRecording)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red,
                     borderRadius: BorderRadius.circular(4),
@@ -140,8 +145,7 @@ class BottomControls extends StatelessWidget {
                                   )
                                 : null,
                           ),
-                          child:
-                              lastCapturedPath != null && isLastCapturedVideo
+                          child: lastCapturedPath != null && isLastCapturedVideo
                               ? const Icon(
                                   Icons.play_circle_fill,
                                   color: Colors.white,

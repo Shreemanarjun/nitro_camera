@@ -5,26 +5,23 @@ CameraDeviceInfo _device(
   String id, {
   CameraPosition position = CameraPosition.back,
   HardwareLevel hardwareLevel = HardwareLevel.full,
-  List<PhysicalDeviceType> physicalDevices = const [
-    PhysicalDeviceType.wideAngleCamera
-  ],
-}) =>
-    CameraDeviceInfo(
-      id: id,
-      name: id,
-      position: position,
-      lensType: CameraLensType.wideAngle,
-      sensorOrientation: 90,
-      minZoom: 1,
-      maxZoom: 8,
-      neutralZoom: 1,
-      hasFlash: true,
-      hasTorch: true,
-      maxPhotoWidth: 4000,
-      maxPhotoHeight: 3000,
-      hardwareLevel: hardwareLevel,
-      physicalDevices: physicalDevices,
-    );
+  List<PhysicalDeviceType> physicalDevices = const [PhysicalDeviceType.wideAngleCamera],
+}) => CameraDeviceInfo(
+  id: id,
+  name: id,
+  position: position,
+  lensType: CameraLensType.wideAngle,
+  sensorOrientation: 90,
+  minZoom: 1,
+  maxZoom: 8,
+  neutralZoom: 1,
+  hasFlash: true,
+  hasTorch: true,
+  maxPhotoWidth: 4000,
+  maxPhotoHeight: 3000,
+  hardwareLevel: hardwareLevel,
+  physicalDevices: physicalDevices,
+);
 
 void main() {
   group('selectCameraDevice', () {
@@ -77,11 +74,14 @@ void main() {
 
     test('exact lens match beats a logical camera with extra lenses', () {
       final devices = [
-        _device('triple', physicalDevices: [
-          PhysicalDeviceType.ultraWideAngleCamera,
-          PhysicalDeviceType.wideAngleCamera,
-          PhysicalDeviceType.telephotoCamera,
-        ]),
+        _device(
+          'triple',
+          physicalDevices: [
+            PhysicalDeviceType.ultraWideAngleCamera,
+            PhysicalDeviceType.wideAngleCamera,
+            PhysicalDeviceType.telephotoCamera,
+          ],
+        ),
         _device('ultrawide', physicalDevices: [PhysicalDeviceType.ultraWideAngleCamera]),
       ];
       final picked = selectCameraDevice(
@@ -95,11 +95,14 @@ void main() {
     test('logical camera wins when ALL its lenses are requested', () {
       final devices = [
         _device('wide'),
-        _device('triple', physicalDevices: [
-          PhysicalDeviceType.ultraWideAngleCamera,
-          PhysicalDeviceType.wideAngleCamera,
-          PhysicalDeviceType.telephotoCamera,
-        ]),
+        _device(
+          'triple',
+          physicalDevices: [
+            PhysicalDeviceType.ultraWideAngleCamera,
+            PhysicalDeviceType.wideAngleCamera,
+            PhysicalDeviceType.telephotoCamera,
+          ],
+        ),
       ];
       final picked = selectCameraDevice(
         devices,

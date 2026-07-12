@@ -65,7 +65,7 @@ class RecordingSystemGallery implements SystemGallery {
 /// A per-test sandbox: temp dir + fake services wired into [MediaServices].
 class GallerySandbox {
   GallerySandbox()
-      : dir = Directory.systemTemp.createTempSync('nitro_gallery_test') {
+    : dir = Directory.systemTemp.createTempSync('nitro_gallery_test') {
     thumbnails = FakeThumbnails(
       tile: writeFile('thumb.png', kTinyImageBytes),
       duration: const Duration(seconds: 5),

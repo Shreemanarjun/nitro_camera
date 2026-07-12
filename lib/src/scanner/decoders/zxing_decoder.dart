@@ -11,24 +11,24 @@ import 'package:zxing_lib/zxing.dart' as zxing;
 import '../types.dart';
 
 zxing.BarcodeFormat? _toZxing(CodeFormat f) => switch (f) {
-      CodeFormat.qrCode => zxing.BarcodeFormat.qrCode,
-      CodeFormat.dataMatrix => zxing.BarcodeFormat.dataMatrix,
-      CodeFormat.aztec => zxing.BarcodeFormat.aztec,
-      CodeFormat.pdf417 => zxing.BarcodeFormat.pdf417,
-      CodeFormat.maxicode => zxing.BarcodeFormat.maxicode,
-      CodeFormat.ean13 => zxing.BarcodeFormat.ean13,
-      CodeFormat.ean8 => zxing.BarcodeFormat.ean8,
-      CodeFormat.upcA => zxing.BarcodeFormat.upcA,
-      CodeFormat.upcE => zxing.BarcodeFormat.upcE,
-      CodeFormat.code39 => zxing.BarcodeFormat.code39,
-      CodeFormat.code93 => zxing.BarcodeFormat.code93,
-      CodeFormat.code128 => zxing.BarcodeFormat.code128,
-      CodeFormat.itf => zxing.BarcodeFormat.itf,
-      CodeFormat.codabar => zxing.BarcodeFormat.codabar,
-      CodeFormat.rss14 => zxing.BarcodeFormat.rss14,
-      CodeFormat.rssExpanded => zxing.BarcodeFormat.rssExpanded,
-      _ => null,
-    };
+  CodeFormat.qrCode => zxing.BarcodeFormat.qrCode,
+  CodeFormat.dataMatrix => zxing.BarcodeFormat.dataMatrix,
+  CodeFormat.aztec => zxing.BarcodeFormat.aztec,
+  CodeFormat.pdf417 => zxing.BarcodeFormat.pdf417,
+  CodeFormat.maxicode => zxing.BarcodeFormat.maxicode,
+  CodeFormat.ean13 => zxing.BarcodeFormat.ean13,
+  CodeFormat.ean8 => zxing.BarcodeFormat.ean8,
+  CodeFormat.upcA => zxing.BarcodeFormat.upcA,
+  CodeFormat.upcE => zxing.BarcodeFormat.upcE,
+  CodeFormat.code39 => zxing.BarcodeFormat.code39,
+  CodeFormat.code93 => zxing.BarcodeFormat.code93,
+  CodeFormat.code128 => zxing.BarcodeFormat.code128,
+  CodeFormat.itf => zxing.BarcodeFormat.itf,
+  CodeFormat.codabar => zxing.BarcodeFormat.codabar,
+  CodeFormat.rss14 => zxing.BarcodeFormat.rss14,
+  CodeFormat.rssExpanded => zxing.BarcodeFormat.rssExpanded,
+  _ => null,
+};
 
 CodeFormat? _fromZxing(zxing.BarcodeFormat f) {
   for (final v in CodeFormat.values) {
@@ -51,8 +51,7 @@ RawDecode? zxingDecode(
   required int height,
   required Set<CodeFormat> formats,
 }) {
-  final zxFormats =
-      formats.map(_toZxing).whereType<zxing.BarcodeFormat>().toList();
+  final zxFormats = formats.map(_toZxing).whereType<zxing.BarcodeFormat>().toList();
   if (zxFormats.isEmpty) return null;
   try {
     final source = _StridedLuminanceSource(
@@ -74,12 +73,8 @@ RawDecode? zxingDecode(
     );
     final format = _fromZxing(result.barcodeFormat);
     if (format == null) return null;
-    final symbologyId = result
-        .resultMetadata?[zxing.ResultMetadataType.symbologyIdentifier]
-        ?.toString();
-    final isGs1 = format == CodeFormat.rss14 ||
-        format == CodeFormat.rssExpanded ||
-        (symbologyId != null && _gs1SymbologyIds.contains(symbologyId));
+    final symbologyId = result.resultMetadata?[zxing.ResultMetadataType.symbologyIdentifier]?.toString();
+    final isGs1 = format == CodeFormat.rss14 || format == CodeFormat.rssExpanded || (symbologyId != null && _gs1SymbologyIds.contains(symbologyId));
     List<double>? points;
     final rp = result.resultPoints;
     if (rp != null && rp.isNotEmpty) {
@@ -113,9 +108,9 @@ class _StridedLuminanceSource extends zxing.LuminanceSource {
     this._stride, {
     int left = 0,
     int top = 0,
-  })  : _left = left,
-        _top = top,
-        super(width, height);
+  }) : _left = left,
+       _top = top,
+       super(width, height);
 
   @override
   Uint8List getRow(int y, Uint8List? row) {

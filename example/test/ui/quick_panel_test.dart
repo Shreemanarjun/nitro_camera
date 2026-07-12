@@ -32,8 +32,9 @@ void main() {
       expect(cameraStore.quickSettingsOpen.value, isFalse);
     });
 
-    testWidgets('shows stream rows AND the promoted settings rows',
-        (tester) async {
+    testWidgets('shows stream rows AND the promoted settings rows', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await openPanel(tester);
 
@@ -53,8 +54,9 @@ void main() {
       expect(find.text('ALL SETTINGS'), findsOneWidget);
     });
 
-    testWidgets('4K segment only appears when the sensor has a UHD format',
-        (tester) async {
+    testWidgets('4K segment only appears when the sensor has a UHD format', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       cameraStore.currentDevice.value = fakeDevice(with4K: false);
       await openPanel(tester);
@@ -96,32 +98,34 @@ void main() {
       expect(cameraStore.whiteBalanceKelvin.value, 3000);
     });
 
-    testWidgets('HDR / geotag / stabilization / codec segments drive the store',
-        (tester) async {
-      usePhoneSurface(tester);
-      await openPanel(tester);
+    testWidgets(
+      'HDR / geotag / stabilization / codec segments drive the store',
+      (tester) async {
+        usePhoneSurface(tester);
+        await openPanel(tester);
 
-      // Two ON segments exist: HDR row first, GEOTAG row second.
-      await tester.tap(find.text('ON').first);
-      await tester.pump();
-      expect(cameraStore.hdrEnabled.value, isTrue);
+        // Two ON segments exist: HDR row first, GEOTAG row second.
+        await tester.tap(find.text('ON').first);
+        await tester.pump();
+        expect(cameraStore.hdrEnabled.value, isTrue);
 
-      await tester.tap(find.text('ON').last);
-      await tester.pump();
-      expect(cameraStore.geotagEnabled.value, isTrue);
+        await tester.tap(find.text('ON').last);
+        await tester.pump();
+        expect(cameraStore.geotagEnabled.value, isTrue);
 
-      await tester.tap(find.text('CINE'));
-      await tester.pump();
-      expect(cameraStore.videoStabilization.value, 2);
+        await tester.tap(find.text('CINE'));
+        await tester.pump();
+        expect(cameraStore.videoStabilization.value, 2);
 
-      await tester.tap(find.text('H.265'));
-      await tester.pump();
-      expect(cameraStore.videoCodec.value, VideoCodec.hevc);
+        await tester.tap(find.text('H.265'));
+        await tester.pump();
+        expect(cameraStore.videoCodec.value, VideoCodec.hevc);
 
-      await tester.tap(find.text('H.264'));
-      await tester.pump();
-      expect(cameraStore.videoCodec.value, VideoCodec.h264);
-    });
+        await tester.tap(find.text('H.264'));
+        await tester.pump();
+        expect(cameraStore.videoCodec.value, VideoCodec.h264);
+      },
+    );
 
     testWidgets('config caption also opens the panel', (tester) async {
       usePhoneSurface(tester);

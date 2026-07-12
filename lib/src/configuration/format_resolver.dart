@@ -24,9 +24,7 @@ class FormatResolver {
     final formats = device.formats;
     if (formats.isEmpty) return null;
 
-    final effective = constraints.isEmpty
-        ? const [ResolutionConstraint(TargetResolution.max())]
-        : constraints;
+    final effective = constraints.isEmpty ? const [ResolutionConstraint(TargetResolution.max())] : constraints;
 
     final stats = FormatStats.from(formats);
     final n = effective.length;
@@ -63,8 +61,7 @@ class FormatResolver {
 
     // Clamp the requested fps into the negotiated format's supported range.
     final fpsReq = targetFps ?? format.maxFps;
-    final selectedFps =
-        fpsReq.clamp(format.minFps, format.maxFps).round();
+    final selectedFps = fpsReq.clamp(format.minFps, format.maxFps).round();
 
     return ResolvedCameraConfig(
       format: format,
@@ -85,6 +82,5 @@ class FormatResolver {
 extension FormatNegotiation on CameraDeviceInfo {
   /// The best format for the given prioritised [constraints]
   /// (highest-resolution format when the list is empty).
-  CameraDeviceFormat? bestFormat([List<CameraConstraint> constraints = const []]) =>
-      FormatResolver.resolve(this, constraints);
+  CameraDeviceFormat? bestFormat([List<CameraConstraint> constraints = const []]) => FormatResolver.resolve(this, constraints);
 }

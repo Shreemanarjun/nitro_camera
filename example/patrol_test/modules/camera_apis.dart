@@ -37,10 +37,14 @@ final class CameraApis extends Module {
   CameraController get _ctrl => cameraStore.activeController.value!;
 
   Future<void> verifyPermissionApis() async {
-    expect(await CameraController.requestCameraPermission(),
-        PermissionStatus.granted);
-    expect(NitroCamera.instance.getCameraPermissionStatus(),
-        PermissionStatus.granted.index);
+    expect(
+      await CameraController.requestCameraPermission(),
+      PermissionStatus.granted,
+    );
+    expect(
+      NitroCamera.instance.getCameraPermissionStatus(),
+      PermissionStatus.granted.index,
+    );
     final mic = NitroCamera.instance.getMicrophonePermissionStatus();
     expect(mic, inInclusiveRange(0, PermissionStatus.values.length - 1));
   }
@@ -76,9 +80,11 @@ final class CameraApis extends Module {
     if (front != null) expect(front.position, CameraPosition.front);
     if (back != null) {
       expect(
-        selectCameraDevice(devices,
-            position: CameraPosition.back,
-            physicalDevices: [PhysicalDeviceType.wideAngleCamera]),
+        selectCameraDevice(
+          devices,
+          position: CameraPosition.back,
+          physicalDevices: [PhysicalDeviceType.wideAngleCamera],
+        ),
         isNotNull,
       );
     }
@@ -106,8 +112,11 @@ final class CameraApis extends Module {
     final base = c.configuration;
     expect(base, isNotNull);
     await c.configure(base!.copyWith(zoom: 2.0, exposure: 0.5));
-    expect(c.textureId, beforeTid,
-        reason: 'live-field configure must not tear down the session');
+    expect(
+      c.textureId,
+      beforeTid,
+      reason: 'live-field configure must not tear down the session',
+    );
     expect(c.configuration!.zoom, 2.0);
     await c.configure(base.copyWith(zoom: 1.0, exposure: 0.0));
     expect(c.textureId, beforeTid);
@@ -161,8 +170,11 @@ final class CameraApis extends Module {
 
     await pumpFor(const Duration(seconds: 2));
     expect(cameraStore.status.value, CameraStatus.running);
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'no live setter may surface a native error');
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason: 'no live setter may surface a native error',
+    );
     expect(c.getSessionState().running, isTrue);
   }
 
@@ -229,8 +241,11 @@ final class CameraApis extends Module {
     c.setFrameProcessing(enabled: false);
 
     for (final f in frames) {
-      expect(f.textureId, c.textureId,
-          reason: 'frameStream must be filtered to its own session');
+      expect(
+        f.textureId,
+        c.textureId,
+        reason: 'frameStream must be filtered to its own session',
+      );
       expect(f.w, greaterThan(0));
       expect(f.h, greaterThan(0));
       expect(f.size, greaterThan(0));
@@ -243,8 +258,10 @@ final class CameraApis extends Module {
 
     FrameProcessorPlugins.register('meanLuma', createMeanLumaPlugin);
     expect(FrameProcessorPlugins.isRegistered('meanLuma'), isTrue);
-    expect(() => FrameProcessorPlugins.init('no-such-plugin'),
-        throwsArgumentError);
+    expect(
+      () => FrameProcessorPlugins.init('no-such-plugin'),
+      throwsArgumentError,
+    );
 
     final runner = FrameProcessorPlugins.init('meanLuma', {'step': 64});
     final results = <Object?>[];
@@ -310,9 +327,13 @@ final class CameraApis extends Module {
     // Paused time must NOT be counted: reported duration is at least ~1s under
     // the wall-clock (which spans the 1.5s pause). If pause leaked in,
     // durationMs would be ~= wall-clock and this fails.
-    expect(rec.durationMs, lessThan(wall.elapsedMilliseconds - 1000),
-        reason: 'paused span leaked into durationMs '
-            '(dur=${rec.durationMs}ms, wall=${wall.elapsedMilliseconds}ms)');
+    expect(
+      rec.durationMs,
+      lessThan(wall.elapsedMilliseconds - 1000),
+      reason:
+          'paused span leaked into durationMs '
+          '(dur=${rec.durationMs}ms, wall=${wall.elapsedMilliseconds}ms)',
+    );
     expect(rec.reason, RecordingFinishedReason.stopped);
     expect(rec.videoCodec, VideoCodec.h264);
     expect(rec.videoFileType, VideoFileType.mp4);
@@ -343,19 +364,23 @@ final class CameraApis extends Module {
     await pumpFor(const Duration(seconds: 1)); // AE/AF settle
 
     // JPEG variants are guaranteed on any camera — assert strictly.
-    final geo = await c.takePhotoWithOptions(const PhotoCaptureOptions(
-      location: (latitude: 37.7749, longitude: -122.4194, altitude: 12.0),
-    ));
+    final geo = await c.takePhotoWithOptions(
+      const PhotoCaptureOptions(
+        location: (latitude: 37.7749, longitude: -122.4194, altitude: 12.0),
+      ),
+    );
     expect(File(geo.path).existsSync(), isTrue);
     expect(geo.width, greaterThan(0));
     expect(geo.height, greaterThan(0));
     File(geo.path).deleteSync();
 
-    final fast = await c.takePhotoWithOptions(const PhotoCaptureOptions(
-      quality: QualityPrioritization.speed,
-      enableShutterSound: false,
-      skipMetadata: true,
-    ));
+    final fast = await c.takePhotoWithOptions(
+      const PhotoCaptureOptions(
+        quality: QualityPrioritization.speed,
+        enableShutterSound: false,
+        skipMetadata: true,
+      ),
+    );
     expect(File(fast.path).existsSync(), isTrue);
     File(fast.path).deleteSync();
 
@@ -367,9 +392,9 @@ final class CameraApis extends Module {
       // unavailable" and skip — don't fail the whole variant test. The JPEG
       // assertions above still guard the common path.
       try {
-        final raw = await c.takePhotoWithOptions(const PhotoCaptureOptions(
-          outputFormat: PhotoOutputFormat.dng,
-        ));
+        final raw = await c.takePhotoWithOptions(
+          const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng),
+        );
         expect(File(raw.path).existsSync(), isTrue);
         expect(raw.path.toLowerCase(), endsWith('.dng'));
         File(raw.path).deleteSync();
@@ -454,8 +479,11 @@ final class CameraApis extends Module {
     await frameSub.cancel();
     await pumpFor(const Duration(milliseconds: 500));
     expect(cameraStore.status.value, CameraStatus.running);
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'detector start/stop churn must not surface an error');
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason: 'detector start/stop churn must not surface an error',
+    );
   }
 
   /// configure() with a session-field change (fps) must REOPEN: new
@@ -467,15 +495,22 @@ final class CameraApis extends Module {
     final targetFps = base.fps == 30 ? 24 : 30;
 
     await c.configure(base.copyWith(fps: targetFps));
-    expect(c.textureId, isNot(beforeTid),
-        reason: 'an fps change must tear down and reopen the session');
+    expect(
+      c.textureId,
+      isNot(beforeTid),
+      reason: 'an fps change must tear down and reopen the session',
+    );
     expect(c.isInitialized, isTrue);
-    await pumpUntil(() => c.getSessionState().running,
-        reason: 'session streaming after the fps reopen');
+    await pumpUntil(
+      () => c.getSessionState().running,
+      reason: 'session streaming after the fps reopen',
+    );
 
     await c.configure(c.configuration!.copyWith(fps: base.fps));
-    await pumpUntil(() => c.getSessionState().running,
-        reason: 'session streaming after restoring fps');
+    await pumpUntil(
+      () => c.getSessionState().running,
+      reason: 'session streaming after restoring fps',
+    );
     expect(cameraStore.errorMessage.value, isNull);
   }
 
@@ -492,23 +527,30 @@ final class CameraApis extends Module {
     final photo = await c.takePhoto();
     File(photo.path).deleteSync();
     await pumpUntil(
-      () => mine.any((e) =>
-          e.type == CameraEventType.photoCaptureShutter ||
-          e.type == CameraEventType.photoCaptureBegan),
+      () => mine.any(
+        (e) =>
+            e.type == CameraEventType.photoCaptureShutter ||
+            e.type == CameraEventType.photoCaptureBegan,
+      ),
       reason: 'typed capture events delivered on controller.events',
     );
     await s1.cancel();
     await s2.cancel();
 
     expect(
-        all.any((e) =>
+      all.any(
+        (e) =>
             e.type == CameraEventType.photoCaptureShutter ||
-            e.type == CameraEventType.photoCaptureBegan),
-        isTrue,
-        reason: 'allEvents must carry the same capture events');
-    expect(mine.every((e) => e.textureId == c.textureId || e.textureId == 0),
-        isTrue,
-        reason: 'controller.events must be scoped to its session');
+            e.type == CameraEventType.photoCaptureBegan,
+      ),
+      isTrue,
+      reason: 'allEvents must carry the same capture events',
+    );
+    expect(
+      mine.every((e) => e.textureId == c.textureId || e.textureId == 0),
+      isTrue,
+      reason: 'controller.events must be scoped to its session',
+    );
   }
 
   /// RecordingOptions.maxDurationMs auto-stops natively; the finished file
@@ -535,8 +577,11 @@ final class CameraApis extends Module {
     await sub.cancel();
 
     final finished = File(stops.first.message);
-    expect(finished.existsSync(), isTrue,
-        reason: 'auto-stop event must carry the finalized file path');
+    expect(
+      finished.existsSync(),
+      isTrue,
+      reason: 'auto-stop event must carry the finalized file path',
+    );
     expect(finished.lengthSync(), greaterThan(0));
     finished.deleteSync();
     expect(cameraStore.errorMessage.value, isNull);
@@ -554,8 +599,10 @@ final class CameraApis extends Module {
     try {
       await c.startRecording(
         path,
-        options:
-            const RecordingOptions(codec: 1 /* hevc */, fileType: 1 /* mov */),
+        options: const RecordingOptions(
+          codec: 1 /* hevc */,
+          fileType: 1 /* mov */,
+        ),
       );
     } on CameraException {
       // No HEVC encoder — the recorder rejected the codec at prepare().
@@ -568,9 +615,13 @@ final class CameraApis extends Module {
     expect(f.existsSync(), isTrue);
     expect(rec.fileSize, greaterThan(0));
     expect(rec.durationMs, greaterThan(0));
-    expect(rec.videoCodec, VideoCodec.hevc,
-        reason: 'requested HEVC but the recorder reported '
-            '${rec.videoCodec.name} — encoder fallback?');
+    expect(
+      rec.videoCodec,
+      VideoCodec.hevc,
+      reason:
+          'requested HEVC but the recorder reported '
+          '${rec.videoCodec.name} — encoder fallback?',
+    );
     // NOTE: container is platform-normalized — Android's MediaRecorder writes
     // MPEG-4 for a .mov request (VideoFileType.mp4); iOS honours .mov. So the
     // fileType is validated only as a real enum value, not pinned to mov.
@@ -588,15 +639,19 @@ final class CameraApis extends Module {
 
     await pumpFor(const Duration(seconds: 1)); // AE settle
     final photo = await c.takePhotoWithOptions(
-        const PhotoCaptureOptions(flash: FlashMode.on));
+      const PhotoCaptureOptions(flash: FlashMode.on),
+    );
     expect(File(photo.path).existsSync(), isTrue);
     expect(File(photo.path).lengthSync(), greaterThan(0));
     File(photo.path).deleteSync();
 
     await pumpFor(const Duration(milliseconds: 500));
     expect(cameraStore.status.value, CameraStatus.running);
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'flash capture must not surface an error');
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason: 'flash capture must not surface an error',
+    );
     return true;
   }
 
@@ -623,7 +678,9 @@ final class CameraApis extends Module {
       final firstFrames = <int>[];
       final secondFrames = <int>[];
       final s1 = c.frameStream.listen((f) => firstFrames.add(f.textureId));
-      final s2 = second.frameStream.listen((f) => secondFrames.add(f.textureId));
+      final s2 = second.frameStream.listen(
+        (f) => secondFrames.add(f.textureId),
+      );
       c.setFrameProcessing(enabled: true);
       second.setFrameProcessing(enabled: true);
 
@@ -636,10 +693,16 @@ final class CameraApis extends Module {
       second.setFrameProcessing(enabled: false);
       c.setFrameProcessing(enabled: false);
 
-      expect(secondFrames.toSet(), {second.textureId},
-          reason: 'second session frames carry ITS textureId only');
-      expect(firstFrames.toSet().difference({c.textureId!}), isEmpty,
-          reason: 'no cross-session frame leak into the first stream');
+      expect(
+        secondFrames.toSet(),
+        {second.textureId},
+        reason: 'second session frames carry ITS textureId only',
+      );
+      expect(
+        firstFrames.toSet().difference({c.textureId!}),
+        isEmpty,
+        reason: 'no cross-session frame leak into the first stream',
+      );
     } finally {
       await second.dispose();
     }
@@ -661,17 +724,27 @@ final class CameraApis extends Module {
       c.startRecording('/nonexistent_dir_xyz/clip.mp4'),
       throwsA(isA<RecorderException>()),
     );
-    expect(c.isRecording, isFalse,
-        reason: 'a failed start must not leave the controller "recording"');
+    expect(
+      c.isRecording,
+      isFalse,
+      reason: 'a failed start must not leave the controller "recording"',
+    );
     await pumpFor(const Duration(milliseconds: 500));
     // The session must SURVIVE a rejected recording (still running), and the
     // failure is RECORDER-scoped (thrown RecorderException) — it must NOT
     // surface as a session error event / errorMessage. This is the scoping fix.
-    expect(cameraStore.status.value, CameraStatus.running,
-        reason: 'a rejected recording must not kill the session');
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'a caller-side bad-path recording must be recorder-scoped, '
-            'not a session error event');
+    expect(
+      cameraStore.status.value,
+      CameraStatus.running,
+      reason: 'a rejected recording must not kill the session',
+    );
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason:
+          'a caller-side bad-path recording must be recorder-scoped, '
+          'not a session error event',
+    );
 
     // Recovery: the SAME session records to a valid path right after — proving
     // the rejected attempt left the recorder in a usable state.
@@ -681,8 +754,11 @@ final class CameraApis extends Module {
     await c.startRecording(good);
     await pumpFor(const Duration(seconds: 1));
     final rec = await c.stopRecording();
-    expect(File(rec.path).existsSync(), isTrue,
-        reason: 'session must record normally after a rejected attempt');
+    expect(
+      File(rec.path).existsSync(),
+      isTrue,
+      reason: 'session must record normally after a rejected attempt',
+    );
     expect(rec.fileSize, greaterThan(0));
     File(rec.path).deleteSync();
     expect(cameraStore.status.value, CameraStatus.running);
@@ -704,8 +780,11 @@ final class CameraApis extends Module {
       await pumpFor(const Duration(milliseconds: 150));
     }
     expect(cameraStore.status.value, CameraStatus.running);
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'a capture burst must not surface an error');
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason: 'a capture burst must not surface an error',
+    );
   }
 
   Future<void> verifyTypedErrorsAndObservers() async {
@@ -715,8 +794,13 @@ final class CameraApis extends Module {
     final fresh = CameraController(device: _ctrl.device);
     expect(
       () => fresh.setZoom(2.0),
-      throwsA(isA<SessionException>()
-          .having((e) => e.code, 'code', 'session/not-initialized')),
+      throwsA(
+        isA<SessionException>().having(
+          (e) => e.code,
+          'code',
+          'session/not-initialized',
+        ),
+      ),
     );
     await fresh.dispose();
 

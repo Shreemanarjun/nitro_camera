@@ -37,8 +37,9 @@ abstract base class Module {
   /// hang).
   Future<void> acceptPermissionDialogs({int maxDialogs = 2}) async {
     for (var i = 0; i < maxDialogs; i++) {
-      final visible = await $.platform.mobile
-          .isPermissionDialogVisible(timeout: const Duration(seconds: 5));
+      final visible = await $.platform.mobile.isPermissionDialogVisible(
+        timeout: const Duration(seconds: 5),
+      );
       if (!visible) break;
       await Future<void>.delayed(const Duration(seconds: 1));
       await $.platform.mobile.grantPermissionWhenInUse();

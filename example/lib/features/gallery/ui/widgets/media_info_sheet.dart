@@ -121,12 +121,18 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
       }
 
       final lat = _gpsToDecimal(
-          tags['GPS GPSLatitude'], tags['GPS GPSLatitudeRef']);
+        tags['GPS GPSLatitude'],
+        tags['GPS GPSLatitudeRef'],
+      );
       final lng = _gpsToDecimal(
-          tags['GPS GPSLongitude'], tags['GPS GPSLongitudeRef']);
+        tags['GPS GPSLongitude'],
+        tags['GPS GPSLongitudeRef'],
+      );
       if (lat != null && lng != null) {
-        rows.add(
-            ('GPS', '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}'));
+        rows.add((
+          'GPS',
+          '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}',
+        ));
       }
     } catch (_) {}
     return rows;
@@ -238,15 +244,19 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Divider(color: Colors.white.withValues(alpha: 0.08),
-                        height: 1),
+                    Divider(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      height: 1,
+                    ),
                     const SizedBox(height: 12),
                     if (d == null)
                       const Center(
                         child: Padding(
                           padding: EdgeInsets.all(24),
                           child: CircularProgressIndicator(
-                              color: Colors.cyanAccent, strokeWidth: 2),
+                            color: Colors.cyanAccent,
+                            strokeWidth: 2,
+                          ),
                         ),
                       )
                     else ...[
@@ -259,8 +269,7 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                       if (item.isVideo && widget.videoMeta != null)
                         _InfoRow(
                           label: 'DURATION',
-                          value:
-                              formatClipDuration(widget.videoMeta!.duration),
+                          value: formatClipDuration(widget.videoMeta!.duration),
                         ),
                       _InfoRow(label: 'SIZE', value: formatBytes(d.sizeBytes)),
                       if (d.date != null)

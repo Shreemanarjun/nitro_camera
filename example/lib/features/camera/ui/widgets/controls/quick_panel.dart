@@ -67,44 +67,44 @@ class QuickPanel extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                // RESOLUTION — options derive from the active device's formats.
-                Watch((context) {
-                  final w = cameraStore.width.value;
-                  final has4K = cameraStore.supports4K.value;
-                  return _PanelRow(
-                    label: 'RESOLUTION',
-                    segments: [
-                      (
-                        '720P',
-                        w < 1920,
-                        () => cameraStore.setResolution(1280, 720),
-                      ),
-                      (
-                        '1080P',
-                        w >= 1920 && w < 3840,
-                        () => cameraStore.setResolution(1920, 1080),
-                      ),
-                      if (has4K)
-                        (
-                          '4K',
-                          w >= 3840,
-                          () => cameraStore.setResolution(3840, 2160),
-                        ),
-                    ],
-                  );
-                }),
+                    // RESOLUTION — options derive from the active device's formats.
+                    Watch((context) {
+                      final w = cameraStore.width.value;
+                      final has4K = cameraStore.supports4K.value;
+                      return _PanelRow(
+                        label: 'RESOLUTION',
+                        segments: [
+                          (
+                            '720P',
+                            w < 1920,
+                            () => cameraStore.setResolution(1280, 720),
+                          ),
+                          (
+                            '1080P',
+                            w >= 1920 && w < 3840,
+                            () => cameraStore.setResolution(1920, 1080),
+                          ),
+                          if (has4K)
+                            (
+                              '4K',
+                              w >= 3840,
+                              () => cameraStore.setResolution(3840, 2160),
+                            ),
+                        ],
+                      );
+                    }),
 
-                // FPS.
-                Watch((context) {
-                  final fps = cameraStore.fps.value;
-                  return _PanelRow(
-                    label: 'FPS',
-                    segments: [
-                      ('30', fps == 30, () => cameraStore.setFps(30)),
-                      ('60', fps == 60, () => cameraStore.setFps(60)),
-                    ],
-                  );
-                }),
+                    // FPS.
+                    Watch((context) {
+                      final fps = cameraStore.fps.value;
+                      return _PanelRow(
+                        label: 'FPS',
+                        segments: [
+                          ('30', fps == 30, () => cameraStore.setFps(30)),
+                          ('60', fps == 60, () => cameraStore.setFps(60)),
+                        ],
+                      );
+                    }),
 
                     // ASPECT ratio of the preview viewport.
                     Watch((context) {
@@ -153,7 +153,11 @@ class QuickPanel extends StatelessWidget {
                       return _PanelRow(
                         label: 'WHITE BAL',
                         segments: [
-                          ('AUTO', k == 0, () => cameraStore.setWhiteBalance(0)),
+                          (
+                            'AUTO',
+                            k == 0,
+                            () => cameraStore.setWhiteBalance(0),
+                          ),
                           (
                             'INCAND',
                             near(3000),
@@ -281,8 +285,9 @@ class QuickPanel extends StatelessWidget {
                             Text(
                               'ALL SETTINGS',
                               style: TextStyle(
-                                color:
-                                    Colors.cyanAccent.withValues(alpha: 0.95),
+                                color: Colors.cyanAccent.withValues(
+                                  alpha: 0.95,
+                                ),
                                 fontSize: 10,
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 1.6,
@@ -334,8 +339,7 @@ class _PanelRow extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               child: Row(
                 children: segments.map((seg) {

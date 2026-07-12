@@ -94,8 +94,7 @@ class FrameStatsCollector {
     final w = f.width, h = f.height;
     if (w <= 0 || h <= 0 || px.isEmpty) return;
     final isBgra = f.pixelFormat == 1;
-    final rowStride =
-        f.bytesPerRow > 0 ? f.bytesPerRow : (isBgra ? w * 4 : w);
+    final rowStride = f.bytesPerRow > 0 ? f.bytesPerRow : (isBgra ? w * 4 : w);
 
     var frameSum = 0;
     var frameSamples = 0;
@@ -106,7 +105,8 @@ class FrameStatsCollector {
         if (isBgra) {
           final i = row + x * 4;
           if (i + 2 >= px.length) continue;
-          luma = (0.114 * px[i] + 0.587 * px[i + 1] + 0.299 * px[i + 2]).round();
+          luma = (0.114 * px[i] + 0.587 * px[i + 1] + 0.299 * px[i + 2])
+              .round();
         } else {
           final i = row + x;
           if (i >= px.length) continue;
@@ -164,7 +164,9 @@ class FrameStatsCollector {
     final elapsedSec = _wall.elapsedMilliseconds / 1000.0;
     final fps = elapsedSec > 0 ? _frameCount / elapsedSec : 0.0;
     // Timestamp span (if present) is a better FPS source than wall clock.
-    final tsSpanSec = (_lastTs > _firstTs) ? (_lastTs - _firstTs) / 1000.0 : 0.0;
+    final tsSpanSec = (_lastTs > _firstTs)
+        ? (_lastTs - _firstTs) / 1000.0
+        : 0.0;
     final tsFps = tsSpanSec > 0 ? (_frameCount - 1) / tsSpanSec : 0.0;
 
     return FrameStreamReport(

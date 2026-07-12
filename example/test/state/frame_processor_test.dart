@@ -41,9 +41,7 @@ CameraFrame fakeFrame({
 }) {
   final bpp = pixelFormat == 1 ? 4 : 1;
   return CameraFrame(
-    pixels: Uint8List.fromList(
-      List.filled(width * height * bpp, fill),
-    ),
+    pixels: Uint8List.fromList(List.filled(width * height * bpp, fill)),
     size: width * height * bpp,
     width: width,
     height: height,
@@ -248,8 +246,11 @@ void main() {
 
       expect(() => p.processFrame(fakeFrame()), returnsNormally);
       expect(a.frames.length, 1);
-      expect(c.frames.length, 1,
-          reason: 'a throwing sibling must not starve later children');
+      expect(
+        c.frames.length,
+        1,
+        reason: 'a throwing sibling must not starve later children',
+      );
 
       p.onDetach();
       expect(a.detachCount, 1);

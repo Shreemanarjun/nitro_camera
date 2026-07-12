@@ -9,9 +9,7 @@ CameraDeviceFormat fmt({
   double maxFps = 30,
   bool videoHdr = false,
   bool photoHdr = false,
-  List<VideoStabilizationMode> stabilization = const [
-    VideoStabilizationMode.off
-  ],
+  List<VideoStabilizationMode> stabilization = const [VideoStabilizationMode.off],
   AutoFocusSystem autoFocus = AutoFocusSystem.phaseDetection,
 }) {
   return CameraDeviceFormat(
@@ -29,20 +27,20 @@ CameraDeviceFormat fmt({
 }
 
 CameraDeviceInfo device(List<CameraDeviceFormat> formats) => CameraDeviceInfo(
-      id: 'back',
-      name: 'Back Camera',
-      position: CameraPosition.back,
-      lensType: CameraLensType.wideAngle,
-      sensorOrientation: 90,
-      minZoom: 1,
-      maxZoom: 8,
-      neutralZoom: 1,
-      hasFlash: true,
-      hasTorch: true,
-      maxPhotoWidth: 4032,
-      maxPhotoHeight: 3024,
-      formats: formats,
-    );
+  id: 'back',
+  name: 'Back Camera',
+  position: CameraPosition.back,
+  lensType: CameraLensType.wideAngle,
+  sensorOrientation: 90,
+  minZoom: 1,
+  maxZoom: 8,
+  neutralZoom: 1,
+  hasFlash: true,
+  hasTorch: true,
+  maxPhotoWidth: 4032,
+  maxPhotoHeight: 3024,
+  formats: formats,
+);
 
 void main() {
   final f720 = fmt(width: 1280, height: 720);
@@ -53,20 +51,17 @@ void main() {
     final dev = device([f720, f1080, f4k]);
 
     test('max picks the highest-resolution format', () {
-      final r =
-          FormatResolver.resolve(dev, const [ResolutionConstraint(TargetResolution.max())]);
+      final r = FormatResolver.resolve(dev, const [ResolutionConstraint(TargetResolution.max())]);
       expect(r, same(f4k));
     });
 
     test('min picks the lowest-resolution format', () {
-      final r =
-          FormatResolver.resolve(dev, const [ResolutionConstraint(TargetResolution.min())]);
+      final r = FormatResolver.resolve(dev, const [ResolutionConstraint(TargetResolution.min())]);
       expect(r, same(f720));
     });
 
     test('closestTo picks the nearest resolution', () {
-      final r = FormatResolver.resolve(
-          dev, const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
+      final r = FormatResolver.resolve(dev, const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
       expect(r, same(f1080));
     });
 
@@ -76,8 +71,7 @@ void main() {
       final f43 = fmt(width: 2048, height: 1536); // 4:3, 3.1 MP (closer area)
       final f169 = fmt(width: 1280, height: 720); // 16:9, 0.9 MP
       final dev43 = device([f43, f169]);
-      final r = FormatResolver.resolve(dev43,
-          const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
+      final r = FormatResolver.resolve(dev43, const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
       expect(r, same(f169), reason: 'aspect mismatch weighs 3× log-distance');
     });
 
@@ -86,8 +80,7 @@ void main() {
       // must break by list order, proving the distances are equal.
       final fBig = fmt(width: 3840, height: 2160);
       final fSmall = fmt(width: 960, height: 540);
-      final r = FormatResolver.resolve(device([fSmall, fBig]),
-          const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
+      final r = FormatResolver.resolve(device([fSmall, fBig]), const [ResolutionConstraint(TargetResolution.closestTo(1920, 1080))]);
       expect(r, same(fSmall), reason: 'equal penalty → first wins');
     });
 

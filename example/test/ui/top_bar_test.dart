@@ -21,8 +21,9 @@ void main() {
       expect(find.byTooltip('Stream configuration'), findsOneWidget);
     });
 
-    testWidgets('RAW badge is hidden when the sensor lacks RAW support',
-        (tester) async {
+    testWidgets('RAW badge is hidden when the sensor lacks RAW support', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       cameraStore.currentDevice.value = fakeDevice(supportsRaw: false);
       await tester.pumpWidget(harness(const TopBar()));
@@ -31,8 +32,9 @@ void main() {
       expect(find.text('RAW'), findsNothing);
     });
 
-    testWidgets('RAW badge appears when the sensor supports RAW',
-        (tester) async {
+    testWidgets('RAW badge appears when the sensor supports RAW', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       cameraStore.currentDevice.value = fakeDevice(supportsRaw: true);
       await tester.pumpWidget(harness(const TopBar()));
@@ -45,8 +47,9 @@ void main() {
       expect(cameraStore.rawPhoto.value, isTrue);
     });
 
-    testWidgets('flash icon cycles off → on → auto and the tooltip follows',
-        (tester) async {
+    testWidgets('flash icon cycles off → on → auto and the tooltip follows', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const TopBar()));
 
@@ -61,8 +64,9 @@ void main() {
       expect(find.byTooltip('Flash: auto'), findsOneWidget);
     });
 
-    testWidgets('long-press shows the tooltip without firing the tap action',
-        (tester) async {
+    testWidgets('long-press shows the tooltip without firing the tap action', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const TopBar()));
 

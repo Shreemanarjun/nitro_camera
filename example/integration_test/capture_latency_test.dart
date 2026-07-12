@@ -30,7 +30,6 @@ import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 
 import 'support/harness.dart';
 
-
 /// Awaits [run] while KEEPING FRAMES PUMPING, failing with [label] if it does
 /// not complete within [deadline]. Returns (result, elapsed).
 Future<(T, Duration)> timedCapture<T>(

@@ -183,8 +183,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   Future<void> _requestScrubFrame(double ms) async {
     if (_frameMisses > 2) return;
     final now = DateTime.now();
-    if (now.difference(_lastFrameRequest) <
-        const Duration(milliseconds: 200)) {
+    if (now.difference(_lastFrameRequest) < const Duration(milliseconds: 200)) {
       return;
     }
     _lastFrameRequest = now;
@@ -210,12 +209,14 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    final durationMs =
-        _duration.inMilliseconds > 0 ? _duration.inMilliseconds.toDouble() : 1.0;
-    final positionMs = (_scrubbing
-            ? _scrubMs
-            : _position.inMilliseconds.toDouble())
-        .clamp(0.0, durationMs);
+    final durationMs = _duration.inMilliseconds > 0
+        ? _duration.inMilliseconds.toDouble()
+        : 1.0;
+    final positionMs =
+        (_scrubbing ? _scrubMs : _position.inMilliseconds.toDouble()).clamp(
+          0.0,
+          durationMs,
+        );
 
     return Stack(
       children: [
@@ -259,8 +260,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
-                    border:
-                        Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.25),
+                    ),
                   ),
                   child: Icon(
                     _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
@@ -287,7 +289,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   _ScrubBubble(
                     frame: _scrubFrame,
                     label: formatClipDuration(
-                        Duration(milliseconds: _scrubMs.round())),
+                      Duration(milliseconds: _scrubMs.round()),
+                    ),
                     fraction: durationMs == 0 ? 0 : positionMs / durationMs,
                   ),
                 Container(
@@ -300,7 +303,8 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                     children: [
                       Text(
                         formatClipDuration(
-                            Duration(milliseconds: positionMs.round())),
+                          Duration(milliseconds: positionMs.round()),
+                        ),
                         style: _timeStyle,
                       ),
                       Expanded(
@@ -310,12 +314,15 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             activeTrackColor: Colors.cyanAccent,
                             inactiveTrackColor: Colors.white24,
                             thumbColor: Colors.white,
-                            overlayColor:
-                                Colors.cyanAccent.withValues(alpha: 0.15),
+                            overlayColor: Colors.cyanAccent.withValues(
+                              alpha: 0.15,
+                            ),
                             thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6),
+                              enabledThumbRadius: 6,
+                            ),
                             overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 14),
+                              overlayRadius: 14,
+                            ),
                           ),
                           child: Slider(
                             min: 0,
@@ -379,8 +386,10 @@ class _ScrubBubble extends StatelessWidget {
       height: hasFrame ? 76 : 34,
       child: LayoutBuilder(
         builder: (context, box) {
-          final left = (fraction * box.maxWidth - bubbleW / 2)
-              .clamp(0.0, (box.maxWidth - bubbleW).clamp(0.0, double.infinity));
+          final left = (fraction * box.maxWidth - bubbleW / 2).clamp(
+            0.0,
+            (box.maxWidth - bubbleW).clamp(0.0, double.infinity),
+          );
           return Stack(
             children: [
               Positioned(
@@ -399,8 +408,11 @@ class _ScrubBubble extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       if (hasFrame)
-                        Image.memory(frame!,
-                            fit: BoxFit.cover, gaplessPlayback: true),
+                        Image.memory(
+                          frame!,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                        ),
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Container(

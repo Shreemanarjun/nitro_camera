@@ -125,8 +125,6 @@ class CaptureStorage {
   /// mixed media still sorts chronologically).
   static String _sortKey(String path) {
     final name = p.basenameWithoutExtension(path);
-    return RegExp(r'^(IMG|RAW|VID)_').hasMatch(name)
-        ? name.substring(4)
-        : name;
+    return RegExp(r'^(IMG|RAW|VID)_').hasMatch(name) ? name.substring(4) : name;
   }
 }

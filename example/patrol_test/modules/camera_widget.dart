@@ -56,8 +56,11 @@ final class CameraWidget extends Module {
     final firstTid = current!.textureId;
     expect(firstTid, isNotNull);
     expect(firstTid, isNot(0));
-    expect(resolved, isNotNull,
-        reason: 'onConfigResolved reports the negotiated config');
+    expect(
+      resolved,
+      isNotNull,
+      reason: 'onConfigResolved reports the negotiated config',
+    );
 
     // isActive toggle: streaming stops/starts, NO reopen (same textureId).
     await $.tester.pumpWidget(build(back, active: false));
@@ -66,8 +69,10 @@ final class CameraWidget extends Module {
     expect(current!.textureId, firstTid);
 
     await $.tester.pumpWidget(build(back, active: true));
-    await pumpUntil(() => current!.isActive,
-        reason: 'preview resumed after isActive=true');
+    await pumpUntil(
+      () => current!.isActive,
+      reason: 'preview resumed after isActive=true',
+    );
     expect(current!.textureId, firstTid);
 
     // Device switch: double-buffered swap → onClosing fires, a NEW controller
@@ -77,24 +82,31 @@ final class CameraWidget extends Module {
       await $.tester.pumpWidget(build(front, active: true));
       await pumpUntil(
         () =>
-            (current?.isInitialized ?? false) &&
-            current!.textureId != firstTid,
+            (current?.isInitialized ?? false) && current!.textureId != firstTid,
         timeout: const Duration(seconds: 20),
         reason: 'double-buffered swap published the new session',
       );
-      expect(closings, greaterThan(0),
-          reason: 'onClosing must fire before the old session is torn down');
+      expect(
+        closings,
+        greaterThan(0),
+        reason: 'onClosing must fire before the old session is torn down',
+      );
       expect(current!.device.id, front.id);
-      await pumpUntil(() => current!.getSessionState().running,
-          reason: 'new device streaming after the swap');
+      await pumpUntil(
+        () => current!.getSessionState().running,
+        reason: 'new device streaming after the swap',
+      );
     }
 
     // Teardown: unmount → the widget disposes its controller.
-    await $.tester.pumpWidget(
-        const MaterialApp(home: SizedBox.shrink()));
+    await $.tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
     await pumpFor(const Duration(milliseconds: 800));
-    expect(events.every((e) => !e.isError), isTrue,
-        reason: 'no error events during the declarative lifecycle '
-            '(${events.where((e) => e.isError).map((e) => e.message)})');
+    expect(
+      events.every((e) => !e.isError),
+      isTrue,
+      reason:
+          'no error events during the declarative lifecycle '
+          '(${events.where((e) => e.isError).map((e) => e.message)})',
+    );
   }
 }

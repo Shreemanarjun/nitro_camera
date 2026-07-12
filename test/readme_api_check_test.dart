@@ -75,8 +75,7 @@ class _QuickStartScreenState extends State<_QuickStartScreen> {
 // ---------------------------------------------------------------------------
 
 Future<void> _readmeDeviceDiscovery() async {
-  final List<CameraDeviceInfo> devices =
-      await CameraController.getAvailableCameraDevices();
+  final List<CameraDeviceInfo> devices = await CameraController.getAvailableCameraDevices();
 
   final back = devices.backCamera();
   final front = devices.frontCamera();
@@ -122,8 +121,7 @@ Future<void> _readmeDeviceDiscovery() async {
 
 Future<void> _readmePermissions() async {
   final PermissionStatus cam = await CameraController.requestCameraPermission();
-  final PermissionStatus mic =
-      await CameraController.requestMicrophonePermission();
+  final PermissionStatus mic = await CameraController.requestMicrophonePermission();
   switch (cam) {
     case PermissionStatus.notDetermined:
     case PermissionStatus.granted:
@@ -348,14 +346,7 @@ Future<void> _readmeFrameProcessing(CameraController controller) async {
   processor.results.listen((luma) => print('brightness $luma'));
 
   // Documented FrameData fields.
-  int probe(FrameData f) =>
-      f.width +
-      f.height +
-      f.format +
-      f.bytesPerRow +
-      f.effectiveBytesPerRow +
-      (f.isMirrored ? 1 : 0) +
-      f.bytes.length;
+  int probe(FrameData f) => f.width + f.height + f.format + f.bytesPerRow + f.effectiveBytesPerRow + (f.isMirrored ? 1 : 0) + f.bytes.length;
 }
 
 // ---------------------------------------------------------------------------

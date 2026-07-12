@@ -12,15 +12,18 @@ void main() {
   setUp(resetStore);
 
   group('MediaViewerScreen (photo)', () {
-    testWidgets('rotate button cycles the displayed quarter turns',
-        (tester) async {
+    testWidgets('rotate button cycles the displayed quarter turns', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       cameraStore.capturedMedia.value = [
         sandbox.seedPhoto('IMG_20260703_100000.jpg'),
       ];
 
-      await tester.pumpWidget(harness(const MediaViewerScreen(initialIndex: 0)));
+      await tester.pumpWidget(
+        harness(const MediaViewerScreen(initialIndex: 0)),
+      );
       await tester.pumpAndSettle();
 
       RotatedBox rotation() => tester.widget(find.byType(RotatedBox));
@@ -49,8 +52,9 @@ void main() {
       expect(find.text('SAVE'), findsNothing);
     });
 
-    testWidgets('shows share, delete and info actions with the item counter',
-        (tester) async {
+    testWidgets('shows share, delete and info actions with the item counter', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       cameraStore.capturedMedia.value = [
@@ -58,7 +62,9 @@ void main() {
         sandbox.seedPhoto('IMG_20260703_100001.jpg'),
       ];
 
-      await tester.pumpWidget(harness(const MediaViewerScreen(initialIndex: 0)));
+      await tester.pumpWidget(
+        harness(const MediaViewerScreen(initialIndex: 0)),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('SHARE'), findsOneWidget);
@@ -76,7 +82,9 @@ void main() {
       final photo = sandbox.seedPhoto('IMG_20260703_100000.jpg');
       cameraStore.capturedMedia.value = [photo];
 
-      await tester.pumpWidget(harness(const MediaViewerScreen(initialIndex: 0)));
+      await tester.pumpWidget(
+        harness(const MediaViewerScreen(initialIndex: 0)),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('SHARE'));
@@ -89,8 +97,9 @@ void main() {
   });
 
   group('MediaViewerScreen (delete)', () {
-    testWidgets('delete confirms, removes the file and the store entry',
-        (tester) async {
+    testWidgets('delete confirms, removes the file and the store entry', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       final older = sandbox.seedPhoto('IMG_20260703_100000.jpg');
@@ -98,7 +107,9 @@ void main() {
       cameraStore.capturedMedia.value = [older, newer];
       cameraStore.lastCapturedPath.value = newer.path;
 
-      await tester.pumpWidget(harness(const MediaViewerScreen(initialIndex: 0)));
+      await tester.pumpWidget(
+        harness(const MediaViewerScreen(initialIndex: 0)),
+      );
       await tester.pumpAndSettle();
 
       // Viewer shows the newest item; delete it.
@@ -116,15 +127,18 @@ void main() {
   });
 
   group('MediaViewerScreen (RAW / DNG)', () {
-    testWidgets('DNG is view-only rotate: placeholder shown, no SAVE action',
-        (tester) async {
+    testWidgets('DNG is view-only rotate: placeholder shown, no SAVE action', (
+      tester,
+    ) async {
       final sandbox = useGallerySandbox();
       usePhoneSurface(tester);
       cameraStore.capturedMedia.value = [
         sandbox.seedRaw('RAW_20260703_100000.dng'),
       ];
 
-      await tester.pumpWidget(harness(const MediaViewerScreen(initialIndex: 0)));
+      await tester.pumpWidget(
+        harness(const MediaViewerScreen(initialIndex: 0)),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('RAW · DNG'), findsOneWidget);

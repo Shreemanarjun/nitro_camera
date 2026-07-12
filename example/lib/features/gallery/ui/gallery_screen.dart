@@ -20,12 +20,17 @@ void openGallery(BuildContext context) {
       reverseTransitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (_, _, _) => const GalleryScreen(),
       transitionsBuilder: (_, anim, _, child) {
-        final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+        final curved = CurvedAnimation(
+          parent: anim,
+          curve: Curves.easeOutCubic,
+        );
         return FadeTransition(
           opacity: curved,
           child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.04), end: Offset.zero)
-                .animate(curved),
+            position: Tween(
+              begin: const Offset(0, 0.04),
+              end: Offset.zero,
+            ).animate(curved),
             child: child,
           ),
         );
@@ -48,9 +53,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
   final Set<String> _selected = {};
 
   void _exitSelection() => setState(() {
-        _selecting = false;
-        _selected.clear();
-      });
+    _selecting = false;
+    _selected.clear();
+  });
 
   void _toggle(String path) {
     HapticFeedback.selectionClick();
@@ -158,21 +163,30 @@ class _GalleryScreenState extends State<GalleryScreen> {
         if (_selecting) ...[
           IconButton(
             tooltip: 'Share',
-            icon: const Icon(Icons.ios_share_rounded,
-                color: Colors.white, size: 20),
+            icon: const Icon(
+              Icons.ios_share_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
             onPressed: () => _shareSelected(items),
           ),
           IconButton(
             tooltip: 'Delete',
-            icon: const Icon(Icons.delete_outline_rounded,
-                color: Colors.redAccent, size: 22),
+            icon: const Icon(
+              Icons.delete_outline_rounded,
+              color: Colors.redAccent,
+              size: 22,
+            ),
             onPressed: _deleteSelected,
           ),
         ] else if (items.isNotEmpty)
           IconButton(
             tooltip: 'Select',
-            icon: const Icon(Icons.check_circle_outline_rounded,
-                color: Colors.white, size: 20),
+            icon: const Icon(
+              Icons.check_circle_outline_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
             onPressed: () {
               HapticFeedback.selectionClick();
               setState(() => _selecting = true);

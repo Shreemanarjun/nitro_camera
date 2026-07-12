@@ -34,7 +34,7 @@ class TargetFpsProcessor extends FrameProcessor {
   int _lastAcceptedTs = 0;
 
   TargetFpsProcessor({required this.targetFps, required this.inner})
-      : assert(targetFps > 0);
+    : assert(targetFps > 0);
 
   @override
   String get name => '${inner.name}@${targetFps.toStringAsFixed(0)}fps';

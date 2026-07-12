@@ -101,9 +101,12 @@ class _VideoTileContent extends StatefulWidget {
 }
 
 class _VideoTileContentState extends State<_VideoTileContent> {
-  late final Future<File?> _thumb = MediaServices.thumbnails.tileFor(widget.path);
-  late final Future<Duration?> _duration =
-      MediaServices.thumbnails.durationOf(widget.path);
+  late final Future<File?> _thumb = MediaServices.thumbnails.tileFor(
+    widget.path,
+  );
+  late final Future<Duration?> _duration = MediaServices.thumbnails.durationOf(
+    widget.path,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -117,8 +120,11 @@ class _VideoTileContentState extends State<_VideoTileContent> {
             if (file == null) {
               return Container(
                 color: Colors.white10,
-                child: const Icon(Icons.videocam_rounded,
-                    color: Colors.white24, size: 26),
+                child: const Icon(
+                  Icons.videocam_rounded,
+                  color: Colors.white24,
+                  size: 26,
+                ),
               );
             }
             return Image.file(
@@ -141,8 +147,11 @@ class _VideoTileContentState extends State<_VideoTileContent> {
           ),
         ),
         const Center(
-          child: Icon(Icons.play_circle_outline_rounded,
-              color: Colors.white70, size: 30),
+          child: Icon(
+            Icons.play_circle_outline_rounded,
+            color: Colors.white70,
+            size: 30,
+          ),
         ),
         Positioned(
           right: 4,
@@ -229,8 +238,11 @@ class _BrokenTileContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: Colors.white10,
-      child: const Icon(Icons.broken_image_outlined,
-          color: Colors.white24, size: 24),
+      child: const Icon(
+        Icons.broken_image_outlined,
+        color: Colors.white24,
+        size: 24,
+      ),
     );
   }
 }

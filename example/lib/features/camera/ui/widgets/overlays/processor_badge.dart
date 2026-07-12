@@ -27,8 +27,7 @@ class ProcessorBadge extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.40),
                 borderRadius: BorderRadius.circular(12),
-                border:
-                    Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
               ),
               child: Watch((context) {
                 final processor = cameraStore.frameProcessor.value;
@@ -44,13 +43,16 @@ class ProcessorBadge extends StatelessWidget {
                 final ms = cameraStore.processorAvgMs.value;
                 final stats = fps > 0
                     ? ' \u00b7 ${fps.toStringAsFixed(0)}FPS'
-                        ' ${ms.toStringAsFixed(1)}ms'
+                          ' ${ms.toStringAsFixed(1)}ms'
                     : '';
                 return Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.memory_rounded,
-                        size: 12, color: Colors.cyanAccent),
+                    const Icon(
+                      Icons.memory_rounded,
+                      size: 12,
+                      color: Colors.cyanAccent,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '${processor.name}$value$stats',

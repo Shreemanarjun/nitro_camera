@@ -44,8 +44,7 @@ abstract class FrameProcessorPlugin {
 
 /// Creates a [FrameProcessorPlugin] from init [options]. **Must be a top-level
 /// or static function** — it crosses the isolate boundary.
-typedef FrameProcessorPluginFactory = FrameProcessorPlugin Function(
-    Map<String, Object?> options);
+typedef FrameProcessorPluginFactory = FrameProcessorPlugin Function(Map<String, Object?> options);
 
 // ── Worker-isolate side ──────────────────────────────────────────────────────
 
@@ -119,10 +118,10 @@ class FrameProcessorPluginRunner {
     FrameProcessorPluginFactory factory,
     Map<String, Object?> options,
   ) : _proc = CameraFrameProcessor<Object?>(
-          _pluginFrameHandler,
-          workerInit: _pluginWorkerInit,
-          workerInitArg: [factory, options],
-        );
+        _pluginFrameHandler,
+        workerInit: _pluginWorkerInit,
+        workerInitArg: [factory, options],
+      );
 
   /// Every non-null value the plugin returned, in completion order.
   Stream<Object?> get results => _proc.results.where((r) => r != null);

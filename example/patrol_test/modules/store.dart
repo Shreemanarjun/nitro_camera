@@ -13,8 +13,11 @@ import 'module.dart';
 final class Store extends Module {
   Store(super.$);
 
-  Future<void> _awaitReopen(int? beforeTid, String reason,
-      {Duration timeout = const Duration(seconds: 20)}) async {
+  Future<void> _awaitReopen(
+    int? beforeTid,
+    String reason, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     await pumpUntil(
       () =>
           cameraStore.status.value == CameraStatus.running &&
@@ -41,10 +44,16 @@ final class Store extends Module {
     for (var i = 1; i <= toggles; i++) {
       final beforeTid = cameraStore.activeTextureId.value;
       cameraStore.toggleCamera();
-      await _awaitReopen(beforeTid, 'preview running after toggle $i',
-          timeout: const Duration(seconds: 15));
-      expect(cameraStore.errorMessage.value, isNull,
-          reason: 'toggle $i must not surface an error');
+      await _awaitReopen(
+        beforeTid,
+        'preview running after toggle $i',
+        timeout: const Duration(seconds: 15),
+      );
+      expect(
+        cameraStore.errorMessage.value,
+        isNull,
+        reason: 'toggle $i must not surface an error',
+      );
       await pumpFor(const Duration(seconds: 1));
     }
     expect(cameraStore.status.value, CameraStatus.running);
@@ -63,8 +72,11 @@ final class Store extends Module {
     await cameraStore.setMode('SCANNER');
     await pumpFor(const Duration(seconds: 2));
     expect(cameraStore.mode.value, 'SCANNER');
-    expect(cameraStore.frameProcessor.value, isNotNull,
-        reason: 'custom processor stays installed during SCANNER');
+    expect(
+      cameraStore.frameProcessor.value,
+      isNotNull,
+      reason: 'custom processor stays installed during SCANNER',
+    );
     expect(cameraStore.status.value, CameraStatus.running);
 
     await cameraStore.setMode('PHOTO');
@@ -77,10 +89,15 @@ final class Store extends Module {
       final beforeFrames = luminanceProcessor.framesProcessed.value;
       cameraStore.toggleCamera();
       await _awaitReopen(
-          beforeTid, 'preview running on the new device with processor');
+        beforeTid,
+        'preview running on the new device with processor',
+      );
       await _expectFramesFlow(after: beforeFrames, stage: 'after lens change');
-      expect(luminanceProcessor.attached.value, isTrue,
-          reason: 'processor re-adopted by the new session');
+      expect(
+        luminanceProcessor.attached.value,
+        isTrue,
+        reason: 'processor re-adopted by the new session',
+      );
       expect(cameraStore.errorMessage.value, isNull);
     }
 
@@ -94,8 +111,11 @@ final class Store extends Module {
     Future<void> changeRes(int w, int h) async {
       final beforeTid = cameraStore.activeTextureId.value;
       cameraStore.setResolution(w, h);
-      await _awaitReopen(beforeTid, 'session reopened at ${w}x$h',
-          timeout: const Duration(seconds: 15));
+      await _awaitReopen(
+        beforeTid,
+        'session reopened at ${w}x$h',
+        timeout: const Duration(seconds: 15),
+      );
       expect(cameraStore.errorMessage.value, isNull);
       await pumpFor(const Duration(seconds: 1));
     }
@@ -126,15 +146,22 @@ final class Store extends Module {
     expect(state, isNotNull);
     final longEdge = state!.width > state.height ? state.width : state.height;
     expect(state.running, isTrue);
-    expect(longEdge, greaterThanOrEqualTo(3840),
-        reason: 'requested 4K but the resolved stream is '
-            '${state.width}x${state.height}');
+    expect(
+      longEdge,
+      greaterThanOrEqualTo(3840),
+      reason:
+          'requested 4K but the resolved stream is '
+          '${state.width}x${state.height}',
+    );
     expect(cameraStore.resolutionLabel.value, '4K');
 
     final sustainStart = luminanceProcessor.framesProcessed.value;
     await pumpFor(const Duration(seconds: 2));
-    expect(luminanceProcessor.framesProcessed.value, greaterThan(sustainStart),
-        reason: '4K stream died after the first frames');
+    expect(
+      luminanceProcessor.framesProcessed.value,
+      greaterThan(sustainStart),
+      reason: '4K stream died after the first frames',
+    );
 
     final tid4k = cameraStore.activeTextureId.value;
     cameraStore.setResolution(1920, 1080);
@@ -173,8 +200,7 @@ final class Store extends Module {
     final beforeTid = cameraStore.activeTextureId.value;
     cameraStore.setResolution(1280, 720); // force a reopen → re-publish thermal
     await pumpUntil(
-      () =>
-          cameraStore.activeTextureId.value != beforeTid && states.isNotEmpty,
+      () => cameraStore.activeTextureId.value != beforeTid && states.isNotEmpty,
       timeout: const Duration(seconds: 15),
       reason: 'a thermal state was published on (re)open',
     );
@@ -190,25 +216,26 @@ final class Store extends Module {
   Future<void> eventMapRoutesRealEvents() async {
     final labels = <String>[];
     final sub = CameraController.allEvents.listen((e) {
-      labels.add(e.map(
-        started: () => 'started',
-        stopped: () => 'stopped',
-        error: (m) => 'error:$m',
-        orientationChanged: (d) => 'orient:$d',
-        thermalChanged: (s) => 'thermal:${s.name}',
-        frameDropped: (r) => 'drop:${r.name}',
-        deviceHotplug: (id, on) => 'hotplug:$id:$on',
-        interruption: (_, ended) => 'interruption:$ended',
-        detection: (_) => 'detection',
-        orElse: () => 'other:${e.type.name}',
-      ));
+      labels.add(
+        e.map(
+          started: () => 'started',
+          stopped: () => 'stopped',
+          error: (m) => 'error:$m',
+          orientationChanged: (d) => 'orient:$d',
+          thermalChanged: (s) => 'thermal:${s.name}',
+          frameDropped: (r) => 'drop:${r.name}',
+          deviceHotplug: (id, on) => 'hotplug:$id:$on',
+          interruption: (_, ended) => 'interruption:$ended',
+          detection: (_) => 'detection',
+          orElse: () => 'other:${e.type.name}',
+        ),
+      );
     });
 
     final beforeTid = cameraStore.activeTextureId.value;
     cameraStore.setResolution(1280, 720); // reopen → stopped + started
     await pumpUntil(
-      () =>
-          cameraStore.activeTextureId.value != beforeTid && labels.isNotEmpty,
+      () => cameraStore.activeTextureId.value != beforeTid && labels.isNotEmpty,
       timeout: const Duration(seconds: 15),
       reason: 'events routed through map() on reopen',
     );
@@ -218,8 +245,11 @@ final class Store extends Module {
     // reopen surfaced at least a started event.
     expect(labels, isNotEmpty);
     expect(labels.every((l) => l.isNotEmpty), isTrue);
-    expect(labels.any((l) => l == 'started' || l == 'thermal:nominal'), isTrue,
-        reason: 'reopen should surface a started/thermal event ($labels)');
+    expect(
+      labels.any((l) => l == 'started' || l == 'thermal:nominal'),
+      isTrue,
+      reason: 'reopen should surface a started/thermal event ($labels)',
+    );
     cameraStore.setResolution(1920, 1080); // restore
     await pumpFor(const Duration(seconds: 1));
     expect(cameraStore.errorMessage.value, isNull);
@@ -248,28 +278,45 @@ final class Store extends Module {
     );
     expect(cameraStore.errorMessage.value, isNull);
     final frames = await _streamFrameCount();
-    expect(frames, greaterThan(5),
-        reason: 'no frames after resume — preview stuck after backgrounding');
+    expect(
+      frames,
+      greaterThan(5),
+      reason: 'no frames after resume — preview stuck after backgrounding',
+    );
   }
 
   /// Rapid PHOTO/VIDEO/SCANNER churn (each flips pixel format → a session
   /// reconfigure). The session must stay healthy and streaming after the
   /// churn, with no error.
   Future<void> rapidModeChurnSurvives() async {
-    const seq = ['PHOTO', 'VIDEO', 'SCANNER', 'VIDEO', 'PHOTO', 'SCANNER', 'PHOTO'];
+    const seq = [
+      'PHOTO',
+      'VIDEO',
+      'SCANNER',
+      'VIDEO',
+      'PHOTO',
+      'SCANNER',
+      'PHOTO',
+    ];
     for (final m in seq) {
       await cameraStore.setMode(m);
       await pumpFor(const Duration(milliseconds: 500));
-      expect(cameraStore.errorMessage.value, isNull,
-          reason: 'mode $m surfaced an error during churn');
+      expect(
+        cameraStore.errorMessage.value,
+        isNull,
+        reason: 'mode $m surfaced an error during churn',
+      );
     }
     await pumpUntil(
       () => cameraStore.status.value == CameraStatus.running,
       reason: 'session running after rapid mode churn',
     );
     final frames = await _streamFrameCount();
-    expect(frames, greaterThan(5),
-        reason: 'preview stalled after rapid mode churn');
+    expect(
+      frames,
+      greaterThan(5),
+      reason: 'preview stalled after rapid mode churn',
+    );
     expect(cameraStore.errorMessage.value, isNull);
   }
 
@@ -287,8 +334,11 @@ final class Store extends Module {
 
     final mediaBefore = cameraStore.capturedMedia.value.length;
     await cameraStore.toggleRecording();
-    expect(cameraStore.isRecording.value, isTrue,
-        reason: 'recording started (error=${cameraStore.errorMessage.value})');
+    expect(
+      cameraStore.isRecording.value,
+      isTrue,
+      reason: 'recording started (error=${cameraStore.errorMessage.value})',
+    );
     await pumpFor(const Duration(seconds: 2));
     await cameraStore.toggleRecording();
     await pumpUntil(
@@ -301,7 +351,10 @@ final class Store extends Module {
 
     // "No crash for 5s" IS the assertion for the gallery mirror.
     await pumpFor(const Duration(seconds: 5));
-    expect(cameraStore.status.value, CameraStatus.running,
-        reason: 'app survived the system-gallery mirror');
+    expect(
+      cameraStore.status.value,
+      CameraStatus.running,
+      reason: 'app survived the system-gallery mirror',
+    );
   }
 }

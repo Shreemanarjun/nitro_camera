@@ -84,21 +84,21 @@ class CameraController extends ChangeNotifier {
   /// The physical orientation of the camera sensor (90/270 for portrait).
   int get sensorOrientation => _sensorOrientation;
 
-  bool _isDisposed   = false;
-  bool _isRecording  = false;
+  bool _isDisposed = false;
+  bool _isRecording = false;
   bool _isRecordingPaused = false;
 
-  double _zoom     = 1.0;
+  double _zoom = 1.0;
   double _exposure = 0.0;
   FlashMode _flash = FlashMode.off;
-  bool _torch      = false;
+  bool _torch = false;
 
-  double    get zoom     => _zoom;
-  double    get exposure => _exposure;
-  FlashMode get flash    => _flash;
-  bool      get torch    => _torch;
+  double get zoom => _zoom;
+  double get exposure => _exposure;
+  FlashMode get flash => _flash;
+  bool get torch => _torch;
 
-  bool get isRecording       => _isRecording;
+  bool get isRecording => _isRecording;
   bool get isRecordingPaused => _isRecordingPaused;
 
   // ---- Declarative configuration (mirrors vision-camera) ----
@@ -126,23 +126,17 @@ class CameraController extends ChangeNotifier {
       videoHeight: native?.height ?? f.videoHeight,
       photoWidth: f.photoWidth,
       photoHeight: f.photoHeight,
-      videoHdrEnabled: native != null
-          ? native.videoHdrEnabled != 0
-          : (c.videoHdr && f.supportsVideoHdr),
-      pixelFormat: native != null
-          ? PixelFormat.fromNative(native.pixelFormat)
-          : c.pixelFormat,
-      autoFocusSystem: native != null
-          ? _afSystemFrom(native.autoFocusSystem)
-          : f.autoFocusSystem,
+      videoHdrEnabled: native != null ? native.videoHdrEnabled != 0 : (c.videoHdr && f.supportsVideoHdr),
+      pixelFormat: native != null ? PixelFormat.fromNative(native.pixelFormat) : c.pixelFormat,
+      autoFocusSystem: native != null ? _afSystemFrom(native.autoFocusSystem) : f.autoFocusSystem,
     );
   }
 
   static AutoFocusSystem _afSystemFrom(int v) => switch (v) {
-        1 => AutoFocusSystem.contrastDetection,
-        2 => AutoFocusSystem.phaseDetection,
-        _ => AutoFocusSystem.none,
-      };
+    1 => AutoFocusSystem.contrastDetection,
+    2 => AutoFocusSystem.phaseDetection,
+    _ => AutoFocusSystem.none,
+  };
 
   // ---- Static device enumeration (mirrors Camera.getAvailableCameraDevices) ----
 
@@ -168,10 +162,7 @@ class CameraController extends ChangeNotifier {
 
   // An unknown status index (native/plugin version skew) is treated as denied
   // rather than throwing a RangeError — the conservative interpretation.
-  static PermissionStatus _permissionFrom(int v) =>
-      (v >= 0 && v < PermissionStatus.values.length)
-          ? PermissionStatus.values[v]
-          : PermissionStatus.denied;
+  static PermissionStatus _permissionFrom(int v) => (v >= 0 && v < PermissionStatus.values.length) ? PermissionStatus.values[v] : PermissionStatus.denied;
 
   // ---- Lifecycle ----
 
@@ -282,8 +273,7 @@ class CameraController extends ChangeNotifier {
   /// current state (and applies as cheap live updates) instead of triggering a
   /// spurious reopen.
   @internal
-  void initializeWithTexture(int id, int width, int height, int sensorOrientation,
-      {int fps = 30}) {
+  void initializeWithTexture(int id, int width, int height, int sensorOrientation, {int fps = 30}) {
     _textureId = id;
     _width = width;
     _height = height;
@@ -493,15 +483,13 @@ class CameraController extends ChangeNotifier {
   /// [NativeDetector.face]) on this session's frames. Results arrive typed on
   /// [detections]. Requires the host app to add the matching ML Kit dependency
   /// (documented in the README).
-  void startDetector(NativeDetector detector) =>
-      setNativeDetector(detector.wire);
+  void startDetector(NativeDetector detector) => setNativeDetector(detector.wire);
 
   /// Stops the native detector.
   void stopDetector() => setNativeDetector('');
 
   /// Typed native-detector results for THIS session (vision-camera-style).
-  Stream<DetectionResult> get detections =>
-      nativeDetections.map(DetectionResult.fromJson).where((r) => r != null).cast();
+  Stream<DetectionResult> get detections => nativeDetections.map(DetectionResult.fromJson).where((r) => r != null).cast();
 
   /// Runs a NATIVE ML Kit detector on this session's frames:
   /// `"barcode"`, `"face"`, or `""` to stop.
@@ -516,18 +504,13 @@ class CameraController extends ChangeNotifier {
   /// (`{detector, width, height, rotation, results: [...]}`).
   ///
   /// Prefer the typed [detections] stream.
-  Stream<Map<String, dynamic>> get nativeDetections =>
-      NitroCamera.instance.eventStream
-          .where((e) =>
-              e.type == CameraEventType.detection.index &&
-              (e.textureId == _textureId || e.textureId == 0))
-          .map((e) {
-        try {
-          return jsonDecode(e.message) as Map<String, dynamic>;
-        } catch (_) {
-          return <String, dynamic>{'error': 'bad detection payload'};
-        }
-      });
+  Stream<Map<String, dynamic>> get nativeDetections => NitroCamera.instance.eventStream.where((e) => e.type == CameraEventType.detection.index && (e.textureId == _textureId || e.textureId == 0)).map((e) {
+    try {
+      return jsonDecode(e.message) as Map<String, dynamic>;
+    } catch (_) {
+      return <String, dynamic>{'error': 'bad detection payload'};
+    }
+  });
 
   /// Camera-ID combinations that can stream CONCURRENTLY (multi-cam, API 30+).
   /// Each inner list is one combination that [initialize] can open as
@@ -536,9 +519,7 @@ class CameraController extends ChangeNotifier {
     final json = NitroCamera.instance.getConcurrentCameraIdsJson();
     try {
       final raw = jsonDecode(json);
-      return (raw as List)
-          .map((combo) => (combo as List).cast<String>())
-          .toList();
+      return (raw as List).map((combo) => (combo as List).cast<String>()).toList();
     } catch (e) {
       // A malformed payload must not masquerade as "multi-cam unsupported"
       // (the native side reports that as a well-formed empty array).
@@ -557,8 +538,7 @@ class CameraController extends ChangeNotifier {
   /// Captures a photo with explicit [options] (flash, quality, shutter sound…).
   Future<PhotoResult> takePhotoWithOptions(PhotoCaptureOptions options) async {
     _requireInitialized();
-    return await NitroCamera.instance
-        .takePhotoWithOptions(_textureId!, options.toNative());
+    return await NitroCamera.instance.takePhotoWithOptions(_textureId!, options.toNative());
   }
 
   /// Captures the current preview frame as a fast JPEG snapshot (no full
@@ -593,8 +573,7 @@ class CameraController extends ChangeNotifier {
       // — or a bad output path) surfaces as a bare FFI error. Wrap it in the
       // typed hierarchy so callers can match on it (RecorderException) instead
       // of a raw StateError. The session is unharmed; recording just didn't start.
-      throw RecorderException('recorder/start-failed',
-          'Failed to start recording: $e', cause: e);
+      throw RecorderException('recorder/start-failed', 'Failed to start recording: $e', cause: e);
     }
     _isRecording = true;
     _isRecordingPaused = false;
@@ -657,39 +636,28 @@ class CameraController extends ChangeNotifier {
   /// Stream of raw camera frames for **this** session (only active after
   /// [enableFrameProcessing]). Frames from other concurrently-open sessions
   /// (multi-cam, the double-buffered switch window) are filtered out.
-  Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream
-      .where((f) => f.textureId == _textureId);
+  Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream.where((f) => f.textureId == _textureId);
 
   /// Typed session events (started / stopped / error / interruption) for **this**
   /// session. Mirrors vision-camera's session listeners.
   ///
   /// Events with a type index unknown to this plugin version (native/plugin
   /// version skew) are skipped rather than crashing the stream.
-  Stream<CameraSessionEvent> get events => NitroCamera.instance.eventStream
-      .where(CameraSessionEvent.isKnownType)
-      .map(CameraSessionEvent.fromNative)
-      .where((e) => e.textureId == _textureId || e.textureId == 0);
+  Stream<CameraSessionEvent> get events => NitroCamera.instance.eventStream.where(CameraSessionEvent.isKnownType).map(CameraSessionEvent.fromNative).where((e) => e.textureId == _textureId || e.textureId == 0);
 
   /// Typed session events across **all** open sessions.
-  static Stream<CameraSessionEvent> get allEvents =>
-      NitroCamera.instance.eventStream
-          .where(CameraSessionEvent.isKnownType)
-          .map(CameraSessionEvent.fromNative);
+  static Stream<CameraSessionEvent> get allEvents => NitroCamera.instance.eventStream.where(CameraSessionEvent.isKnownType).map(CameraSessionEvent.fromNative);
 
   /// Typed frame-drop reasons for **this** session (vision-camera's
   /// `onFrameDropped`) — a sustained stream of these means the frame processor
   /// can't keep up (drop-latest backpressure is discarding frames).
-  Stream<FrameDropReason> get frameDropReasons => events
-      .where((e) => e.type == CameraEventType.frameDropped)
-      .map((e) => FrameDropReason.fromMessage(e.message));
+  Stream<FrameDropReason> get frameDropReasons => events.where((e) => e.type == CameraEventType.frameDropped).map((e) => FrameDropReason.fromMessage(e.message));
 
   /// Device thermal-pressure changes while this session is open. Shed capture
   /// load (fps / resolution / HDR) as this climbs toward
   /// [ThermalState.critical] to avoid a HAL throttle or shutdown. Monitoring
   /// auto-starts with the session (no enable call needed).
-  Stream<ThermalState> get thermalStates => CameraController.allEvents
-      .where((e) => e.type == CameraEventType.thermalStateChanged)
-      .map((e) => ThermalState.fromLevel(e.rawReason));
+  Stream<ThermalState> get thermalStates => CameraController.allEvents.where((e) => e.type == CameraEventType.thermalStateChanged).map((e) => ThermalState.fromLevel(e.rawReason));
 
   /// Updates the GPU filter shader applied to the preview.
   void setFilterShader(String glslSource) {

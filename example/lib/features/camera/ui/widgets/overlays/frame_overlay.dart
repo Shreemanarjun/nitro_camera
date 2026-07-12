@@ -134,8 +134,9 @@ class _FrameOverlayState extends State<FrameOverlay> {
           if (pts[i + 1] < minY) minY = pts[i + 1];
           if (pts[i + 1] > maxY) maxY = pts[i + 1];
         }
-        final span =
-            (maxX - minX) > (maxY - minY) ? (maxX - minX) : (maxY - minY);
+        final span = (maxX - minX) > (maxY - minY)
+            ? (maxX - minX)
+            : (maxY - minY);
         final now = DateTime.now();
         final zoom = cameraStore.currentZoom.value;
         if (span < 0.22 &&
@@ -304,7 +305,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                         BoxShadow(
                           color: Colors.cyanAccent.withValues(alpha: 0.1),
                           blurRadius: 10,
-                        )
+                        ),
                       ],
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.1),
@@ -337,7 +338,6 @@ class _FrameOverlayState extends State<FrameOverlay> {
                     ),
                   ),
                 ),
-
             ],
           ),
         ),
@@ -360,10 +360,12 @@ class _FrameOverlayState extends State<FrameOverlay> {
           alignment: Alignment.center,
           child: Padding(
             padding: const EdgeInsets.only(top: 400),
-            child: Watch((_) => _ScanKindChips(
-                  selected: cameraStore.scanKind.value,
-                  onChanged: (k) => cameraStore.scanKind.value = k,
-                )),
+            child: Watch(
+              (_) => _ScanKindChips(
+                selected: cameraStore.scanKind.value,
+                onChanged: (k) => cameraStore.scanKind.value = k,
+              ),
+            ),
           ),
         ),
 
@@ -372,10 +374,12 @@ class _FrameOverlayState extends State<FrameOverlay> {
           alignment: Alignment.centerRight,
           child: Padding(
             padding: const EdgeInsets.only(right: 14),
-            child: Watch((_) => _ZoomChips(
-                  current: cameraStore.currentZoom.value,
-                  onChanged: cameraStore.setZoom,
-                )),
+            child: Watch(
+              (_) => _ZoomChips(
+                current: cameraStore.currentZoom.value,
+                onChanged: cameraStore.setZoom,
+              ),
+            ),
           ),
         ),
 
@@ -396,14 +400,17 @@ class _FrameOverlayState extends State<FrameOverlay> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 7),
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
                     decoration: BoxDecoration(
                       color: oneShot
                           ? Colors.cyanAccent
                           : Colors.black.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15)),
+                        color: Colors.white.withValues(alpha: 0.15),
+                      ),
                     ),
                     child: Text(
                       oneShot ? 'ONE-SHOT' : 'CONTINUOUS',
@@ -453,12 +460,15 @@ class _FrameOverlayState extends State<FrameOverlay> {
                   padding: const EdgeInsets.only(bottom: 230),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color: Colors.cyanAccent.withValues(alpha: 0.5)),
+                        color: Colors.cyanAccent.withValues(alpha: 0.5),
+                      ),
                     ),
                     child: const Text(
                       'TAP TO SCAN AGAIN',
@@ -487,8 +497,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
     var fw = (ctrl?.width ?? 1920).toDouble();
     var fh = (ctrl?.height ?? 1080).toDouble();
     // Upright dims: the preview rotates the landscape stream in portrait.
-    if (MediaQuery.of(context).orientation == Orientation.portrait &&
-        fw > fh) {
+    if (MediaQuery.of(context).orientation == Orientation.portrait && fw > fh) {
       final t = fw;
       fw = fh;
       fh = t;
@@ -515,10 +524,12 @@ class _CodeHighlightPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final mapped = <Offset>[];
     for (var i = 0; i + 1 < points.length; i += 2) {
-      mapped.add(Offset(
-        windowRect.left + points[i] * windowRect.width,
-        windowRect.top + points[i + 1] * windowRect.height,
-      ));
+      mapped.add(
+        Offset(
+          windowRect.left + points[i] * windowRect.width,
+          windowRect.top + points[i + 1] * windowRect.height,
+        ),
+      );
     }
     if (mapped.isEmpty) return;
 
@@ -595,8 +606,11 @@ class _PulsingChipState extends State<_PulsingChip>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.flashlight_on_rounded,
-                color: Colors.amberAccent, size: 15),
+            const Icon(
+              Icons.flashlight_on_rounded,
+              color: Colors.amberAccent,
+              size: 15,
+            ),
             const SizedBox(width: 8),
             Text(
               widget.label,
@@ -721,7 +735,9 @@ class _ScanKindChips extends StatelessWidget {
                       duration: const Duration(milliseconds: 200),
                       curve: Curves.easeOut,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 8),
+                        horizontal: 18,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: kind == selected
                             ? Colors.cyanAccent
@@ -731,8 +747,9 @@ class _ScanKindChips extends StatelessWidget {
                       child: Text(
                         kind.label,
                         style: TextStyle(
-                          color:
-                              kind == selected ? Colors.black : Colors.white70,
+                          color: kind == selected
+                              ? Colors.black
+                              : Colors.white70,
                           fontSize: 12,
                           fontWeight: FontWeight.w900,
                           letterSpacing: 1,
@@ -785,7 +802,8 @@ class _AnimatedStatsCard extends StatelessWidget {
                 label: "STREAM",
                 value: ValueListenableBuilder<double>(
                   valueListenable: fpsCounter,
-                  builder: (ctx, v, _) => Text("${v.toInt()} FPS", style: _valStyle),
+                  builder: (ctx, v, _) =>
+                      Text("${v.toInt()} FPS", style: _valStyle),
                 ),
                 color: Colors.cyanAccent,
               ),
@@ -801,10 +819,10 @@ class _AnimatedStatsCard extends StatelessWidget {
                       color: v == 0
                           ? Colors.white38
                           : v < 20
-                              ? Colors.greenAccent
-                              : v < 50
-                                  ? Colors.amberAccent
-                                  : Colors.redAccent,
+                          ? Colors.greenAccent
+                          : v < 50
+                          ? Colors.amberAccent
+                          : Colors.redAccent,
                     ),
                   ),
                 ),
@@ -839,9 +857,14 @@ class _AnimatedStatsCard extends StatelessWidget {
               _StatItem(
                 icon: Icons.qr_code_scanner,
                 label: "SCANNER",
-                value: Text(lastResult != null ? "FOUND" : "SCANNING", style: _valStyle.copyWith(
-                  color: lastResult != null ? Colors.greenAccent : Colors.white38,
-                )),
+                value: Text(
+                  lastResult != null ? "FOUND" : "SCANNING",
+                  style: _valStyle.copyWith(
+                    color: lastResult != null
+                        ? Colors.greenAccent
+                        : Colors.white38,
+                  ),
+                ),
                 color: lastResult != null ? Colors.greenAccent : Colors.white24,
               ),
             ],
@@ -851,7 +874,12 @@ class _AnimatedStatsCard extends StatelessWidget {
     );
   }
 
-  static const _valStyle = TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, fontFamily: 'monospace');
+  static const _valStyle = TextStyle(
+    color: Colors.white,
+    fontSize: 11,
+    fontWeight: FontWeight.w900,
+    fontFamily: 'monospace',
+  );
 }
 
 class _StatItem extends StatelessWidget {
@@ -859,7 +887,12 @@ class _StatItem extends StatelessWidget {
   final String label;
   final Widget value;
   final Color color;
-  const _StatItem({required this.icon, required this.label, required this.value, required this.color});
+  const _StatItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -871,7 +904,15 @@ class _StatItem extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.4),
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
             value,
           ],
         ),
@@ -902,31 +943,40 @@ class _PremiumViewfinder extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(48),
               border: Border.all(color: color.withValues(alpha: 0.1), width: 2),
-              boxShadow: isScanning ? [
-                 BoxShadow(
-                   color: color.withValues(alpha: 0.05),
-                   blurRadius: 40,
-                   spreadRadius: 10,
-                 )
-              ] : null,
+              boxShadow: isScanning
+                  ? [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.05),
+                        blurRadius: 40,
+                        spreadRadius: 10,
+                      ),
+                    ]
+                  : null,
             ),
             child: Stack(
               children: [
-                ...List.generate(4, (i) => Positioned(
-                  top: i < 2 ? -2 : null,
-                  bottom: i >= 2 ? -2 : null,
-                  left: i % 2 == 0 ? -2 : null,
-                  right: i % 2 != 0 ? -2 : null,
-                  child: _Corner(index: i, color: color),
-                )),
+                ...List.generate(
+                  4,
+                  (i) => Positioned(
+                    top: i < 2 ? -2 : null,
+                    bottom: i >= 2 ? -2 : null,
+                    left: i % 2 == 0 ? -2 : null,
+                    right: i % 2 != 0 ? -2 : null,
+                    child: _Corner(index: i, color: color),
+                  ),
+                ),
                 if (isScanning && !hasResult) const _ScanningBeam(),
                 if (hasResult)
-                  Center(
-                    child: _PulseCircle(color: Colors.greenAccent),
-                  ),
+                  Center(child: _PulseCircle(color: Colors.greenAccent)),
                 if (hasResult) ...[
                   const _SuccessFlash(),
-                  const Center(child: Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 60)),
+                  const Center(
+                    child: Icon(
+                      Icons.check_circle_outline,
+                      color: Colors.greenAccent,
+                      size: 60,
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -950,9 +1000,15 @@ class _Corner extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(
           top: index < 2 ? BorderSide(color: color, width: 5) : BorderSide.none,
-          bottom: index >= 2 ? BorderSide(color: color, width: 5) : BorderSide.none,
-          left: index % 2 == 0 ? BorderSide(color: color, width: 5) : BorderSide.none,
-          right: index % 2 != 0 ? BorderSide(color: color, width: 5) : BorderSide.none,
+          bottom: index >= 2
+              ? BorderSide(color: color, width: 5)
+              : BorderSide.none,
+          left: index % 2 == 0
+              ? BorderSide(color: color, width: 5)
+              : BorderSide.none,
+          right: index % 2 != 0
+              ? BorderSide(color: color, width: 5)
+              : BorderSide.none,
         ),
         borderRadius: BorderRadius.only(
           topLeft: index == 0 ? const Radius.circular(22) : Radius.zero,
@@ -996,15 +1052,23 @@ class _ScanningBeam extends StatefulWidget {
   State<_ScanningBeam> createState() => _ScanningBeamState();
 }
 
-class _ScanningBeamState extends State<_ScanningBeam> with SingleTickerProviderStateMixin {
+class _ScanningBeamState extends State<_ScanningBeam>
+    with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 2500))..repeat(reverse: true);
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    )..repeat(reverse: true);
   }
+
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1018,13 +1082,19 @@ class _ScanningBeamState extends State<_ScanningBeam> with SingleTickerProviderS
           height: 3,
           decoration: BoxDecoration(
             boxShadow: [
-              BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.6), blurRadius: 20, spreadRadius: 2)
+              BoxShadow(
+                color: Colors.cyanAccent.withValues(alpha: 0.6),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
             ],
-            gradient: LinearGradient(colors: [
-              Colors.cyanAccent.withValues(alpha: 0),
-              Colors.cyanAccent,
-              Colors.cyanAccent.withValues(alpha: 0),
-            ]),
+            gradient: LinearGradient(
+              colors: [
+                Colors.cyanAccent.withValues(alpha: 0),
+                Colors.cyanAccent,
+                Colors.cyanAccent.withValues(alpha: 0),
+              ],
+            ),
           ),
         ),
       ),
@@ -1055,10 +1125,7 @@ class _TacticalScannerOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size.infinite,
-      painter: _ScannerHolePainter(),
-    );
+    return CustomPaint(size: Size.infinite, painter: _ScannerHolePainter());
   }
 }
 
@@ -1112,7 +1179,10 @@ class _QRResultCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3), width: 2),
+                border: Border.all(
+                  color: Colors.greenAccent.withValues(alpha: 0.3),
+                  width: 2,
+                ),
               ),
               child: Row(
                 children: [
@@ -1122,7 +1192,11 @@ class _QRResultCard extends StatelessWidget {
                       color: Colors.greenAccent.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.greenAccent, size: 28),
+                    child: const Icon(
+                      Icons.qr_code_scanner_rounded,
+                      color: Colors.greenAccent,
+                      size: 28,
+                    ),
                   ),
                   const SizedBox(width: 20),
                   Expanded(
@@ -1165,7 +1239,11 @@ class _QRResultCard extends StatelessWidget {
                       Clipboard.setData(ClipboardData(text: result.text));
                       HapticFeedback.selectionClick();
                     },
-                    icon: const Icon(Icons.copy_rounded, color: Colors.white38, size: 20),
+                    icon: const Icon(
+                      Icons.copy_rounded,
+                      color: Colors.white38,
+                      size: 20,
+                    ),
                   ),
                 ],
               ),

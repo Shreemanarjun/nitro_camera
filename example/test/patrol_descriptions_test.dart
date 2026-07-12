@@ -36,12 +36,16 @@ void main() {
       }
     }
 
-    expect(scanned, greaterThan(0),
-        reason: 'no testApp(...) descriptions found — regex or layout drift?');
+    expect(
+      scanned,
+      greaterThan(0),
+      reason: 'no testApp(...) descriptions found — regex or layout drift?',
+    );
     expect(
       offenders,
       isEmpty,
-      reason: 'These descriptions contain a path separator and will crash the '
+      reason:
+          'These descriptions contain a path separator and will crash the '
           'AndroidX orchestrator (rename, e.g. "on/off" -> "on and off"):\n'
           '${offenders.join('\n')}',
     );

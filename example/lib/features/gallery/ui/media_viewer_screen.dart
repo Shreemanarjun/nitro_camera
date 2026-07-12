@@ -44,7 +44,9 @@ class MediaViewerScreen extends StatefulWidget {
 }
 
 class _MediaViewerScreenState extends State<MediaViewerScreen> {
-  late final PageController _page = PageController(initialPage: widget.initialIndex);
+  late final PageController _page = PageController(
+    initialPage: widget.initialIndex,
+  );
   late int _index = widget.initialIndex;
 
   /// View-only rotation per item, in quarter turns.
@@ -157,7 +159,8 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                   }
                   return _PhotoPage(
                     key: ValueKey(
-                        'photo:${item.path}:${_version[item.path] ?? 0}'),
+                      'photo:${item.path}:${_version[item.path] ?? 0}',
+                    ),
                     path: item.path,
                     quarterTurns: _turnsFor(item.path),
                   );
@@ -187,8 +190,11 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                     children: [
                       IconButton(
                         tooltip: 'Back',
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white, size: 20),
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                         onPressed: () => Navigator.pop(context),
                       ),
                       Expanded(
@@ -241,7 +247,8 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                       color: Colors.black.withValues(alpha: 0.4),
                       border: Border(
                         top: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.08)),
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
                       ),
                     ),
                     child: SafeArea(
@@ -331,7 +338,9 @@ class _ActionButton extends StatelessWidget {
                     width: 22,
                     height: 22,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: color),
+                      strokeWidth: 2,
+                      color: color,
+                    ),
                   )
                 : Icon(icon, color: color, size: 22),
             const SizedBox(height: 5),
@@ -397,9 +406,10 @@ class _PhotoPageState extends State<_PhotoPage>
   }
 
   void _animateTo(Matrix4 target) {
-    _zoomAnim = Matrix4Tween(begin: _tc.value, end: target).animate(
-      CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeOutCubic),
-    );
+    _zoomAnim = Matrix4Tween(
+      begin: _tc.value,
+      end: target,
+    ).animate(CurvedAnimation(parent: _zoomCtrl, curve: Curves.easeOutCubic));
     _zoomCtrl
       ..reset()
       ..forward();
@@ -416,8 +426,7 @@ class _PhotoPageState extends State<_PhotoPage>
     final target = Matrix4.identity();
     if (pos != null) {
       target
-        ..translateByDouble(
-            -pos.dx * (scale - 1), -pos.dy * (scale - 1), 0, 1)
+        ..translateByDouble(-pos.dx * (scale - 1), -pos.dy * (scale - 1), 0, 1)
         ..scaleByDouble(scale, scale, 1, 1);
     } else {
       target.scaleByDouble(scale, scale, 1, 1);
@@ -520,8 +529,7 @@ class _RawPreview extends StatelessWidget {
 /// Rewrites [path] with its pixels rotated by `quarterTurns * 90°`, preserving
 /// the original EXIF block (GPS, camera fields) and resetting the orientation
 /// tag. Runs in a background isolate via [compute].
-Future<void> bakeRotationIntoFile(
-    ({String path, int quarterTurns}) job) async {
+Future<void> bakeRotationIntoFile(({String path, int quarterTurns}) job) async {
   final file = File(job.path);
   final bytes = await file.readAsBytes();
   final src = img.decodeImage(bytes);

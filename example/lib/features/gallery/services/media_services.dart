@@ -91,7 +91,8 @@ class NativeVideoThumbnails implements VideoThumbnails {
       final sidecar = await _thumbFile(videoPath, '.dur');
       if (await sidecar.exists()) {
         final ms = int.tryParse(await sidecar.readAsString());
-        if (ms != null) return _durations[videoPath] = Duration(milliseconds: ms);
+        if (ms != null)
+          return _durations[videoPath] = Duration(milliseconds: ms);
       }
       final d = await _probeDuration(videoPath);
       if (d == null) return null;
@@ -119,7 +120,8 @@ class NativeVideoThumbnails implements VideoThumbnails {
   // Player for a metadata probe crashes on iOS 26 (see
   // docs/PERF_MEMORY_ASYNC_PLAN.md, item 0) — and every capture path also
   // primes the sidecar, so this only runs for pre-existing files.
-  Future<Duration?> _probeDuration(String videoPath) => probeMp4Duration(videoPath);
+  Future<Duration?> _probeDuration(String videoPath) =>
+      probeMp4Duration(videoPath);
 
   @override
   Future<Uint8List?> frameAt(String videoPath, Duration position) async {
@@ -192,8 +194,12 @@ Future<Duration?> _scanBoxes(
     }
     if (size < headerLen) return null; // corrupt — would loop forever
     if (!inMoov && type == 'moov') {
-      final d =
-          await _scanBoxes(f, offset + headerLen, offset + size, inMoov: true);
+      final d = await _scanBoxes(
+        f,
+        offset + headerLen,
+        offset + size,
+        inMoov: true,
+      );
       if (d != null) return d;
     } else if (inMoov && type == 'mvhd') {
       return _parseMvhd(f, offset + headerLen, offset + size);

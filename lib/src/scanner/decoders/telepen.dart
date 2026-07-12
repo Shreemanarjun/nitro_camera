@@ -77,8 +77,7 @@ const int _minRuns = 12 + 6 + 6 + 12 - 1;
 
 /// Reverse lookup: run-width pattern → glyph index.
 final Map<String, int> _patternToGlyph = {
-  for (var i = 0; i < telepenGlyphPatterns.length; i++)
-    telepenGlyphPatterns[i]: i,
+  for (var i = 0; i < telepenGlyphPatterns.length; i++) telepenGlyphPatterns[i]: i,
 };
 
 /// Decodes Telepen alpha (full ASCII) from normalized run widths.
@@ -88,8 +87,7 @@ final Map<String, int> _patternToGlyph = {
 /// assumed trimmed together with the quiet zone. Both scan directions are
 /// tried. Returns null unless the start/stop glyphs and the mod-127 check
 /// digit all hold and there is at least one payload character.
-RawDecode? decodeTelepen(List<int> units) =>
-    _decodeDirection(units) ?? _decodeDirection(units.reversed.toList());
+RawDecode? decodeTelepen(List<int> units) => _decodeDirection(units) ?? _decodeDirection(units.reversed.toList());
 
 RawDecode? _decodeDirection(List<int> units) {
   final glyphs = _segmentGlyphs(units);

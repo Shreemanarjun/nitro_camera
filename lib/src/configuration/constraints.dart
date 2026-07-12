@@ -20,8 +20,7 @@ sealed class TargetResolution {
   const factory TargetResolution.min() = MinResolution;
 
   /// Prefer the format whose resolution is closest to [width] x [height].
-  const factory TargetResolution.closestTo(int width, int height) =
-      ClosestResolution;
+  const factory TargetResolution.closestTo(int width, int height) = ClosestResolution;
 
   /// No resolution preference (penalty is always 0).
   const factory TargetResolution.any() = AnyResolution;
@@ -145,8 +144,7 @@ class ResolutionConstraint extends CameraConstraint {
         // (aspect compared long/short so orientation doesn't matter). We
         // normalise the open-ended sum into [0, 1] with x/(1+x) to fit the
         // constraint contract.
-        double longShort(num a, num b) =>
-            a >= b ? a / (b == 0 ? 1 : b) : b / (a == 0 ? 1 : a);
+        double longShort(num a, num b) => a >= b ? a / (b == 0 ? 1 : b) : b / (a == 0 ? 1 : a);
         final targetAr = longShort(width, height);
         final actualAr = longShort(w, h);
         final arDiff = (actualAr - targetAr).abs() / targetAr;
@@ -164,8 +162,7 @@ class VideoHdrConstraint extends CameraConstraint {
   const VideoHdrConstraint(this.enabled);
 
   @override
-  double penalty(CameraDeviceFormat format, FormatStats stats) =>
-      (enabled && !format.supportsVideoHdr) ? 1 : 0;
+  double penalty(CameraDeviceFormat format, FormatStats stats) => (enabled && !format.supportsVideoHdr) ? 1 : 0;
 }
 
 /// Require photo-HDR support (penalty 1 if the format can't do it).
@@ -174,8 +171,7 @@ class PhotoHdrConstraint extends CameraConstraint {
   const PhotoHdrConstraint(this.enabled);
 
   @override
-  double penalty(CameraDeviceFormat format, FormatStats stats) =>
-      (enabled && !format.supportsPhotoHdr) ? 1 : 0;
+  double penalty(CameraDeviceFormat format, FormatStats stats) => (enabled && !format.supportsPhotoHdr) ? 1 : 0;
 }
 
 /// Prefer a format that supports the given video-stabilization [mode].
@@ -185,8 +181,7 @@ class VideoStabilizationConstraint extends CameraConstraint {
   const VideoStabilizationConstraint(this.mode);
 
   @override
-  double penalty(CameraDeviceFormat format, FormatStats stats) =>
-      format.videoStabilizationModes.contains(mode) ? 0 : 1;
+  double penalty(CameraDeviceFormat format, FormatStats stats) => format.videoStabilizationModes.contains(mode) ? 0 : 1;
 }
 
 /// Prefer a format whose auto-focus system matches [system].
@@ -195,6 +190,5 @@ class AutoFocusConstraint extends CameraConstraint {
   const AutoFocusConstraint(this.system);
 
   @override
-  double penalty(CameraDeviceFormat format, FormatStats stats) =>
-      format.autoFocusSystem == system ? 0 : 1;
+  double penalty(CameraDeviceFormat format, FormatStats stats) => format.autoFocusSystem == system ? 0 : 1;
 }

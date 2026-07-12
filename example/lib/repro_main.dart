@@ -77,22 +77,30 @@ class _ReproAppState extends State<_ReproApp> {
     if (cameraStore.cameraPermission.value != 1) {
       _log('requesting camera permission');
       unawaited(cameraStore.grantPermission());
-      await _waitUntil(() => cameraStore.cameraPermission.value == 1,
-          timeout: const Duration(seconds: 90), what: 'camera permission');
+      await _waitUntil(
+        () => cameraStore.cameraPermission.value == 1,
+        timeout: const Duration(seconds: 90),
+        what: 'camera permission',
+      );
     }
 
     await _waitUntil(
-        () =>
-            cameraStore.status.value == CameraStatus.running &&
-            (cameraStore.activeController.value?.isInitialized ?? false),
-        what: 'camera running');
-    _log('camera running tid=${cameraStore.activeTextureId.value} '
-        'device=${cameraStore.currentDevice.value?.name}');
+      () =>
+          cameraStore.status.value == CameraStatus.running &&
+          (cameraStore.activeController.value?.isInitialized ?? false),
+      what: 'camera running',
+    );
+    _log(
+      'camera running tid=${cameraStore.activeTextureId.value} '
+      'device=${cameraStore.currentDevice.value?.name}',
+    );
 
     // Frame processing ON (LUMA).
     cameraStore.setFrameProcessor(luminanceProcessor);
-    await _waitUntil(() => luminanceProcessor.framesProcessed.value > 0,
-        what: 'first luma frame');
+    await _waitUntil(
+      () => luminanceProcessor.framesProcessed.value > 0,
+      what: 'first luma frame',
+    );
     _log('luma frames=${luminanceProcessor.framesProcessed.value}');
 
     // Record a short clip so we have a real file to play via media_kit.
@@ -101,10 +109,11 @@ class _ReproAppState extends State<_ReproApp> {
     await Future<void>.delayed(const Duration(seconds: 2));
     await cameraStore.toggleRecording();
     await _waitUntil(
-        () =>
-            (cameraStore.lastCapturedPath.value?.isNotEmpty ?? false) &&
-            cameraStore.isLastCapturedVideo.value,
-        what: 'recorded video path');
+      () =>
+          (cameraStore.lastCapturedPath.value?.isNotEmpty ?? false) &&
+          cameraStore.isLastCapturedVideo.value,
+      what: 'recorded video path',
+    );
     final videoPath = cameraStore.lastCapturedPath.value;
     _log('recorded video=$videoPath');
 
@@ -127,8 +136,12 @@ class _ReproAppState extends State<_ReproApp> {
     await Future<void>.delayed(const Duration(milliseconds: 500));
 
     final devices = cameraStore.devices.value;
-    _log('devices=${devices.map((d) => "${d.name}|lens${d.lensType.name}|pos${d.position.name}").toList()}');
-    final uw = devices.where((d) => d.lensType == CameraLensType.ultraWideAngle).toList();
+    _log(
+      'devices=${devices.map((d) => "${d.name}|lens${d.lensType.name}|pos${d.position.name}").toList()}',
+    );
+    final uw = devices
+        .where((d) => d.lensType == CameraLensType.ultraWideAngle)
+        .toList();
     if (uw.isEmpty) {
       _log('NO ultra-wide device found — aborting');
       return;
@@ -136,11 +149,12 @@ class _ReproAppState extends State<_ReproApp> {
     _log('SWITCHING to ultra-wide: ${uw.first.name}');
     await cameraStore.selectDevice(uw.first);
     await _waitUntil(
-        () =>
-            cameraStore.status.value == CameraStatus.running &&
-            (cameraStore.activeController.value?.isInitialized ?? false),
-        timeout: const Duration(seconds: 25),
-        what: 'ultra-wide running');
+      () =>
+          cameraStore.status.value == CameraStatus.running &&
+          (cameraStore.activeController.value?.isInitialized ?? false),
+      timeout: const Duration(seconds: 25),
+      what: 'ultra-wide running',
+    );
     _log('SWITCHED tid=${cameraStore.activeTextureId.value}');
     await Future<void>.delayed(const Duration(seconds: 4));
     _log('DONE — no crash observed');

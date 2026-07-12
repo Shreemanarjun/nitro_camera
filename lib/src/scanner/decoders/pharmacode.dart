@@ -29,8 +29,7 @@ import '../types.dart';
 /// direction is tried when the forward walk fails; note the symbology
 /// itself cannot distinguish orientation, so callers should scan it in a
 /// known direction.
-RawDecode? decodePharmaOneTrack(List<int> units) =>
-    _oneTrack(units) ?? _oneTrack(units.reversed.toList());
+RawDecode? decodePharmaOneTrack(List<int> units) => _oneTrack(units) ?? _oneTrack(units.reversed.toList());
 
 RawDecode? _oneTrack(List<int> units) {
   // Bars at even indices; a run list ending on a bar has odd length.
@@ -70,8 +69,8 @@ RawDecode? decodePharmaTwoTrack(List<int> states) =>
         s == 1
             ? 2
             : s == 2
-                ? 1
-                : s,
+            ? 1
+            : s,
     ]);
 
 RawDecode? _twoTrack(List<int> states) {

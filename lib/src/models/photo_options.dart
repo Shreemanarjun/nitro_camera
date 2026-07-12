@@ -50,15 +50,15 @@ class PhotoCaptureOptions {
   /// Projects onto the FFI struct.
   @internal
   PhotoOptions toNative() => PhotoOptions(
-        flash: flash.nativeValue,
-        qualityPrioritization: quality.nativeValue,
-        enableShutterSound: enableShutterSound ? 1 : 0,
-        skipMetadata: skipMetadata ? 1 : 0,
-        enableAutoRedEyeReduction: enableAutoRedEyeReduction ? 1 : 0,
-        latitude: location?.latitude ?? 0,
-        longitude: location?.longitude ?? 0,
-        altitude: location?.altitude ?? 0,
-        hasLocation: location != null ? 1 : 0,
-        outputFormat: outputFormat.index,
-      );
+    flash: flash.nativeValue,
+    qualityPrioritization: quality.nativeValue,
+    enableShutterSound: enableShutterSound ? 1 : 0,
+    skipMetadata: skipMetadata ? 1 : 0,
+    enableAutoRedEyeReduction: enableAutoRedEyeReduction ? 1 : 0,
+    latitude: location?.latitude ?? 0,
+    longitude: location?.longitude ?? 0,
+    altitude: location?.altitude ?? 0,
+    hasLocation: location != null ? 1 : 0,
+    outputFormat: outputFormat.index,
+  );
 }

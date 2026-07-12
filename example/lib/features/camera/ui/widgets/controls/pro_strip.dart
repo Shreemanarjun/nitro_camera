@@ -106,8 +106,9 @@ class _ProStripState extends State<ProStrip> {
   }
 
   void _cycleStabilization() {
-    cameraStore
-        .setVideoStabilization((cameraStore.videoStabilization.value + 1) % 3);
+    cameraStore.setVideoStabilization(
+      (cameraStore.videoStabilization.value + 1) % 3,
+    );
   }
 
   void _cycleFps() {
@@ -123,10 +124,10 @@ class _ProStripState extends State<ProStrip> {
   // ── Labels ──────────────────────────────────────────────────────────────
 
   static String _qualityLabel(QualityPrioritization q) => switch (q) {
-        QualityPrioritization.speed => 'SPEED',
-        QualityPrioritization.balanced => 'BALANCED',
-        QualityPrioritization.quality => 'QUALITY',
-      };
+    QualityPrioritization.speed => 'SPEED',
+    QualityPrioritization.balanced => 'BALANCED',
+    QualityPrioritization.quality => 'QUALITY',
+  };
 
   static String _evLabel(double ev) {
     if (ev == 0) return 'EV 0';
@@ -137,10 +138,10 @@ class _ProStripState extends State<ProStrip> {
       kelvin == 0 ? 'WB AUTO' : 'WB ${kelvin}K';
 
   static String _stabLabel(int mode) => switch (mode) {
-        1 => 'STAB STD',
-        2 => 'STAB CINE',
-        _ => 'STAB OFF',
-      };
+    1 => 'STAB STD',
+    2 => 'STAB CINE',
+    _ => 'STAB OFF',
+  };
 
   static String _torchLabel(bool on, double level) {
     if (!on) return 'TORCH';
@@ -151,142 +152,140 @@ class _ProStripState extends State<ProStrip> {
   // ── Pill sets per mode ──────────────────────────────────────────────────
 
   List<Widget> _photoPills() => [
-        Watch((context) {
-          final q = cameraStore.photoQuality.value;
-          return _ProPill(
-            icon: Icons.high_quality_rounded,
-            label: _qualityLabel(q),
-            tooltip: 'Photo quality',
-            active: q != QualityPrioritization.balanced,
-            onTap: _cycleQuality,
-          );
-        }),
-        _hdrPill(),
-        Watch((context) {
-          final on = cameraStore.lowLightBoost.value;
-          return _ProPill(
-            icon: Icons.nightlight_round,
-            label: 'LOW LIGHT',
-            tooltip: 'Low light boost',
-            active: on,
-            onTap: () => cameraStore.setLowLightBoost(!on),
-          );
-        }),
-        _evPill(),
-        Watch((context) {
-          final k = cameraStore.whiteBalanceKelvin.value;
-          return _ProPill(
-            icon: Icons.wb_sunny_outlined,
-            label: _wbLabel(k),
-            tooltip: 'White balance',
-            active: k != 0,
-            onTap: _cycleWhiteBalance,
-          );
-        }),
-        _torchPill(),
-      ];
+    Watch((context) {
+      final q = cameraStore.photoQuality.value;
+      return _ProPill(
+        icon: Icons.high_quality_rounded,
+        label: _qualityLabel(q),
+        tooltip: 'Photo quality',
+        active: q != QualityPrioritization.balanced,
+        onTap: _cycleQuality,
+      );
+    }),
+    _hdrPill(),
+    Watch((context) {
+      final on = cameraStore.lowLightBoost.value;
+      return _ProPill(
+        icon: Icons.nightlight_round,
+        label: 'LOW LIGHT',
+        tooltip: 'Low light boost',
+        active: on,
+        onTap: () => cameraStore.setLowLightBoost(!on),
+      );
+    }),
+    _evPill(),
+    Watch((context) {
+      final k = cameraStore.whiteBalanceKelvin.value;
+      return _ProPill(
+        icon: Icons.wb_sunny_outlined,
+        label: _wbLabel(k),
+        tooltip: 'White balance',
+        active: k != 0,
+        onTap: _cycleWhiteBalance,
+      );
+    }),
+    _torchPill(),
+  ];
 
   List<Widget> _scannerPills() => [
-        Watch((context) {
-          final fps = cameraStore.fps.value;
-          return _ProPill(
-            icon: Icons.speed_rounded,
-            label: 'FPS $fps',
-            tooltip: 'Scan frame rate',
-            active: fps != 60,
-            onTap: _cycleFps,
-          );
-        }),
-        Watch((context) {
-          final rate = cameraStore.samplingRate.value;
-          return _ProPill(
-            icon: Icons.blur_linear_rounded,
-            label: 'ANALYZE 1:$rate',
-            tooltip: rate == 1
-                ? 'Analyze every frame'
-                : 'Analyze every ${rate == 2 ? '2nd' : '${rate}rd'} frame',
-            active: rate != 1,
-            onTap: _cycleSampling,
-          );
-        }),
-      ];
+    Watch((context) {
+      final fps = cameraStore.fps.value;
+      return _ProPill(
+        icon: Icons.speed_rounded,
+        label: 'FPS $fps',
+        tooltip: 'Scan frame rate',
+        active: fps != 60,
+        onTap: _cycleFps,
+      );
+    }),
+    Watch((context) {
+      final rate = cameraStore.samplingRate.value;
+      return _ProPill(
+        icon: Icons.blur_linear_rounded,
+        label: 'ANALYZE 1:$rate',
+        tooltip: rate == 1
+            ? 'Analyze every frame'
+            : 'Analyze every ${rate == 2 ? '2nd' : '${rate}rd'} frame',
+        active: rate != 1,
+        onTap: _cycleSampling,
+      );
+    }),
+  ];
 
   List<Widget> _videoPills() => [
-        Watch((context) {
-          final v = cameraStore.videoStabilization.value;
-          return _ProPill(
-            icon: Icons.video_stable_rounded,
-            label: _stabLabel(v),
-            tooltip: 'Video stabilization',
-            active: v != 0,
-            onTap: _cycleStabilization,
-          );
-        }),
-        Watch((context) {
-          final on = cameraStore.geotagEnabled.value;
-          return _ProPill(
-            icon: Icons.location_on_outlined,
-            label: 'GEOTAG',
-            tooltip: 'Geotag captures',
-            active: on,
-            onTap: () => cameraStore.geotagEnabled.value = !on,
-          );
-        }),
-        Watch((context) {
-          final on = cameraStore.showFpsGraph.value;
-          return _ProPill(
-            icon: Icons.show_chart_rounded,
-            label: 'FPS GRAPH',
-            tooltip: 'FPS graph overlay',
-            active: on,
-            onTap: () => cameraStore.showFpsGraph.value = !on,
-          );
-        }),
-        _hdrPill(),
-        _torchPill(),
-      ];
+    Watch((context) {
+      final v = cameraStore.videoStabilization.value;
+      return _ProPill(
+        icon: Icons.video_stable_rounded,
+        label: _stabLabel(v),
+        tooltip: 'Video stabilization',
+        active: v != 0,
+        onTap: _cycleStabilization,
+      );
+    }),
+    Watch((context) {
+      final on = cameraStore.geotagEnabled.value;
+      return _ProPill(
+        icon: Icons.location_on_outlined,
+        label: 'GEOTAG',
+        tooltip: 'Geotag captures',
+        active: on,
+        onTap: () => cameraStore.geotagEnabled.value = !on,
+      );
+    }),
+    Watch((context) {
+      final on = cameraStore.showFpsGraph.value;
+      return _ProPill(
+        icon: Icons.show_chart_rounded,
+        label: 'FPS GRAPH',
+        tooltip: 'FPS graph overlay',
+        active: on,
+        onTap: () => cameraStore.showFpsGraph.value = !on,
+      );
+    }),
+    _hdrPill(),
+    _torchPill(),
+  ];
 
   // Shared pills (PHOTO + VIDEO).
 
   Widget _hdrPill() => Watch((context) {
-        final on = cameraStore.hdrEnabled.value;
-        return _ProPill(
-          icon: Icons.hdr_on_rounded,
-          label: 'HDR',
-          tooltip: 'HDR',
-          active: on,
-          onTap: () => cameraStore.setHdr(!on),
-        );
-      });
+    final on = cameraStore.hdrEnabled.value;
+    return _ProPill(
+      icon: Icons.hdr_on_rounded,
+      label: 'HDR',
+      tooltip: 'HDR',
+      active: on,
+      onTap: () => cameraStore.setHdr(!on),
+    );
+  });
 
   Widget _evPill() => Watch((context) {
-        final ev = cameraStore.exposure.value;
-        return _ProPill(
-          icon: Icons.exposure_rounded,
-          label: _evLabel(ev),
-          tooltip: 'Exposure compensation',
-          active: ev != 0 || _bubble == _Bubble.exposure,
-          onTap: () => _toggleBubble(_Bubble.exposure),
-        );
-      });
+    final ev = cameraStore.exposure.value;
+    return _ProPill(
+      icon: Icons.exposure_rounded,
+      label: _evLabel(ev),
+      tooltip: 'Exposure compensation',
+      active: ev != 0 || _bubble == _Bubble.exposure,
+      onTap: () => _toggleBubble(_Bubble.exposure),
+    );
+  });
 
   Widget _torchPill() => Watch((context) {
-        final on = cameraStore.torch.value;
-        final level = cameraStore.torchLevel.value;
-        return _ProPill(
-          icon: on
-              ? Icons.flashlight_on_rounded
-              : Icons.flashlight_off_rounded,
-          label: _torchLabel(on, level),
-          tooltip: 'Torch — long-press for level',
-          active: on,
-          onTap: () => cameraStore.setTorch(!on),
-          onLongPress: () {
-            HapticFeedback.mediumImpact();
-            _toggleBubble(_Bubble.torch);
-          },
-        );
-      });
+    final on = cameraStore.torch.value;
+    final level = cameraStore.torchLevel.value;
+    return _ProPill(
+      icon: on ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
+      label: _torchLabel(on, level),
+      tooltip: 'Torch — long-press for level',
+      active: on,
+      onTap: () => cameraStore.setTorch(!on),
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        _toggleBubble(_Bubble.torch);
+      },
+    );
+  });
 
   // ── Build ───────────────────────────────────────────────────────────────
 
@@ -311,48 +310,49 @@ class _ProStripState extends State<ProStrip> {
                 FadeTransition(opacity: anim, child: child),
             child: switch (_bubble) {
               _Bubble.exposure => _SliderBubble(
-                  key: const ValueKey('bubble_ev'),
-                  label: 'EV',
-                  child: Watch((context) {
-                    final ev = cameraStore.exposure.value;
-                    return _BubbleSlider(
-                      value: ev,
-                      min: -4,
-                      max: 4,
-                      valueLabel: _evLabel(ev),
-                      onChanged: (v) {
-                        // 0-detent: snap flat near the neutral point.
-                        final snapped = v.abs() < 0.15 ? 0.0 : v;
-                        if (snapped != ev) {
-                          if (snapped == 0.0) {
-                            HapticFeedback.selectionClick();
-                          }
-                          cameraStore.setExposure(snapped);
+                key: const ValueKey('bubble_ev'),
+                label: 'EV',
+                child: Watch((context) {
+                  final ev = cameraStore.exposure.value;
+                  return _BubbleSlider(
+                    value: ev,
+                    min: -4,
+                    max: 4,
+                    valueLabel: _evLabel(ev),
+                    onChanged: (v) {
+                      // 0-detent: snap flat near the neutral point.
+                      final snapped = v.abs() < 0.15 ? 0.0 : v;
+                      if (snapped != ev) {
+                        if (snapped == 0.0) {
+                          HapticFeedback.selectionClick();
                         }
-                        _armDismiss();
-                      },
-                    );
-                  }),
-                ),
+                        cameraStore.setExposure(snapped);
+                      }
+                      _armDismiss();
+                    },
+                  );
+                }),
+              ),
               _Bubble.torch => _SliderBubble(
-                  key: const ValueKey('bubble_torch'),
-                  label: 'TORCH',
-                  child: Watch((context) {
-                    final level = cameraStore.torchLevel.value;
-                    return _BubbleSlider(
-                      value: level,
-                      min: 0,
-                      max: 1,
-                      valueLabel: '${(level * 100).round()}%',
-                      onChanged: (v) {
-                        cameraStore.setTorchLevel(v);
-                        _armDismiss();
-                      },
-                    );
-                  }),
-                ),
-              _Bubble.none =>
-                const SizedBox.shrink(key: ValueKey('bubble_none')),
+                key: const ValueKey('bubble_torch'),
+                label: 'TORCH',
+                child: Watch((context) {
+                  final level = cameraStore.torchLevel.value;
+                  return _BubbleSlider(
+                    value: level,
+                    min: 0,
+                    max: 1,
+                    valueLabel: '${(level * 100).round()}%',
+                    onChanged: (v) {
+                      cameraStore.setTorchLevel(v);
+                      _armDismiss();
+                    },
+                  );
+                }),
+              ),
+              _Bubble.none => const SizedBox.shrink(
+                key: ValueKey('bubble_none'),
+              ),
             },
           ),
           SizedBox(
@@ -527,10 +527,8 @@ class _BubbleSlider extends StatelessWidget {
           child: SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 2,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 7),
-              overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 14),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
             ),
             child: Slider(
               value: value.clamp(min, max),

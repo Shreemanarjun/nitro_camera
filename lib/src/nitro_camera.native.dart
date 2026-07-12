@@ -128,8 +128,7 @@ class CameraFrame {
   final int timestamp; // ms since epoch
   final int orientation; // degrees: 0 / 90 / 180 / 270
   final int textureId; // identifies which camera session this frame belongs to
-  final int
-  bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
+  final int bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
   final int pixelFormat; // 0 = YUV_420 (plane 0 = luma), 1 = BGRA_8888
   final int isMirrored; // 0 / 1 (front camera)
 
@@ -271,8 +270,7 @@ class PhotoOptions {
   final double longitude;
   final double altitude;
   final int hasLocation; // 0 / 1
-  final int
-  outputFormat; // 0 = JPEG, 1 = DNG (RAW; requires supportsRawCapture)
+  final int outputFormat; // 0 = JPEG, 1 = DNG (RAW; requires supportsRawCapture)
 
   const PhotoOptions({
     required this.flash,

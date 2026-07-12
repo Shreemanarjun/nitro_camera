@@ -61,8 +61,10 @@ class TopBar extends StatelessWidget {
                 final (icon, color) = switch (flash) {
                   FlashMode.off => (Icons.flash_off_rounded, Colors.white70),
                   FlashMode.on => (Icons.flash_on_rounded, Colors.amberAccent),
-                  FlashMode.auto =>
-                    (Icons.flash_auto_rounded, Colors.cyanAccent),
+                  FlashMode.auto => (
+                    Icons.flash_auto_rounded,
+                    Colors.cyanAccent,
+                  ),
                 };
                 return _StripIcon(
                   icon: icon,
@@ -72,8 +74,9 @@ class TopBar extends StatelessWidget {
                   tooltip: 'Flash: ${flash.name}',
                   onTap: () {
                     final modes = FlashMode.values;
-                    cameraStore
-                        .setFlash(modes[(flash.index + 1) % modes.length]);
+                    cameraStore.setFlash(
+                      modes[(flash.index + 1) % modes.length],
+                    );
                   },
                 );
               }),
@@ -127,8 +130,9 @@ class TopBar extends StatelessWidget {
                   icon: Icons.memory_rounded,
                   active: on,
                   tooltip: 'Frame processor (demo)',
-                  onTap: () => cameraStore
-                      .setFrameProcessor(on ? null : luminanceProcessor),
+                  onTap: () => cameraStore.setFrameProcessor(
+                    on ? null : luminanceProcessor,
+                  ),
                 );
               }),
 
@@ -237,9 +241,7 @@ class _StripIcon extends StatelessWidget {
           height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: active
-                ? accent.withValues(alpha: 0.16)
-                : Colors.transparent,
+            color: active ? accent.withValues(alpha: 0.16) : Colors.transparent,
           ),
           child: Icon(
             icon,

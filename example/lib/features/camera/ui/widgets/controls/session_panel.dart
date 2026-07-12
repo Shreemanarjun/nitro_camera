@@ -24,9 +24,9 @@ class SessionPanel extends StatelessWidget {
             resolved == null
                 ? '—'
                 : '${resolved.videoWidth}×${resolved.videoHeight} @ ${resolved.selectedFps}fps'
-                    ' · ${resolved.pixelFormat.name}'
-                    ' · af:${resolved.autoFocusSystem.value}'
-                    '${resolved.videoHdrEnabled ? ' · HDR' : ''}',
+                      ' · ${resolved.pixelFormat.name}'
+                      ' · af:${resolved.autoFocusSystem.value}'
+                      '${resolved.videoHdrEnabled ? ' · HDR' : ''}',
             style: _mono,
           ),
           const SizedBox(height: 10),
@@ -35,7 +35,7 @@ class SessionPanel extends StatelessWidget {
             state == null
                 ? '—'
                 : 'running:${state.running} · ${state.width}×${state.height}'
-                    ' @ ${state.fps}fps · ${state.pixelFormat.name}',
+                      ' @ ${state.fps}fps · ${state.pixelFormat.name}',
             style: _mono,
           ),
           const SizedBox(height: 10),
@@ -43,16 +43,20 @@ class SessionPanel extends StatelessWidget {
           if (events.isEmpty)
             const Text('no events yet', style: _mono)
           else
-            ...events.reversed.take(6).map((e) => Text(
-                  '• ${e.type.name}'
-                  '${e.reason.name != 'none' ? ' (${e.reason.name})' : ''}'
-                  '${e.message.isNotEmpty ? ': ${e.message}' : ''}',
-                  style: TextStyle(
-                    color: e.isError ? Colors.redAccent : Colors.white54,
-                    fontSize: 9,
-                    fontFamily: 'monospace',
+            ...events.reversed
+                .take(6)
+                .map(
+                  (e) => Text(
+                    '• ${e.type.name}'
+                    '${e.reason.name != 'none' ? ' (${e.reason.name})' : ''}'
+                    '${e.message.isNotEmpty ? ': ${e.message}' : ''}',
+                    style: TextStyle(
+                      color: e.isError ? Colors.redAccent : Colors.white54,
+                      fontSize: 9,
+                      fontFamily: 'monospace',
+                    ),
                   ),
-                )),
+                ),
         ],
       );
     });
@@ -71,12 +75,15 @@ class _Header extends StatelessWidget {
   const _Header(this.title);
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(title,
-            style: const TextStyle(
-                color: Colors.white30,
-                fontSize: 8,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.4)),
-      );
+    padding: const EdgeInsets.only(bottom: 4, top: 4),
+    child: Text(
+      title,
+      style: const TextStyle(
+        color: Colors.white30,
+        fontSize: 8,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.4,
+      ),
+    ),
+  );
 }

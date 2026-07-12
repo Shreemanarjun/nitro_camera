@@ -27,8 +27,7 @@ void main() {
     });
 
     test('cooldown suppresses repeats, then allows again', () {
-      final c = ScanConfirmer(
-          confirmationFrames: 2, cooldown: const Duration(milliseconds: 1000));
+      final c = ScanConfirmer(confirmationFrames: 2, cooldown: const Duration(milliseconds: 1000));
       expect(c.onFrame(_r('A'), nowMs: 0), isNull);
       expect(c.onFrame(_r('A'), nowMs: 30), isNotNull); // emit @30
       // Still confirmed on later frames but inside cooldown:
@@ -39,8 +38,7 @@ void main() {
     });
 
     test('different payloads have independent cooldowns', () {
-      final c = ScanConfirmer(
-          confirmationFrames: 1, cooldown: const Duration(milliseconds: 1000));
+      final c = ScanConfirmer(confirmationFrames: 1, cooldown: const Duration(milliseconds: 1000));
       expect(c.onFrame(_r('A'), nowMs: 0), isNotNull);
       expect(c.onFrame(_r('B'), nowMs: 100), isNotNull);
       expect(c.onFrame(_r('A'), nowMs: 200), isNull); // A on cooldown
@@ -70,40 +68,33 @@ void main() {
     test('frameOrientation 90 rotates points cw to the displayed window', () {
       // Sensor-oriented window point at normalized (0.25, 0.1). On screen the
       // buffer is shown rotated 90° cw: (x, y) → (1-y, x).
-      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false,
-          frameOrientation: 90);
+      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false, frameOrientation: 90);
       expect(out[0], closeTo(0.9, 1e-9));
       expect(out[1], closeTo(0.25, 1e-9));
     });
 
     test('frameOrientation 270 rotates points ccw', () {
       // (x, y) → (y, 1-x).
-      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false,
-          frameOrientation: 270);
+      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false, frameOrientation: 270);
       expect(out[0], closeTo(0.1, 1e-9));
       expect(out[1], closeTo(0.75, 1e-9));
     });
 
     test('mirrored flips horizontally after rotation', () {
-      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false,
-          frameOrientation: 90, mirrored: true);
+      final out = mapDecodedPointsToWindow([25, 10], 100, 100, false, frameOrientation: 90, mirrored: true);
       expect(out[0], closeTo(1 - 0.9, 1e-9));
       expect(out[1], closeTo(0.25, 1e-9));
     });
 
-    test('portrait 1D: rotated pass + sensor 90 keeps a horizontal scanline',
-        () {
+    test('portrait 1D: rotated pass + sensor 90 keeps a horizontal scanline', () {
       // A horizontal 1D code on a portrait screen is VERTICAL in the sensor
       // buffer, so it decodes via the rotated pass. zxing sees a horizontal
       // scanline in the rotated bitmap: endpoints (10, 50) and (90, 50) in a
       // 100×100 window. After the inverse rotation + the sensor-90 display
       // rotation, the painted line must be horizontal again (same y).
-      final out = mapDecodedPointsToWindow(
-          [10, 50, 90, 50], 100, 100, true,
-          frameOrientation: 90);
+      final out = mapDecodedPointsToWindow([10, 50, 90, 50], 100, 100, true, frameOrientation: 90);
       expect(out[1], closeTo(out[3], 1e-9), reason: 'same screen y');
-      expect((out[0] - out[2]).abs(), greaterThan(0.5),
-          reason: 'spans horizontally');
+      expect((out[0] - out[2]).abs(), greaterThan(0.5), reason: 'spans horizontally');
     });
   });
 }

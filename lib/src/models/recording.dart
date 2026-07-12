@@ -14,10 +14,7 @@ extension RecordingResultMetadata on RecordingResult {
     return RecordingFinishedReason.values[i];
   }
 
-  VideoCodec get videoCodec =>
-      codec == VideoCodec.hevc.index ? VideoCodec.hevc : VideoCodec.h264;
+  VideoCodec get videoCodec => codec == VideoCodec.hevc.index ? VideoCodec.hevc : VideoCodec.h264;
 
-  VideoFileType get videoFileType => fileType == VideoFileType.mov.index
-      ? VideoFileType.mov
-      : VideoFileType.mp4;
+  VideoFileType get videoFileType => fileType == VideoFileType.mov.index ? VideoFileType.mov : VideoFileType.mp4;
 }

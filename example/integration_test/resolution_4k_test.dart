@@ -14,7 +14,6 @@
 // across `-r` reinstalls — run support/reset_permissions.sh to re-prompt). The
 // Patrol suite accepts the dialogs natively.
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -23,7 +22,6 @@ import 'package:nitro_camera_example/features/camera/processors/luminance_proces
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 
 import 'support/harness.dart';
-
 
 /// Waits for [luminanceProcessor.framesProcessed] to advance past [after],
 /// proving the native stream is alive (the CPU frame path shares
@@ -37,7 +35,8 @@ Future<void> expectFramesFlow(
     tester,
     () => luminanceProcessor.framesProcessed.value > after,
     timeout: const Duration(seconds: 15),
-    reason: 'frames flowing $stage (framesProcessed stuck at '
+    reason:
+        'frames flowing $stage (framesProcessed stuck at '
         '${luminanceProcessor.framesProcessed.value})',
   );
 }
@@ -47,76 +46,94 @@ void main() {
 
   installSemanticsFlakeFilter();
 
-  testWidgets('4K switch keeps a LIVE preview and reports a real 4K stream',
-      semanticsEnabled: false, (tester) async {
-    await bootApp(tester);
-    if (!cameraStore.supports4K.value) {
-      markTestSkipped('active sensor advertises no 4K format');
-      return;
-    }
+  testWidgets(
+    '4K switch keeps a LIVE preview and reports a real 4K stream',
+    semanticsEnabled: false,
+    (tester) async {
+      await bootApp(tester);
+      if (!cameraStore.supports4K.value) {
+        markTestSkipped('active sensor advertises no 4K format');
+        return;
+      }
 
-    // Prove frames flow at the boot resolution first.
-    cameraStore.setFrameProcessor(luminanceProcessor);
-    await expectFramesFlow(tester, after: 0, stage: 'at boot (1080p)');
+      // Prove frames flow at the boot resolution first.
+      cameraStore.setFrameProcessor(luminanceProcessor);
+      await expectFramesFlow(tester, after: 0, stage: 'at boot (1080p)');
 
-    // Switch to 4K.
-    final beforeTid = cameraStore.activeTextureId.value;
-    cameraStore.setResolution(3840, 2160);
-    await pumpUntil(
-      tester,
-      () =>
-          cameraStore.status.value == CameraStatus.running &&
-          cameraStore.activeTextureId.value != beforeTid &&
-          (cameraStore.activeController.value?.isInitialized ?? false),
-      timeout: const Duration(seconds: 20),
-      reason: 'session reopened at 4K',
-    );
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'switching to 4K must not surface an error');
+      // Switch to 4K.
+      final beforeTid = cameraStore.activeTextureId.value;
+      cameraStore.setResolution(3840, 2160);
+      await pumpUntil(
+        tester,
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != beforeTid &&
+            (cameraStore.activeController.value?.isInitialized ?? false),
+        timeout: const Duration(seconds: 20),
+        reason: 'session reopened at 4K',
+      );
+      expect(
+        cameraStore.errorMessage.value,
+        isNull,
+        reason: 'switching to 4K must not surface an error',
+      );
 
-    // THE regression assertion: frames must actually flow at 4K.
-    final at4kStart = luminanceProcessor.framesProcessed.value;
-    await expectFramesFlow(tester, after: at4kStart, stage: 'after 4K switch');
+      // THE regression assertion: frames must actually flow at 4K.
+      final at4kStart = luminanceProcessor.framesProcessed.value;
+      await expectFramesFlow(
+        tester,
+        after: at4kStart,
+        stage: 'after 4K switch',
+      );
 
-    // Correct-info assertion: the RESOLVED stream really is 4K (long edge
-    // >= 3840), not just the requested label. streamWidth/Height are
-    // portrait-swapped on iOS, so compare the long edge.
-    final state = cameraStore.sessionState();
-    expect(state, isNotNull);
-    final longEdge =
-        state!.width > state.height ? state.width : state.height;
-    debugPrint('[4K] resolved stream ${state.width}x${state.height} '
-        '@${state.fps} running=${state.running}');
-    expect(state.running, isTrue);
-    expect(longEdge, greaterThanOrEqualTo(3840),
-        reason: 'requested 4K but the resolved stream is '
+      // Correct-info assertion: the RESOLVED stream really is 4K (long edge
+      // >= 3840), not just the requested label. streamWidth/Height are
+      // portrait-swapped on iOS, so compare the long edge.
+      final state = cameraStore.sessionState();
+      expect(state, isNotNull);
+      final longEdge = state!.width > state.height ? state.width : state.height;
+      debugPrint(
+        '[4K] resolved stream ${state.width}x${state.height} '
+        '@${state.fps} running=${state.running}',
+      );
+      expect(state.running, isTrue);
+      expect(
+        longEdge,
+        greaterThanOrEqualTo(3840),
+        reason:
+            'requested 4K but the resolved stream is '
             '${state.width}x${state.height} — format negotiation picked a '
-            'non-4K format (UI would show wrong info)');
+            'non-4K format (UI would show wrong info)',
+      );
 
-    // And the store's own UI label agrees with reality.
-    expect(cameraStore.resolutionLabel.value, '4K');
+      // And the store's own UI label agrees with reality.
+      expect(cameraStore.resolutionLabel.value, '4K');
 
-    // Sustained streaming (not just one frame after reopen).
-    final sustainStart = luminanceProcessor.framesProcessed.value;
-    await pumpFor(tester, const Duration(seconds: 2));
-    expect(luminanceProcessor.framesProcessed.value, greaterThan(sustainStart),
-        reason: '4K stream died after the first frames');
+      // Sustained streaming (not just one frame after reopen).
+      final sustainStart = luminanceProcessor.framesProcessed.value;
+      await pumpFor(tester, const Duration(seconds: 2));
+      expect(
+        luminanceProcessor.framesProcessed.value,
+        greaterThan(sustainStart),
+        reason: '4K stream died after the first frames',
+      );
 
-    // Back to 1080p — preview must survive the round-trip.
-    final tid4k = cameraStore.activeTextureId.value;
-    cameraStore.setResolution(1920, 1080);
-    await pumpUntil(
-      tester,
-      () =>
-          cameraStore.status.value == CameraStatus.running &&
-          cameraStore.activeTextureId.value != tid4k,
-      timeout: const Duration(seconds: 20),
-      reason: 'session reopened back at 1080p',
-    );
-    final at1080 = luminanceProcessor.framesProcessed.value;
-    await expectFramesFlow(tester, after: at1080, stage: 'back at 1080p');
-    expect(cameraStore.errorMessage.value, isNull);
+      // Back to 1080p — preview must survive the round-trip.
+      final tid4k = cameraStore.activeTextureId.value;
+      cameraStore.setResolution(1920, 1080);
+      await pumpUntil(
+        tester,
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != tid4k,
+        timeout: const Duration(seconds: 20),
+        reason: 'session reopened back at 1080p',
+      );
+      final at1080 = luminanceProcessor.framesProcessed.value;
+      await expectFramesFlow(tester, after: at1080, stage: 'back at 1080p');
+      expect(cameraStore.errorMessage.value, isNull);
 
-    cameraStore.clearFrameProcessor();
-  });
+      cameraStore.clearFrameProcessor();
+    },
+  );
 }

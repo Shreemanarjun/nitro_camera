@@ -31,14 +31,12 @@ CameraDeviceInfo? selectCameraDevice(
   if (candidates.isEmpty) return null;
 
   final wanted = physicalDevices?.toSet();
-  final explicitlyWantsNonWide =
-      wanted != null && !wanted.contains(PhysicalDeviceType.wideAngleCamera);
+  final explicitlyWantsNonWide = wanted != null && !wanted.contains(PhysicalDeviceType.wideAngleCamera);
 
   int score(CameraDeviceInfo d) {
     var points = 0;
     if (d.hardwareLevel == HardwareLevel.full) points += 4;
-    if (!explicitlyWantsNonWide &&
-        d.physicalDevices.contains(PhysicalDeviceType.wideAngleCamera)) {
+    if (!explicitlyWantsNonWide && d.physicalDevices.contains(PhysicalDeviceType.wideAngleCamera)) {
       points += 2;
     }
     if (wanted != null) {
@@ -58,16 +56,11 @@ CameraDeviceInfo? selectCameraDevice(
 /// Fluent selection sugar over a device list.
 extension CameraDeviceSelection on List<CameraDeviceInfo> {
   /// The best back camera (optionally restricted to [physicalDevices]).
-  CameraDeviceInfo? backCamera({List<PhysicalDeviceType>? physicalDevices}) =>
-      selectCameraDevice(this,
-          position: CameraPosition.back, physicalDevices: physicalDevices);
+  CameraDeviceInfo? backCamera({List<PhysicalDeviceType>? physicalDevices}) => selectCameraDevice(this, position: CameraPosition.back, physicalDevices: physicalDevices);
 
   /// The best front camera.
-  CameraDeviceInfo? frontCamera({List<PhysicalDeviceType>? physicalDevices}) =>
-      selectCameraDevice(this,
-          position: CameraPosition.front, physicalDevices: physicalDevices);
+  CameraDeviceInfo? frontCamera({List<PhysicalDeviceType>? physicalDevices}) => selectCameraDevice(this, position: CameraPosition.front, physicalDevices: physicalDevices);
 
   /// The best external (USB) camera, if any.
-  CameraDeviceInfo? externalCamera() =>
-      selectCameraDevice(this, position: CameraPosition.external);
+  CameraDeviceInfo? externalCamera() => selectCameraDevice(this, position: CameraPosition.external);
 }

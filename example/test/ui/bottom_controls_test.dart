@@ -8,8 +8,9 @@ void main() {
   setUp(resetStore);
 
   group('BottomControls', () {
-    testWidgets('gallery, shutter and flip controls carry tooltips',
-        (tester) async {
+    testWidgets('gallery, shutter and flip controls carry tooltips', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const BottomControls()));
 
@@ -37,8 +38,9 @@ void main() {
       expect(find.byTooltip('Take photo'), findsOneWidget);
     });
 
-    testWidgets('mode swiper renders all three modes and switches on tap',
-        (tester) async {
+    testWidgets('mode swiper renders all three modes and switches on tap', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const BottomControls()));
 

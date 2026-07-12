@@ -12,8 +12,7 @@ import '../types.dart';
 /// Decodes an MSI symbol from normalized run widths. Tries the reversed
 /// run list too (upside-down scan). Returns null unless the frame structure
 /// holds and the trailing Luhn mod-10 check digit validates.
-RawDecode? decodeMsi(List<int> units) =>
-    _decode(units) ?? _decode(units.reversed.toList());
+RawDecode? decodeMsi(List<int> units) => _decode(units) ?? _decode(units.reversed.toList());
 
 RawDecode? _decode(List<int> units) {
   final n = units.length;

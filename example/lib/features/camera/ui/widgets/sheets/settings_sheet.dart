@@ -18,17 +18,16 @@ class SettingsSheet extends StatefulWidget {
   static Future<void> show(
     BuildContext context, {
     SettingsTab initialTab = SettingsTab.pro,
-  }) =>
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: Colors.transparent,
-        isScrollControlled: true,
-        // Never let the sheet grow under the status bar / notch.
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.9,
-        ),
-        builder: (_) => SettingsSheet(initialTab: initialTab),
-      );
+  }) => showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    // Never let the sheet grow under the status bar / notch.
+    constraints: BoxConstraints(
+      maxHeight: MediaQuery.of(context).size.height * 0.9,
+    ),
+    builder: (_) => SettingsSheet(initialTab: initialTab),
+  );
 
   @override
   State<SettingsSheet> createState() => _SettingsSheetState();
@@ -86,8 +85,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
                         behavior: HitTestBehavior.opaque,
                         child: const Padding(
                           padding: EdgeInsets.all(4),
-                          child:
-                              Icon(Icons.close, color: Colors.white54, size: 22),
+                          child: Icon(
+                            Icons.close,
+                            color: Colors.white54,
+                            size: 22,
+                          ),
                         ),
                       ),
                     ],
@@ -102,14 +104,18 @@ class _SettingsSheetState extends State<SettingsSheet> {
                         color: Colors.white.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(22),
                         border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.08)),
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _segment('PRO', Icons.tune, SettingsTab.pro),
-                          _segment('CONFIG', Icons.settings_input_component,
-                              SettingsTab.config),
+                          _segment(
+                            'CONFIG',
+                            Icons.settings_input_component,
+                            SettingsTab.config,
+                          ),
                         ],
                       ),
                     ),
@@ -169,7 +175,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 13, color: selected ? Colors.black : Colors.white60),
+            Icon(
+              icon,
+              size: 13,
+              color: selected ? Colors.black : Colors.white60,
+            ),
             const SizedBox(width: 7),
             Text(
               label,

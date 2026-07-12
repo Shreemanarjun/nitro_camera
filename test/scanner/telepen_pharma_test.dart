@@ -73,13 +73,13 @@ List<int> pharmaTwoStates(int value) {
 /// 180° rotation of a two-track state list: reversed order, ascender (1)
 /// and descender (2) swapped, full (0) unchanged.
 List<int> flipTwoTrack(List<int> states) => [
-      for (final s in states.reversed)
-        s == 1
-            ? 2
-            : s == 2
-                ? 1
-                : s,
-    ];
+  for (final s in states.reversed)
+    s == 1
+        ? 2
+        : s == 2
+        ? 1
+        : s,
+];
 
 void main() {
   group('Telepen glyph table', () {
@@ -145,7 +145,7 @@ void main() {
       // DEL (127): sum % 127 == 0 → check 127 → wraps to glyph 0.
       final del = String.fromCharCode(127);
       expect(decodeTelepen(telepenUnits(del))?.text, del);
-      final mixed = 'Hi\x10 42!'; // includes DLE
+      const mixed = 'Hi\x10 42!'; // includes DLE
       expect(decodeTelepen(telepenUnits(mixed))?.text, mixed);
     });
 

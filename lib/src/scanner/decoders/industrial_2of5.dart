@@ -31,8 +31,7 @@ const List<String> _digitBars = [
 /// to 3 units but degrade to 2 with poor module estimates, so any bar of
 /// 2+ units counts as wide. Returns null unless the frame structure holds,
 /// every space is narrow and there are at least 4 digits.
-RawDecode? decodeIndustrial2of5(List<int> units) =>
-    _decode(units) ?? _decode(units.reversed.toList());
+RawDecode? decodeIndustrial2of5(List<int> units) => _decode(units) ?? _decode(units.reversed.toList());
 
 RawDecode? _decode(List<int> units) {
   final n = units.length;

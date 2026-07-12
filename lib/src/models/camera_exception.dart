@@ -31,12 +31,10 @@ final class PermissionException extends CameraException {
   const PermissionException(super.code, super.message, {super.cause});
 
   /// `permission/camera-denied`
-  factory PermissionException.cameraDenied() => const PermissionException(
-      'permission/camera-denied', 'Camera permission was denied.');
+  factory PermissionException.cameraDenied() => const PermissionException('permission/camera-denied', 'Camera permission was denied.');
 
   /// `permission/microphone-denied`
-  factory PermissionException.microphoneDenied() => const PermissionException(
-      'permission/microphone-denied', 'Microphone permission was denied.');
+  factory PermissionException.microphoneDenied() => const PermissionException('permission/microphone-denied', 'Microphone permission was denied.');
 }
 
 /// The camera device could not be opened or disappeared.
@@ -45,8 +43,7 @@ final class DeviceException extends CameraException {
 
   /// `device/open-failed` — the HAL rejected the open (busy, wedged, or the
   /// id is unknown). Usually transient; retry with backoff.
-  factory DeviceException.openFailed(String deviceId) => DeviceException(
-      'device/open-failed', 'openCamera failed for device $deviceId');
+  factory DeviceException.openFailed(String deviceId) => DeviceException('device/open-failed', 'openCamera failed for device $deviceId');
 }
 
 /// The session is in the wrong state for the requested operation, or native
@@ -56,21 +53,15 @@ final class SessionException extends CameraException {
 
   /// `session/not-initialized` — a control/capture call before `initialize()`
   /// completed (or after `dispose()`).
-  factory SessionException.notInitialized() => const SessionException(
-      'session/not-initialized',
-      'CameraController is not initialised. Call initialize() first.');
+  factory SessionException.notInitialized() => const SessionException('session/not-initialized', 'CameraController is not initialised. Call initialize() first.');
 
   /// `session/malformed-payload` — the native layer returned data this plugin
   /// version could not parse (native/plugin version skew).
-  factory SessionException.malformedPayload(String what, Object cause) =>
-      SessionException('session/malformed-payload',
-          'Malformed $what payload from native: $cause',
-          cause: cause);
+  factory SessionException.malformedPayload(String what, Object cause) => SessionException('session/malformed-payload', 'Malformed $what payload from native: $cause', cause: cause);
 
   /// `session/native-error` — an error event emitted by the running native
   /// session (interruption, stream failure, ...).
-  factory SessionException.nativeError(String message) => SessionException(
-      'session/native-error', message.isEmpty ? 'camera error' : message);
+  factory SessionException.nativeError(String message) => SessionException('session/native-error', message.isEmpty ? 'camera error' : message);
 }
 
 /// A photo capture failed.

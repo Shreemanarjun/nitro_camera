@@ -188,8 +188,7 @@ void main() {
         final units = List<int>.generate(len, (_) => 1 + rng.nextInt(3));
         expect(decodeMsi(units), isNull, reason: 'MSI trial $trial');
         expect(decodeCode11(units), isNull, reason: 'Code11 trial $trial');
-        expect(decodeIndustrial2of5(units), isNull,
-            reason: '2of5 trial $trial');
+        expect(decodeIndustrial2of5(units), isNull, reason: '2of5 trial $trial');
       }
     });
   });

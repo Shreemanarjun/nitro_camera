@@ -45,7 +45,8 @@ class SensorTray extends StatelessWidget {
       // dedicated telephoto: active when the wide back camera is selected with
       // zoom ≈ 2.0 (see the DIGITAL chip below).
       final zoom = cameraStore.currentZoom.value;
-      final digital2xActive = !isFront &&
+      final digital2xActive =
+          !isFront &&
           currentDevice?.id == baselineLens.id &&
           (zoom - 2.0).abs() < 0.1;
 
@@ -75,7 +76,8 @@ class SensorTray extends StatelessWidget {
                     ...activeCameras.map((d) {
                       // The physical-lens chip yields "selected" to the 2×
                       // digital chip when the crop is active.
-                      final isSelected = currentDevice?.id == d.id &&
+                      final isSelected =
+                          currentDevice?.id == d.id &&
                           !(digital2xActive && d.id == baselineLens.id);
 
                       String label;
@@ -219,10 +221,14 @@ class _CategoryTabs extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _tab('BACK', Icons.camera_rear, !isFront, onBack,
-                  'Back cameras'),
-              _tab('FRONT', Icons.camera_front, isFront, onFront,
-                  'Front cameras'),
+              _tab('BACK', Icons.camera_rear, !isFront, onBack, 'Back cameras'),
+              _tab(
+                'FRONT',
+                Icons.camera_front,
+                isFront,
+                onFront,
+                'Front cameras',
+              ),
             ],
           ),
         ),
@@ -253,8 +259,11 @@ class _CategoryTabs extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon,
-                  size: 13, color: selected ? Colors.black : Colors.white60),
+              Icon(
+                icon,
+                size: 13,
+                color: selected ? Colors.black : Colors.white60,
+              ),
               const SizedBox(width: 6),
               Text(
                 label,

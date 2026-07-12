@@ -144,8 +144,9 @@ class CameraStore {
     // the numbers describe the stream, not the wall clock.
     _statFrames++;
     _statMs += sw.elapsedMicroseconds / 1000.0;
-    _statWindowStartTs =
-        _statWindowStartTs == 0 ? frame.timestamp : _statWindowStartTs;
+    _statWindowStartTs = _statWindowStartTs == 0
+        ? frame.timestamp
+        : _statWindowStartTs;
     final span = frame.timestamp - _statWindowStartTs;
     if (span >= 1000) {
       processorFps.value = _statFrames * 1000 / span;
@@ -169,8 +170,11 @@ class CameraStore {
   final lastThumbnailPath = signal<String?>(null);
 
   /// Demo geotag (San Francisco). A real app would read GPS via e.g. geolocator.
-  static const _demoLocation =
-      (latitude: 37.7749, longitude: -122.4194, altitude: 12.0);
+  static const _demoLocation = (
+    latitude: 37.7749,
+    longitude: -122.4194,
+    altitude: 12.0,
+  );
 
   // ── Live settings ──────────────────────────────────────────────────────────
   final flashMode = signal(FlashMode.off);
@@ -225,18 +229,21 @@ class CameraStore {
   };
 
   // ── Derived (computed) ──────────────────────────────────────────────────────
-  late final isRunning =
-      computed(() => status.value == CameraStatus.running);
+  late final isRunning = computed(() => status.value == CameraStatus.running);
 
   /// True while the session is being torn down / reopened (device, resolution
   /// or fps switch) — drives the freeze-dim overlay + flip-button animation.
-  late final isSwitching = computed(() =>
-      status.value == CameraStatus.opening ||
-      status.value == CameraStatus.closing);
+  late final isSwitching = computed(
+    () =>
+        status.value == CameraStatus.opening ||
+        status.value == CameraStatus.closing,
+  );
 
   /// Whether the active sensor advertises a 4K (UHD) video format.
-  late final supports4K = computed(() =>
-      currentDevice.value?.formats.any((f) => f.videoWidth >= 3840) ?? false);
+  late final supports4K = computed(
+    () =>
+        currentDevice.value?.formats.any((f) => f.videoWidth >= 3840) ?? false,
+  );
 
   /// Compact label for the active stream config (e.g. "1080P").
   ///
@@ -253,14 +260,17 @@ class CameraStore {
     if (w >= 1920) return '1080P';
     return '720P';
   });
-  late final canCapture =
-      computed(() => activeController.value != null && !isCapturing.value);
+  late final canCapture = computed(
+    () => activeController.value != null && !isCapturing.value,
+  );
   late final currentFormat = computed(() {
     final d = currentDevice.value;
     if (d == null) return null;
     // Negotiate the best format for the requested resolution + fps.
     return FormatResolver.resolve(d, [
-      ResolutionConstraint(TargetResolution.closestTo(width.value, height.value)),
+      ResolutionConstraint(
+        TargetResolution.closestTo(width.value, height.value),
+      ),
       FpsConstraint(fps.value.toDouble()),
     ]);
   });
@@ -280,8 +290,9 @@ class CameraStore {
     _eventSub = controller.events.listen((e) {
       lastEvent.value = e;
       final log = [...sessionEvents.value, e];
-      sessionEvents.value =
-          log.length > 20 ? log.sublist(log.length - 20) : log;
+      sessionEvents.value = log.length > 20
+          ? log.sublist(log.length - 20)
+          : log;
       if (e.isError) errorMessage.value = e.message;
       switch (e.type) {
         case CameraEventType.photoCaptureShutter:
@@ -337,21 +348,23 @@ class CameraStore {
     // unsupported control on an odd device can never abort session start.
     try {
       final base = ctrl.configuration ?? const CameraConfiguration();
-      await ctrl.configure(base.copyWith(
-        zoom: currentZoom.value,
-        exposure: exposure.value,
-        flash: flashMode.value,
-        whiteBalanceKelvin: whiteBalanceKelvin.value,
-        videoHdr: hdrEnabled.value,
-        lowLightBoost: lowLightBoost.value,
-        videoStabilization:
-            VideoStabilizationMode.values[videoStabilization.value],
-        autoFocus: autoFocusMode.value,
-        enableFrameProcessing: _frameDeliveryNeeded,
-        pixelFormat: PixelFormat.fromNative(pixelFormat.value),
-        samplingRate: samplingRate.value,
-        filterShader: filters[currentFilterName.value] ?? '',
-      ));
+      await ctrl.configure(
+        base.copyWith(
+          zoom: currentZoom.value,
+          exposure: exposure.value,
+          flash: flashMode.value,
+          whiteBalanceKelvin: whiteBalanceKelvin.value,
+          videoHdr: hdrEnabled.value,
+          lowLightBoost: lowLightBoost.value,
+          videoStabilization:
+              VideoStabilizationMode.values[videoStabilization.value],
+          autoFocus: autoFocusMode.value,
+          enableFrameProcessing: _frameDeliveryNeeded,
+          pixelFormat: PixelFormat.fromNative(pixelFormat.value),
+          samplingRate: samplingRate.value,
+          filterShader: filters[currentFilterName.value] ?? '',
+        ),
+      );
       // Not part of the declarative config struct (yet) — keep imperative.
       ctrl.setTargetOrientation(targetOrientation.value);
       // Fresh native session — re-adopt the custom processor (new controller,
@@ -401,7 +414,8 @@ class CameraStore {
         final loaded = await CameraController.getAvailableCameraDevices();
         devices.value = List.from(loaded);
         final backCam =
-            loaded.where((d) => d.isBackCamera).firstOrNull ?? loaded.firstOrNull;
+            loaded.where((d) => d.isBackCamera).firstOrNull ??
+            loaded.firstOrNull;
         if (backCam != null && currentDevice.value == null) {
           await selectDevice(backCam);
         }
@@ -481,7 +495,9 @@ class CameraStore {
   }
 
   void setVideoStabilization(int m) {
-    activeController.value?.setVideoStabilization(VideoStabilizationMode.values[m]);
+    activeController.value?.setVideoStabilization(
+      VideoStabilizationMode.values[m],
+    );
     videoStabilization.value = m;
   }
 
@@ -574,22 +590,25 @@ class CameraStore {
 
   Future<void> setPreviewMode(PreviewMode m) async {
     previewMode.value = m;
-    activeController.value?.setFilterShader(filters[currentFilterName.value] ?? '');
+    activeController.value?.setFilterShader(
+      filters[currentFilterName.value] ?? '',
+    );
   }
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
   Future<void> takePhoto() => _capture(
-        () => activeController.value!.takePhotoWithOptions(
-          PhotoCaptureOptions(
-            flash: flashMode.value,
-            quality: photoQuality.value,
-            location: geotagEnabled.value ? _demoLocation : null,
-            outputFormat:
-                rawPhoto.value ? PhotoOutputFormat.dng : PhotoOutputFormat.jpeg,
-          ),
-        ),
-      );
+    () => activeController.value!.takePhotoWithOptions(
+      PhotoCaptureOptions(
+        flash: flashMode.value,
+        quality: photoQuality.value,
+        location: geotagEnabled.value ? _demoLocation : null,
+        outputFormat: rawPhoto.value
+            ? PhotoOutputFormat.dng
+            : PhotoOutputFormat.jpeg,
+      ),
+    ),
+  );
 
   /// Fast preview-frame snapshot (no full still-capture round-trip).
   Future<void> takeSnapshot() =>
@@ -642,10 +661,13 @@ class CameraStore {
       try {
         final result = await ctrl.stopRecording();
         final path = result.path;
-        final ok = path.isNotEmpty && File(path).existsSync() && result.fileSize > 0;
+        final ok =
+            path.isNotEmpty && File(path).existsSync() && result.fileSize > 0;
         if (ok) {
-          _onRecordingFinished(path,
-              duration: Duration(milliseconds: result.durationMs));
+          _onRecordingFinished(
+            path,
+            duration: Duration(milliseconds: result.durationMs),
+          );
         } else {
           _recordingTimer?.cancel();
           _recordingTimer = null;
@@ -746,11 +768,16 @@ class CameraStore {
 
   /// Moves a finished capture into the permanent library (rename/copy — bytes
   /// and EXIF untouched) and mirrors it to the system gallery, best-effort.
-  Future<String> _persistCapture(String rawPath, {required bool isVideo}) async {
+  Future<String> _persistCapture(
+    String rawPath, {
+    required bool isVideo,
+  }) async {
     var path = rawPath;
     try {
-      path = await MediaServices.storage
-          .persist(rawPath, capturedAt: DateTime.now());
+      path = await MediaServices.storage.persist(
+        rawPath,
+        capturedAt: DateTime.now(),
+      );
     } catch (e) {
       debugPrint('Capture persist failed (keeping cache path): $e');
     }
@@ -760,8 +787,9 @@ class CameraStore {
 
   /// Deletes a gallery item: store entry, file, and cached video artifacts.
   Future<void> removeMedia(String path) async {
-    final wasVideo =
-        capturedMedia.value.any((m) => m.path == path && m.isVideo);
+    final wasVideo = capturedMedia.value.any(
+      (m) => m.path == path && m.isVideo,
+    );
     batch(() {
       capturedMedia.value = [
         for (final m in capturedMedia.value)

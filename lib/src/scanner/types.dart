@@ -68,34 +68,24 @@ enum CodeFormat {
 
   /// Whether this is a 2D (matrix) symbology.
   bool get is2D => switch (this) {
-        qrCode || dataMatrix || aztec || pdf417 || maxicode => true,
-        _ => false,
-      };
+    qrCode || dataMatrix || aztec || pdf417 || maxicode => true,
+    _ => false,
+  };
 
   /// Whether this is a postal (height-modulated) symbology.
   bool get isPostal => switch (this) {
-        postnet || planet || rm4scc || kix => true,
-        _ => false,
-      };
+    postnet || planet || rm4scc || kix => true,
+    _ => false,
+  };
 
   /// Whether this is a Pharmacode symbology (explicit-selection only).
   bool get isPharma => this == pharmacode || this == pharmacodeTwoTrack;
 
   /// Whether the zxing engine decodes this format.
   bool get isZxing => switch (this) {
-        msi ||
-        code11 ||
-        industrial2of5 ||
-        telepen ||
-        pharmacode ||
-        pharmacodeTwoTrack ||
-        postnet ||
-        planet ||
-        rm4scc ||
-        kix =>
-          false,
-        _ => true,
-      };
+    msi || code11 || industrial2of5 || telepen || pharmacode || pharmacodeTwoTrack || postnet || planet || rm4scc || kix => false,
+    _ => true,
+  };
 
   /// Whether this is a 1D (linear) symbology.
   bool get is1D => !is2D && !isPostal;
@@ -126,24 +116,22 @@ enum CodeScanKind {
 
   /// The formats this kind scans for.
   Set<CodeFormat> get formats => switch (this) {
-        qr => const {CodeFormat.qrCode},
-        oneD => CodeFormat.values
-            .where((f) => f.is1D && !f.isPharma)
-            .toSet(),
-        twoD => CodeFormat.values.where((f) => f.is2D).toSet(),
-        postal => CodeFormat.values.where((f) => f.isPostal).toSet(),
-        pharma => const {CodeFormat.pharmacode, CodeFormat.pharmacodeTwoTrack},
-        all => CodeFormat.values.where((f) => !f.isPharma).toSet(),
-      };
+    qr => const {CodeFormat.qrCode},
+    oneD => CodeFormat.values.where((f) => f.is1D && !f.isPharma).toSet(),
+    twoD => CodeFormat.values.where((f) => f.is2D).toSet(),
+    postal => CodeFormat.values.where((f) => f.isPostal).toSet(),
+    pharma => const {CodeFormat.pharmacode, CodeFormat.pharmacodeTwoTrack},
+    all => CodeFormat.values.where((f) => !f.isPharma).toSet(),
+  };
 
   String get label => switch (this) {
-        qr => 'QR',
-        oneD => '1D',
-        twoD => '2D',
-        postal => 'POST',
-        pharma => 'RX',
-        all => 'ALL',
-      };
+    qr => 'QR',
+    oneD => '1D',
+    twoD => '2D',
+    postal => 'POST',
+    pharma => 'RX',
+    all => 'ALL',
+  };
 }
 
 /// A decoded code.

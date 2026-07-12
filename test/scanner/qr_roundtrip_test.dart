@@ -37,8 +37,7 @@ void main() {
   });
 
   test('padded row stride decodes identically (bytesPerRow > width)', () {
-    final result =
-        decodeCodeFrame(_qrFrame('stride-safe', strideExtra: 64), CodeScanKind.qr);
+    final result = decodeCodeFrame(_qrFrame('stride-safe', strideExtra: 64), CodeScanKind.qr);
     expect(result, isNotNull);
     expect(result!.text, 'stride-safe');
   });
@@ -48,8 +47,7 @@ void main() {
   });
 
   test('CodeScanKind.all and .twoD also find the QR', () {
-    expect(decodeCodeFrame(_qrFrame('all-kinds'), CodeScanKind.all)?.text,
-        'all-kinds');
+    expect(decodeCodeFrame(_qrFrame('all-kinds'), CodeScanKind.all)?.text, 'all-kinds');
     expect(decodeCodeFrame(_qrFrame('two-d'), CodeScanKind.twoD)?.text, 'two-d');
   });
 
@@ -73,10 +71,8 @@ void main() {
   });
 
   test('noise does not decode', () {
-    final bytes = Uint8List.fromList(
-        List.generate(200 * 200, (i) => (i * 2654435761) % 251));
-    final noise = FrameData(
-        bytes: bytes, width: 200, height: 200, format: 0, bytesPerRow: 200);
+    final bytes = Uint8List.fromList(List.generate(200 * 200, (i) => (i * 2654435761) % 251));
+    final noise = FrameData(bytes: bytes, width: 200, height: 200, format: 0, bytesPerRow: 200);
     expect(decodeCodeFrame(noise, CodeScanKind.qr), isNull);
   });
 }

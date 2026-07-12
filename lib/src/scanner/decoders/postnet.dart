@@ -9,8 +9,16 @@ import '../types.dart';
 
 /// POSTNET digit patterns, 1 = tall bar (PLANET is the inverse).
 const List<String> _postnetDigits = [
-  '11000', '00011', '00101', '00110', '01001',
-  '01010', '01100', '10001', '10010', '10100',
+  '11000',
+  '00011',
+  '00101',
+  '00110',
+  '01001',
+  '01010',
+  '01100',
+  '10001',
+  '10010',
+  '10100',
 ];
 
 /// Decodes POSTNET or PLANET from tall/short bar states. Returns null when
@@ -36,6 +44,5 @@ RawDecode? decodePostnetPlanet(List<int> tall) {
     return RawDecode(digits.sublist(0, digits.length - 1).join(), format);
   }
 
-  return tryDecode(tall, CodeFormat.postnet) ??
-      tryDecode(tall.map((b) => 1 - b).toList(), CodeFormat.planet);
+  return tryDecode(tall, CodeFormat.postnet) ?? tryDecode(tall.map((b) => 1 - b).toList(), CodeFormat.planet);
 }

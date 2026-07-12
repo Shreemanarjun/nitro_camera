@@ -41,14 +41,26 @@ final class Preview extends Module {
     final r = await collectFor(const Duration(seconds: 4));
     // ignore: avoid_print
     print('sustained preview: $r');
-    expect(r.frameCount, greaterThan(20),
-        reason: 'too few frames in 4s — stream stalled ($r)');
-    expect(r.fps, greaterThan(12),
-        reason: 'preview FPS floor breached (lag): $r');
-    expect(r.maxGapMs, lessThan(600),
-        reason: 'preview stalled — ${r.maxGapMs}ms gap between frames ($r)');
-    expect(r.allFramesValid, isTrue,
-        reason: 'preview went black/blown at the pixel level ($r)');
+    expect(
+      r.frameCount,
+      greaterThan(20),
+      reason: 'too few frames in 4s — stream stalled ($r)',
+    );
+    expect(
+      r.fps,
+      greaterThan(12),
+      reason: 'preview FPS floor breached (lag): $r',
+    );
+    expect(
+      r.maxGapMs,
+      lessThan(600),
+      reason: 'preview stalled — ${r.maxGapMs}ms gap between frames ($r)',
+    );
+    expect(
+      r.allFramesValid,
+      isTrue,
+      reason: 'preview went black/blown at the pixel level ($r)',
+    );
     expect(cameraStore.errorMessage.value, isNull);
   }
 
@@ -71,9 +83,11 @@ final class Preview extends Module {
       c.setExposure((i % 3 - 1) * device.maxExposure / 2);
       c.setHdr(enabled: i % 2 == 0);
       c.setLowLightBoost(enabled: i % 3 == 0);
-      c.setVideoStabilization(i % 2 == 0
-          ? VideoStabilizationMode.standard
-          : VideoStabilizationMode.off);
+      c.setVideoStabilization(
+        i % 2 == 0
+            ? VideoStabilizationMode.standard
+            : VideoStabilizationMode.off,
+      );
       await pumpFor(const Duration(milliseconds: 150));
     }
 
@@ -85,15 +99,27 @@ final class Preview extends Module {
     // ignore: avoid_print
     print('config storm: $r');
 
-    expect(r.frameCount, greaterThan(10),
-        reason: 'preview stalled during a config storm ($r)');
-    expect(r.maxGapMs, lessThan(1500),
-        reason: 'long preview stall during config storm — ${r.maxGapMs}ms ($r)');
-    expect(r.allFramesValid, isTrue,
-        reason: 'preview went black during config storm ($r)');
+    expect(
+      r.frameCount,
+      greaterThan(10),
+      reason: 'preview stalled during a config storm ($r)',
+    );
+    expect(
+      r.maxGapMs,
+      lessThan(1500),
+      reason: 'long preview stall during config storm — ${r.maxGapMs}ms ($r)',
+    );
+    expect(
+      r.allFramesValid,
+      isTrue,
+      reason: 'preview went black during config storm ($r)',
+    );
     expect(cameraStore.status.value, CameraStatus.running);
-    expect(cameraStore.errorMessage.value, isNull,
-        reason: 'a config storm must not surface a native error');
+    expect(
+      cameraStore.errorMessage.value,
+      isNull,
+      reason: 'a config storm must not surface a native error',
+    );
   }
 
   /// Sweep zoom min→max→min in steps while streaming — frames must flow
@@ -112,13 +138,15 @@ final class Preview extends Module {
 
     const steps = 12;
     for (var i = 0; i <= steps; i++) {
-      c.setZoom(device.minZoom +
-          (device.maxZoom - device.minZoom) * (i / steps));
+      c.setZoom(
+        device.minZoom + (device.maxZoom - device.minZoom) * (i / steps),
+      );
       await pumpFor(const Duration(milliseconds: 120));
     }
     for (var i = steps; i >= 0; i--) {
-      c.setZoom(device.minZoom +
-          (device.maxZoom - device.minZoom) * (i / steps));
+      c.setZoom(
+        device.minZoom + (device.maxZoom - device.minZoom) * (i / steps),
+      );
       await pumpFor(const Duration(milliseconds: 120));
     }
 
@@ -127,8 +155,16 @@ final class Preview extends Module {
     c.setFrameProcessing(enabled: false);
     // ignore: avoid_print
     print('zoom sweep: $r');
-    expect(r.frameCount, greaterThan(15), reason: 'preview stalled during zoom sweep ($r)');
-    expect(r.maxGapMs, lessThan(800), reason: 'zoom sweep stalled the preview ($r)');
+    expect(
+      r.frameCount,
+      greaterThan(15),
+      reason: 'preview stalled during zoom sweep ($r)',
+    );
+    expect(
+      r.maxGapMs,
+      lessThan(800),
+      reason: 'zoom sweep stalled the preview ($r)',
+    );
     expect(r.allFramesValid, isTrue);
     expect(cameraStore.errorMessage.value, isNull);
   }
@@ -145,7 +181,11 @@ final class Preview extends Module {
 
     for (var i = 0; i < 4; i++) {
       final p = await c.takePhoto();
-      expect(File(p.path).existsSync(), isTrue, reason: 'burst photo #$i missing');
+      expect(
+        File(p.path).existsSync(),
+        isTrue,
+        reason: 'burst photo #$i missing',
+      );
       File(p.path).deleteSync();
       await pumpFor(const Duration(milliseconds: 400));
     }
@@ -154,8 +194,11 @@ final class Preview extends Module {
     c.setFrameProcessing(enabled: false);
     // ignore: avoid_print
     print('capture burst during stream: $r');
-    expect(r.frameCount, greaterThan(10),
-        reason: 'preview froze during capture burst ($r)');
+    expect(
+      r.frameCount,
+      greaterThan(10),
+      reason: 'preview froze during capture burst ($r)',
+    );
     expect(r.allFramesValid, isTrue);
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
@@ -182,13 +225,23 @@ final class Preview extends Module {
     c.setFrameProcessing(enabled: false);
     // ignore: avoid_print
     print('long stream: early=$e  late=$l');
-    expect(e.allFramesValid && l.allFramesValid, isTrue,
-        reason: 'degenerate frame during a long stream (early=$e late=$l)');
-    expect(l.fps, greaterThan(e.fps * 0.7),
-        reason: 'FPS degraded over time — leak/throttle? early=${e.fps} '
-            'late=${l.fps}');
-    expect(l.maxGapMs, lessThan(700),
-        reason: 'preview stalled late in a long stream ($l)');
+    expect(
+      e.allFramesValid && l.allFramesValid,
+      isTrue,
+      reason: 'degenerate frame during a long stream (early=$e late=$l)',
+    );
+    expect(
+      l.fps,
+      greaterThan(e.fps * 0.7),
+      reason:
+          'FPS degraded over time — leak/throttle? early=${e.fps} '
+          'late=${l.fps}',
+    );
+    expect(
+      l.maxGapMs,
+      lessThan(700),
+      reason: 'preview stalled late in a long stream ($l)',
+    );
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
   }
@@ -217,10 +270,16 @@ final class Preview extends Module {
     c.setFrameProcessing(enabled: false);
     // ignore: avoid_print
     print('no-op reconfigure: $r');
-    expect(c.textureId, tid,
-        reason: 'a no-op reconfigure reopened the session (tid changed)');
-    expect(r.maxGapMs, lessThan(700),
-        reason: 'a no-op reconfigure stalled the preview ($r)');
+    expect(
+      c.textureId,
+      tid,
+      reason: 'a no-op reconfigure reopened the session (tid changed)',
+    );
+    expect(
+      r.maxGapMs,
+      lessThan(700),
+      reason: 'a no-op reconfigure stalled the preview ($r)',
+    );
     expect(r.allFramesValid, isTrue);
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
@@ -239,7 +298,9 @@ final class Preview extends Module {
     c.setFrameProcessing(enabled: false);
     await sub.cancel();
     // ignore: avoid_print
-    print('frame-drop reasons observed: ${reasons.map((r) => r.name).toList()}');
+    print(
+      'frame-drop reasons observed: ${reasons.map((r) => r.name).toList()}',
+    );
     for (final r in reasons) {
       expect(FrameDropReason.values, contains(r));
     }
@@ -256,8 +317,7 @@ final class Preview extends Module {
     final beforeTid = cameraStore.activeTextureId.value;
     cameraStore.setResolution(1280, 720);
     await pumpUntil(
-      () =>
-          cameraStore.activeTextureId.value != beforeTid && states.isNotEmpty,
+      () => cameraStore.activeTextureId.value != beforeTid && states.isNotEmpty,
       timeout: const Duration(seconds: 15),
       reason: 'controller.thermalStates published a state on reopen',
     );
@@ -287,16 +347,25 @@ final class Preview extends Module {
 
     c.setLowLightBoost(enabled: false);
     // ignore: avoid_print
-    print('low-light boost: off=$off  on=$on  '
-        'deltaLuma=${(on.meanLuma - off.meanLuma).toStringAsFixed(1)}');
+    print(
+      'low-light boost: off=$off  on=$on  '
+      'deltaLuma=${(on.meanLuma - off.meanLuma).toStringAsFixed(1)}',
+    );
 
-    expect(off.allFramesValid && on.allFramesValid, isTrue,
-        reason: 'low-light boost produced degenerate frames (off=$off on=$on)');
+    expect(
+      off.allFramesValid && on.allFramesValid,
+      isTrue,
+      reason: 'low-light boost produced degenerate frames (off=$off on=$on)',
+    );
     // Directional: boost brightens or is neutral — it must NOT darken the
     // scene (a small tolerance absorbs AE noise).
-    expect(on.meanLuma, greaterThanOrEqualTo(off.meanLuma - 4.0),
-        reason: 'low-light boost DARKENED the image (off=${off.meanLuma}, '
-            'on=${on.meanLuma})');
+    expect(
+      on.meanLuma,
+      greaterThanOrEqualTo(off.meanLuma - 4.0),
+      reason:
+          'low-light boost DARKENED the image (off=${off.meanLuma}, '
+          'on=${on.meanLuma})',
+    );
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
     return true;
@@ -309,7 +378,8 @@ final class Preview extends Module {
   ///   couldn't engage it — caller skips).
   Future<String> verifyHdrImage() async {
     final c = _ctrl;
-    if (!c.device.formats.any((f) => f.supportsVideoHdr)) return 'no-hdr-format';
+    if (!c.device.formats.any((f) => f.supportsVideoHdr))
+      return 'no-hdr-format';
 
     final base = c.configuration;
     if (base == null) return 'no-hdr-format';
@@ -331,16 +401,25 @@ final class Preview extends Module {
 
     await c.configure(c.configuration!.copyWith(videoHdr: false));
     // ignore: avoid_print
-    print('HDR: sdr=$sdr  hdr=$hdr  '
-        'rangeDelta=${hdr.dynamicRange - sdr.dynamicRange}');
+    print(
+      'HDR: sdr=$sdr  hdr=$hdr  '
+      'rangeDelta=${hdr.dynamicRange - sdr.dynamicRange}',
+    );
 
-    expect(sdr.allFramesValid && hdr.allFramesValid, isTrue,
-        reason: 'HDR produced degenerate frames (sdr=$sdr hdr=$hdr)');
+    expect(
+      sdr.allFramesValid && hdr.allFramesValid,
+      isTrue,
+      reason: 'HDR produced degenerate frames (sdr=$sdr hdr=$hdr)',
+    );
     // HDR must not COLLAPSE tonal range vs SDR (it preserves/extends it). A
     // generous margin absorbs scene/AE variation between the two windows.
-    expect(hdr.dynamicRange, greaterThanOrEqualTo(sdr.dynamicRange - 25),
-        reason: 'HDR collapsed dynamic range vs SDR (sdr=${sdr.dynamicRange}, '
-            'hdr=${hdr.dynamicRange})');
+    expect(
+      hdr.dynamicRange,
+      greaterThanOrEqualTo(sdr.dynamicRange - 25),
+      reason:
+          'HDR collapsed dynamic range vs SDR (sdr=${sdr.dynamicRange}, '
+          'hdr=${hdr.dynamicRange})',
+    );
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
     return 'ok';

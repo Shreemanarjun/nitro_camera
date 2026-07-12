@@ -16,10 +16,10 @@ class ScanCodesPlugin extends FrameProcessorPlugin {
   final CodeScanKind kind;
 
   ScanCodesPlugin(super.options)
-      : kind = CodeScanKind.values.firstWhere(
-          (k) => k.name == (options['kind'] ?? 'all'),
-          orElse: () => CodeScanKind.all,
-        );
+    : kind = CodeScanKind.values.firstWhere(
+        (k) => k.name == (options['kind'] ?? 'all'),
+        orElse: () => CodeScanKind.all,
+      );
 
   @override
   Object? callback(FrameData frame) {
@@ -35,8 +35,7 @@ class ScanCodesPlugin extends FrameProcessorPlugin {
 }
 
 /// Factory for [ScanCodesPlugin] (top-level, isolate-sendable).
-FrameProcessorPlugin createScanCodesPlugin(Map<String, Object?> options) =>
-    ScanCodesPlugin(options);
+FrameProcessorPlugin createScanCodesPlugin(Map<String, Object?> options) => ScanCodesPlugin(options);
 
 /// Registers all plugins shipped with nitro_camera (currently `scanCodes`).
 /// Call once, e.g. from `main()`.

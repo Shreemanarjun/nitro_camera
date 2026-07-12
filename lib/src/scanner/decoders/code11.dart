@@ -30,8 +30,7 @@ const String _c11Chars = '0123456789-';
 /// Decodes a Code 11 symbol from normalized run widths. Tries the reversed
 /// run list too (upside-down scan). Returns null unless the frame structure
 /// holds and the C (and, when present, K) mod-11 check characters validate.
-RawDecode? decodeCode11(List<int> units) =>
-    _decode(units) ?? _decode(units.reversed.toList());
+RawDecode? decodeCode11(List<int> units) => _decode(units) ?? _decode(units.reversed.toList());
 
 RawDecode? _decode(List<int> units) {
   final n = units.length;

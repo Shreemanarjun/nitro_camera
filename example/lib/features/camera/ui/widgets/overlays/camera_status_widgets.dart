@@ -4,7 +4,11 @@ class PermissionGuard extends StatelessWidget {
   final int cameraStatus; // 0: unknown, 1: granted, 2: denied
   final VoidCallback onGrant;
 
-  const PermissionGuard({super.key, required this.cameraStatus, required this.onGrant});
+  const PermissionGuard({
+    super.key,
+    required this.cameraStatus,
+    required this.onGrant,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -18,12 +22,21 @@ class PermissionGuard extends StatelessWidget {
           const SizedBox(height: 30),
           const Text(
             "Nitro Camera Ready",
-            style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 2),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
+            ),
           ),
           const SizedBox(height: 10),
           const Text(
             "Access required for high-performance preview",
-            style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.normal),
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 13,
+              fontWeight: FontWeight.normal,
+            ),
           ),
           const SizedBox(height: 40),
           ElevatedButton(
@@ -32,10 +45,19 @@ class PermissionGuard extends StatelessWidget {
               backgroundColor: Colors.cyanAccent,
               foregroundColor: Colors.black,
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               elevation: 0,
             ),
-            child: const Text("GRANT CAMERA PERMISSION", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.5)),
+            child: const Text(
+              "GRANT CAMERA PERMISSION",
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+                letterSpacing: 1.5,
+              ),
+            ),
           ),
         ],
       ),
@@ -59,12 +81,20 @@ class ErrorCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 22),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.redAccent,
+            size: 22,
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),

@@ -11,7 +11,11 @@ void main() {
         'height': 1080,
         'rotation': 90,
         'results': [
-          {'text': 'HELLO', 'format': 256, 'bounds': [10, 20, 110, 220]},
+          {
+            'text': 'HELLO',
+            'format': 256,
+            'bounds': [10, 20, 110, 220],
+          },
         ],
       });
       expect(r, isNotNull);
@@ -57,8 +61,7 @@ void main() {
     });
 
     test('error / unknown-detector payloads parse to null', () {
-      expect(DetectionResult.fromJson({'detector': 'barcode', 'error': 'no mlkit'}),
-          isNull);
+      expect(DetectionResult.fromJson({'detector': 'barcode', 'error': 'no mlkit'}), isNull);
       expect(DetectionResult.fromJson({'detector': 'pose'}), isNull);
     });
 
@@ -83,14 +86,10 @@ void main() {
 
   group('FrameDropReason', () {
     test('maps iOS reason strings', () {
-      expect(FrameDropReason.fromMessage('FrameWasLate'),
-          FrameDropReason.frameWasLate);
-      expect(FrameDropReason.fromMessage('OutOfBuffers'),
-          FrameDropReason.outOfBuffers);
-      expect(FrameDropReason.fromMessage('Discontinuity'),
-          FrameDropReason.discontinuity);
-      expect(FrameDropReason.fromMessage('outOfBuffers'),
-          FrameDropReason.outOfBuffers);
+      expect(FrameDropReason.fromMessage('FrameWasLate'), FrameDropReason.frameWasLate);
+      expect(FrameDropReason.fromMessage('OutOfBuffers'), FrameDropReason.outOfBuffers);
+      expect(FrameDropReason.fromMessage('Discontinuity'), FrameDropReason.discontinuity);
+      expect(FrameDropReason.fromMessage('outOfBuffers'), FrameDropReason.outOfBuffers);
       expect(FrameDropReason.fromMessage('garbage'), FrameDropReason.unknown);
     });
   });

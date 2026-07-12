@@ -38,15 +38,13 @@ class DetectionBounds {
 
   static DetectionBounds? _fromJson(Object? v) {
     if (v is List && v.length >= 4) {
-      return DetectionBounds((v[0] as num).toDouble(), (v[1] as num).toDouble(),
-          (v[2] as num).toDouble(), (v[3] as num).toDouble());
+      return DetectionBounds((v[0] as num).toDouble(), (v[1] as num).toDouble(), (v[2] as num).toDouble(), (v[3] as num).toDouble());
     }
     return null;
   }
 
   @override
-  String toString() =>
-      'DetectionBounds($left, $top, $right, $bottom)';
+  String toString() => 'DetectionBounds($left, $top, $right, $bottom)';
 }
 
 /// A detected barcode/QR (native ML Kit barcode detector).
@@ -63,10 +61,10 @@ class DetectedBarcode {
   const DetectedBarcode({required this.text, required this.format, this.bounds});
 
   factory DetectedBarcode.fromJson(Map<String, dynamic> j) => DetectedBarcode(
-        text: j['text'] as String? ?? '',
-        format: (j['format'] as num?)?.toInt() ?? 0,
-        bounds: DetectionBounds._fromJson(j['bounds']),
-      );
+    text: j['text'] as String? ?? '',
+    format: (j['format'] as num?)?.toInt() ?? 0,
+    bounds: DetectionBounds._fromJson(j['bounds']),
+  );
 }
 
 /// A detected face (native ML Kit face detector).
@@ -90,15 +88,14 @@ class DetectedFace {
   });
 
   factory DetectedFace.fromJson(Map<String, dynamic> j) => DetectedFace(
-        bounds: DetectionBounds._fromJson(j['bounds']),
-        trackingId: (j['trackingId'] as num?)?.toInt(),
-        smilingProbability: (j['smilingProbability'] as num?)?.toDouble(),
-        leftEyeOpenProbability: (j['leftEyeOpenProbability'] as num?)?.toDouble(),
-        rightEyeOpenProbability:
-            (j['rightEyeOpenProbability'] as num?)?.toDouble(),
-        headEulerAngleY: (j['headEulerAngleY'] as num?)?.toDouble() ?? 0,
-        headEulerAngleZ: (j['headEulerAngleZ'] as num?)?.toDouble() ?? 0,
-      );
+    bounds: DetectionBounds._fromJson(j['bounds']),
+    trackingId: (j['trackingId'] as num?)?.toInt(),
+    smilingProbability: (j['smilingProbability'] as num?)?.toDouble(),
+    leftEyeOpenProbability: (j['leftEyeOpenProbability'] as num?)?.toDouble(),
+    rightEyeOpenProbability: (j['rightEyeOpenProbability'] as num?)?.toDouble(),
+    headEulerAngleY: (j['headEulerAngleY'] as num?)?.toDouble() ?? 0,
+    headEulerAngleZ: (j['headEulerAngleZ'] as num?)?.toDouble() ?? 0,
+  );
 }
 
 /// One frame's worth of native-detector results.
@@ -144,17 +141,14 @@ class DetectionResult {
       frameWidth: (json['width'] as num?)?.toInt() ?? 0,
       frameHeight: (json['height'] as num?)?.toInt() ?? 0,
       rotation: (json['rotation'] as num?)?.toInt() ?? 0,
-      barcodes: detector == NativeDetector.barcode
-          ? results.map(DetectedBarcode.fromJson).toList()
-          : const [],
-      faces: detector == NativeDetector.face
-          ? results.map(DetectedFace.fromJson).toList()
-          : const [],
+      barcodes: detector == NativeDetector.barcode ? results.map(DetectedBarcode.fromJson).toList() : const [],
+      faces: detector == NativeDetector.face ? results.map(DetectedFace.fromJson).toList() : const [],
     );
   }
 
   @override
-  String toString() => 'DetectionResult(${detector.name}, '
+  String toString() =>
+      'DetectionResult(${detector.name}, '
       '${frameWidth}x$frameHeight@$rotation°, '
       'barcodes=${barcodes.length}, faces=${faces.length})';
 }

@@ -23,9 +23,11 @@ void main() {
 
   Future<void> pumpStrip(WidgetTester tester) async {
     usePhoneSurface(tester);
-    await tester.pumpWidget(harness(
-      const Align(alignment: Alignment.bottomCenter, child: ProStrip()),
-    ));
+    await tester.pumpWidget(
+      harness(
+        const Align(alignment: Alignment.bottomCenter, child: ProStrip()),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -67,8 +69,9 @@ void main() {
       expect(find.textContaining('WB'), findsNothing);
     });
 
-    testWidgets('VIDEO mode shows stabilize/geotag/graph plus HDR + TORCH',
-        (tester) async {
+    testWidgets('VIDEO mode shows stabilize/geotag/graph plus HDR + TORCH', (
+      tester,
+    ) async {
       cameraStore.mode.value = 'VIDEO';
       await pumpStrip(tester);
 
@@ -82,8 +85,9 @@ void main() {
       expect(find.textContaining('ANALYZE'), findsNothing);
     });
 
-    testWidgets('strip swaps pill sets when the mode signal changes',
-        (tester) async {
+    testWidgets('strip swaps pill sets when the mode signal changes', (
+      tester,
+    ) async {
       await pumpStrip(tester);
       expect(find.text('LOW LIGHT'), findsOneWidget);
 
@@ -98,8 +102,9 @@ void main() {
       expect(find.text('ANALYZE 1:1'), findsOneWidget);
     });
 
-    testWidgets('QUALITY pill cycles speed → balanced → quality',
-        (tester) async {
+    testWidgets('QUALITY pill cycles speed → balanced → quality', (
+      tester,
+    ) async {
       await pumpStrip(tester);
 
       await tapPill(tester, find.text('BALANCED'));
@@ -160,8 +165,7 @@ void main() {
       expect(find.byType(Slider), findsNothing);
     });
 
-    testWidgets('EV slider snaps to the 0 detent near neutral',
-        (tester) async {
+    testWidgets('EV slider snaps to the 0 detent near neutral', (tester) async {
       cameraStore.exposure.value = 0.4;
       await pumpStrip(tester);
 
@@ -236,8 +240,9 @@ void main() {
       expect(find.text('FPS 30'), findsOneWidget);
     });
 
-    testWidgets('VIDEO pills drive stabilization / geotag / fps graph',
-        (tester) async {
+    testWidgets('VIDEO pills drive stabilization / geotag / fps graph', (
+      tester,
+    ) async {
       cameraStore.mode.value = 'VIDEO';
       await pumpStrip(tester);
 
@@ -264,8 +269,16 @@ void main() {
   group('ProStrip in TrayLayer', () {
     setUp(() {
       cameraStore.devices.value = [
-        fakeDevice(id: 'back-wide', lensType: CameraLensType.wideAngle, focalLength: 5.0),
-        fakeDevice(id: 'front-1', position: CameraPosition.front, focalLength: 3.0),
+        fakeDevice(
+          id: 'back-wide',
+          lensType: CameraLensType.wideAngle,
+          focalLength: 5.0,
+        ),
+        fakeDevice(
+          id: 'front-1',
+          position: CameraPosition.front,
+          focalLength: 3.0,
+        ),
       ];
       cameraStore.currentDevice.value = cameraStore.devices.value.first;
     });
@@ -278,12 +291,12 @@ void main() {
 
       // Closed filter tray: strip visible and live.
       final stripFinder = find.byType(ProStrip);
-      AnimatedOpacity opacityOf(Finder inner) =>
-          tester.widget<AnimatedOpacity>(find
-              .ancestor(of: inner, matching: find.byType(AnimatedOpacity))
-              .first);
+      AnimatedOpacity opacityOf(Finder inner) => tester.widget<AnimatedOpacity>(
+        find.ancestor(of: inner, matching: find.byType(AnimatedOpacity)).first,
+      );
       IgnorePointer ignoreOf(Finder inner) => tester.widget<IgnorePointer>(
-          find.ancestor(of: inner, matching: find.byType(IgnorePointer)).first);
+        find.ancestor(of: inner, matching: find.byType(IgnorePointer)).first,
+      );
 
       expect(opacityOf(stripFinder).opacity, 1.0);
       expect(ignoreOf(stripFinder).ignoring, isFalse);
@@ -307,8 +320,9 @@ void main() {
       expect(ignoreOf(stripFinder).ignoring, isFalse);
     });
 
-    testWidgets('strip does not overlap the sensor tray (lens chips)',
-        (tester) async {
+    testWidgets('strip does not overlap the sensor tray (lens chips)', (
+      tester,
+    ) async {
       usePhoneSurface(tester);
       await tester.pumpWidget(harness(const TrayLayer()));
       await tester.pumpAndSettle();

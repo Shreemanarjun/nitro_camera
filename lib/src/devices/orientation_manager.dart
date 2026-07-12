@@ -38,8 +38,7 @@ class OrientationManager {
   OutputOrientationMode _mode = OutputOrientationMode.preview;
   bool _started = false;
 
-  OrientationManager({NitroCamera? native})
-      : _native = native ?? NitroCamera.instance;
+  OrientationManager({NitroCamera? native}) : _native = native ?? NitroCamera.instance;
 
   /// Physical orientation changes in degrees (0 / 90 / 180 / 270).
   Stream<int> get orientationStream => _out.stream;
@@ -70,8 +69,7 @@ class OrientationManager {
   /// mode every physical rotation is forwarded to
   /// [CameraController.setTargetOrientation]; in preview mode the session's
   /// automatic behaviour is restored. Pass null to stop driving.
-  void drive(CameraController? controller,
-      [OutputOrientationMode mode = OutputOrientationMode.device]) {
+  void drive(CameraController? controller, [OutputOrientationMode mode = OutputOrientationMode.device]) {
     _driven = controller;
     _mode = mode;
     if (controller == null) return;
@@ -97,12 +95,10 @@ class OrientationManager {
 class CameraDevicesObserver {
   final NitroCamera _native;
   StreamSubscription<CameraEvent>? _sub;
-  final StreamController<CameraSessionEvent> _changes =
-      StreamController<CameraSessionEvent>.broadcast();
+  final StreamController<CameraSessionEvent> _changes = StreamController<CameraSessionEvent>.broadcast();
   bool _started = false;
 
-  CameraDevicesObserver({NitroCamera? native})
-      : _native = native ?? NitroCamera.instance;
+  CameraDevicesObserver({NitroCamera? native}) : _native = native ?? NitroCamera.instance;
 
   /// A [CameraEventType.deviceConnected] / [CameraEventType.deviceDisconnected]
   /// event per hot-plug change; [CameraSessionEvent.deviceId] names the camera.
@@ -116,8 +112,7 @@ class CameraDevicesObserver {
     _sub = _native.eventStream.listen((e) {
       if (!CameraSessionEvent.isKnownType(e)) return;
       final evt = CameraSessionEvent.fromNative(e);
-      if (evt.type != CameraEventType.deviceConnected &&
-          evt.type != CameraEventType.deviceDisconnected) {
+      if (evt.type != CameraEventType.deviceConnected && evt.type != CameraEventType.deviceDisconnected) {
         return;
       }
       if (!_changes.isClosed) _changes.add(evt);

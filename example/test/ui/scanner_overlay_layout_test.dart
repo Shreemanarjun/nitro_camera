@@ -35,7 +35,8 @@ void main() {
     expect(
       find.byType(SensorTray),
       findsNothing,
-      reason: 'the lens tray must be hidden in SCANNER mode so the scanner '
+      reason:
+          'the lens tray must be hidden in SCANNER mode so the scanner '
           'overlay owns the bottom region and nothing overlaps its code-type chips',
     );
   });
