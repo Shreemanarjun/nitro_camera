@@ -1,5 +1,5 @@
 ## 0.0.1
-
+- **Initial Release**
 * **Export split**: `nitro_camera.dart` now exports a curated surface only.
   The raw FFI layer (`NitroCamera`, FFI structs, codec extensions) moved to
   `package:nitro_camera/native.dart`; the FPS HUD moved to
