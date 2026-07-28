@@ -41,7 +41,11 @@ class FrameOutput(
 
     // @Volatile: set from the Dart/nitro thread (setFrameFormat/setSamplingRate),
     // read on the camera thread (emitFrame / state read-back).
-    @Volatile var pixelFormat: Long = 1
+    // The Android pipeline is hard-wired to YUV_420_888 (the ImageReader above),
+    // so 0 (yuv420) is the only value ever delivered on frames; keeping this at
+    // anything else would make ResolvedConfig/session state contradict every
+    // CameraFrame header.
+    @Volatile var pixelFormat: Long = 0
     @Volatile var samplingRate: Long = 1
 
     /** Delivery callback into the shared frame flow (set by NitroCameraImpl via the session). */

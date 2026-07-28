@@ -172,9 +172,15 @@ class CameraController extends ChangeNotifier {
   /// supplied (e.g. to open at a screen-matched resolution). The camera then
   /// negotiates the closest hardware-supported size natively.
   Future<void> initialize({int? width, int? height, int? fps}) async {
-    final fmt = format ?? device.formats.firstOrNull;
-    final w = width ?? fmt?.videoWidth ?? 1280;
-    final h = height ?? fmt?.videoHeight ?? 720;
+    // Without an explicit format/size, target 1080p and let the native
+    // resolver negotiate the closest supported size. Falling back to
+    // `device.formats.first` here used to inherit the platform's enumeration
+    // order — descending on Android (a 4K preview by default) and roughly
+    // ascending on iOS (a tiny one). vision-camera #4083 parity: the preview
+    // should not bias towards 4K unless the caller asks for it.
+    final fmt = format;
+    final w = width ?? fmt?.videoWidth ?? 1920;
+    final h = height ?? fmt?.videoHeight ?? 1080;
     final targetFps = fps ?? fmt?.maxFps.toInt() ?? 30;
 
     final tid = await NitroCamera.instance.openCamera(
@@ -599,12 +605,34 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Stops and finalises the recording. Returns the file path and metadata.
+  ///
+  /// Throws a [RecorderException] (`recorder/finalize-failed`) when the native
+  /// recorder could not write a playable file — e.g. no frames ever reached
+  /// the encoder, so finalising the container failed. The truncated file is
+  /// deleted natively; there is no partial output to salvage.
   Future<RecordingResult> stopRecording() async {
     _requireInitialized();
-    final result = await NitroCamera.instance.stopVideoRecording(_textureId!);
+    final RecordingResult result;
+    try {
+      result = await NitroCamera.instance.stopVideoRecording(_textureId!);
+    } catch (e) {
+      // iOS surfaces a failed finalize as a thrown error; normalise it to the
+      // same typed exception Android's `failed` reason maps to below.
+      _isRecording = false;
+      _isRecordingPaused = false;
+      notifyListeners();
+      if (e is CameraException) rethrow;
+      throw RecorderException('recorder/finalize-failed', 'Failed to finalise recording: $e', cause: e);
+    }
     _isRecording = false;
     _isRecordingPaused = false;
     notifyListeners();
+    if (result.reason == RecordingFinishedReason.failed) {
+      throw const RecorderException(
+        'recorder/finalize-failed',
+        'Recording could not be finalised — no playable video was written; the truncated file was discarded.',
+      );
+    }
     return result;
   }
 

@@ -18,6 +18,28 @@
 
 ### Fixed
 
+* **Android**: opening a camera crashed (`NullPointerException`) on devices
+  whose HAL returns no `SurfaceTexture` output sizes — external/UVC cameras
+  especially; the preview-size resolver now falls back to the requested size.
+* **Android**: a `MediaRecorder.stop()` failure (e.g. zero frames reached the
+  encoder, so the MP4 was never finalised) returned the truncated, unplayable
+  file as a successful `RecordingResult`. The file is now deleted and
+  `stopRecording()` throws `RecorderException('recorder/finalize-failed')` on
+  both platforms. New: `RecordingFinishedReason.failed`,
+  `RecordingResult.isFinalized`.
+* **Android**: `ResolvedCameraConfig.pixelFormat` / session state echoed a
+  requested `bgra` even though the Android frame pipeline is hard-wired to
+  `YUV_420_888`; the native side now clamps to `yuv420` so config and
+  delivered `FrameData.format` agree.
+* **iOS**: external cameras (USB) and Continuity Cameras (both iOS 17+)
+  never appeared in `getAvailableCameraDevices()` — hot-plug events fired for
+  devices missing from the rebuilt list. They now enumerate and map to
+  `CameraPosition.external` even when they self-report a `front` position.
+* `initialize()` without an explicit size/format targeted the platform's first
+  enumerated format — 4K on Android, the smallest size on iOS. It now targets
+  1080p and negotiates the closest supported size (pass `width`/`height` or a
+  `format` for anything else).
+
 * `CameraController.frameStream` delivered frames from *other* open sessions
   (multi-cam / the device-switch window); it is now filtered to its session.
 * `PreviewMode.platformView` rendered nothing off-Android; it now falls back

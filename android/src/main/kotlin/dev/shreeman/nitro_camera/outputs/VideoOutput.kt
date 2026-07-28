@@ -251,10 +251,16 @@ class VideoOutput(
 
     fun stopVideoRecording(): RecordingResult {
         val recorder = mediaRecorder ?: return RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 0L)
+        // stop() throwing (classically RuntimeException/-1007 when zero frames
+        // reached the encoder) means the MP4 moov atom was never written — the
+        // file on disk is truncated and unplayable. Delete it and report the
+        // failure instead of returning a corrupt file as a successful recording.
+        var stopFailed = false
         try {
             recorder.stop()
         } catch (e: Exception) {
             Log.e("NitroCamera", "VideoOutput: Error stopping recorder: ${e.message}")
+            stopFailed = true
         }
         recorder.release()
         mediaRecorder = null
@@ -279,6 +285,12 @@ class VideoOutput(
         }
         val duration = (now - recordingStartMs - pausedAccumulatedMs).coerceAtLeast(0L)
         val file = File(path)
+
+        if (stopFailed) {
+            if (file.exists()) file.delete()
+            // finishedReason 3 = failed (see Dart RecordingFinishedReason).
+            return RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 3L)
+        }
         val size = if (file.exists()) file.length() else 0L
 
         return RecordingResult(

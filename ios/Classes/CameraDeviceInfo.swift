@@ -61,6 +61,13 @@ enum CameraDeviceInfo {
             deviceTypes.append(.builtInDualWideCamera)
             deviceTypes.append(.builtInTripleCamera)
         }
+        // External cameras never enumerate unless their type is listed — the
+        // hot-plug observer above fires for them, but the rebuilt list would
+        // not contain the device. (vision-camera #4039/#4040 parity.)
+        if #available(iOS 17.0, *) {
+            deviceTypes.append(.external)
+            deviceTypes.append(.continuityCamera)
+        }
         return AVCaptureDevice.DiscoverySession(
             deviceTypes: deviceTypes,
             mediaType: .video,
@@ -140,8 +147,20 @@ enum CameraDeviceInfo {
         }
     }
 
+    /// Wire position index (0 front, 1 back, 2 external). On iOS, "external"
+    /// is reflected on `.deviceType`, not `.position` — a Continuity Camera
+    /// reports position `.front`/`.unspecified`, so mapping by position alone
+    /// would mis-file it as a front camera. (vision-camera #4039 parity.)
+    static func positionIndex(for device: AVCaptureDevice) -> Int {
+        if #available(iOS 17.0, *),
+           device.deviceType == .external || device.deviceType == .continuityCamera {
+            return 2
+        }
+        return device.position == .front ? 0 : (device.position == .back ? 1 : 2)
+    }
+
     static func deviceInfoDict(for device: AVCaptureDevice) -> [String: Any] {
-        let position: Int = device.position == .front ? 0 : (device.position == .back ? 1 : 2)
+        let position: Int = positionIndex(for: device)
         let lensType: Int
         switch device.deviceType {
         case .builtInUltraWideCamera: lensType = 2
@@ -258,7 +277,7 @@ enum CameraDeviceInfo {
     }
 
     static func deviceInfo(for device: AVCaptureDevice) -> CameraDevice {
-        let position: Int64 = device.position == .front ? 0 : (device.position == .back ? 1 : 2)
+        let position: Int64 = Int64(positionIndex(for: device))
         let lensType: Int64
         switch device.deviceType {
         case .builtInUltraWideCamera: lensType = 2

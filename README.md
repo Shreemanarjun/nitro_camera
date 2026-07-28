@@ -299,6 +299,8 @@ controller.resumeRecording();
 
 final RecordingResult result = await controller.stopRecording();
 // result: path, durationMs, fileSize, width, height, codec, fileType, finishedReason
+// Throws RecorderException('recorder/finalize-failed') if no playable video
+// could be written (the truncated file is deleted natively).
 
 controller.cancelRecording(); // discard without finalizing
 controller.isRecording;       // current state

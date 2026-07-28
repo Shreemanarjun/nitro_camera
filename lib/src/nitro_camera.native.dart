@@ -178,7 +178,8 @@ class RecordingResult {
   final int height;
   final int codec; // VideoCodec index
   final int fileType; // VideoFileType index
-  /// 0 = stopped, 1 = maxDurationReached, 2 = maxFileSizeReached.
+  /// 0 = stopped, 1 = maxDurationReached, 2 = maxFileSizeReached,
+  /// 3 = failed (finalise failed — no playable file; path is empty).
   final int finishedReason;
 
   const RecordingResult({

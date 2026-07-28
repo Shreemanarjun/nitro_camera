@@ -995,7 +995,16 @@ class CameraSession(
         triggerUpdate()
     }
 
-    fun setFrameFormat(format: Long)     { frameOutput.pixelFormat = format }
+    fun setFrameFormat(format: Long) {
+        // Android's frame pipeline only produces YUV_420_888 (FrameOutput's
+        // ImageReader is hard-wired to it); a BGRA request cannot be honoured.
+        // Clamp instead of storing the lie so ResolvedConfig / session state
+        // agree with what CameraFrame headers actually carry.
+        if (format != 0L) {
+            Log.w("NitroCamera", "setFrameFormat($format): Android delivers YUV_420_888 only; clamping to yuv420")
+        }
+        frameOutput.pixelFormat = 0L
+    }
     fun setSamplingRate(rate: Long)     { frameOutput.samplingRate = rate }
     fun setFilterShader(shader: String) {
         lastRawShader = shader

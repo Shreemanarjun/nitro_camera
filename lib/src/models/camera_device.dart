@@ -133,7 +133,10 @@ class CameraDeviceInfo {
   final double focalLength;
   final double aperture;
 
-  /// Available capture formats, sorted by descending resolution.
+  /// Available capture formats, in the platform's enumeration order
+  /// (descending resolution on Android; roughly ascending on iOS). Use
+  /// `bestFormat(constraints)` (see `FormatNegotiation`) rather than relying
+  /// on list position.
   final List<CameraDeviceFormat> formats;
 
   const CameraDeviceInfo({

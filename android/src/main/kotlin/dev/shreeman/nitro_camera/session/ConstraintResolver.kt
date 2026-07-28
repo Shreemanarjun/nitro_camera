@@ -32,7 +32,11 @@ object ConstraintResolver {
     ): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?: throw IllegalStateException("No stream configuration map")
+        // getOutputSizes() may return null (or an empty array) on some HALs —
+        // UVC/external cameras especially. This runs in the CameraSession
+        // constructor, so an unchecked access aborts every open on such devices.
         val sizes = map.getOutputSizes(SurfaceTexture::class.java)
+        if (sizes == null || sizes.isEmpty()) return Size(width, height)
 
         val targetAspect = width.toFloat() / height.toFloat()
 
