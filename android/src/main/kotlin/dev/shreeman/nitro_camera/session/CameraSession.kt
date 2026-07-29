@@ -1044,6 +1044,17 @@ class CameraSession(
             val result = stopVideoRecording()
             onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, result.path)
         }
+        // Async recorder death (encoder/mediaserver): finalise immediately —
+        // stopVideoRecording() hits the failed path (file deleted, reason 3) —
+        // and tell Dart via an ERROR event so the app can drop its recording UI.
+        videoOutput.onRecorderError = { what, extra ->
+            stopVideoRecording()
+            onEvent?.invoke(
+                CameraEventType.ERROR,
+                InterruptionReason.NONE,
+                "recording failed: MediaRecorder error $what/$extra",
+            )
+        }
         // Await the cameraHandler result so a MediaRecorder prepare/start failure
         // propagates to the caller (Dart) instead of being silently swallowed.
         suspendCancellableCoroutine { cont ->

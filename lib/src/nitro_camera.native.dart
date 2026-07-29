@@ -153,8 +153,15 @@ class PhotoResult {
   final int width;
   final int height;
   final int fileSize; // bytes
-  final int orientation; // degrees: 0 / 90 / 180 / 270
-  final int isMirrored; // 0 / 1 (front-camera captures)
+  /// Rotation (degrees CW: 0 / 90 / 180 / 270) still PENDING on the saved
+  /// file — read from its EXIF/TIFF orientation tag. 0 means the pixels are
+  /// already upright (image viewers that honour EXIF need no extra work).
+  final int orientation;
+
+  /// 0 / 1 — whether the SAVED image is mirrored (EXIF flip present). Note
+  /// front-camera stills are captured unmirrored on both platforms, so this
+  /// is usually 0 even for selfies.
+  final int isMirrored;
   final int timestamp; // ms since epoch
 
   const PhotoResult({

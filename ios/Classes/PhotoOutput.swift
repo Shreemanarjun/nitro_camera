@@ -114,6 +114,28 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
         return outData as Data
     }
 
+    /// EXIF/TIFF orientation of encoded image [data] as (pending rotation
+    /// degrees, mirrored) — what a consumer must still apply to display the
+    /// pixels upright. Missing/unreadable orientation maps to (0, false).
+    static func exifOrientation(of data: Data) -> (degrees: Int64, mirrored: Bool) {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let raw = props[kCGImagePropertyOrientation] as? UInt32 else {
+            return (0, false)
+        }
+        switch raw {
+        case 1: return (0, false)    // up
+        case 2: return (0, true)     // up, mirrored
+        case 3: return (180, false)  // down
+        case 4: return (180, true)   // down, mirrored
+        case 5: return (90, true)    // left, mirrored
+        case 6: return (90, false)   // right (rotate 90° CW to display)
+        case 7: return (270, true)   // right, mirrored
+        case 8: return (270, false)  // left (rotate 270° CW to display)
+        default: return (0, false)
+        }
+    }
+
     init(device: AVCaptureDevice,
          session: AVCaptureSession,
          sessionQueue: DispatchQueue) {
@@ -384,13 +406,15 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
                 NSLog("NitroCamera photo(DNG): precapture=%dms capture=%dms write=%dms",
                       precaptureMs, captureMs,
                       Int((CFAbsoluteTimeGetCurrent() - processedAt) * 1000))
+                // ImageIO parses DNG (TIFF) orientation the same way as JPEG.
+                let exif = Self.exifOrientation(of: data)
                 cont.resume(returning: PhotoResult(
                     path: url.path,
                     width: Int64(dims.width),
                     height: Int64(dims.height),
                     fileSize: Int64(data.count),
-                    orientation: Int64(device.position == .front ? 0 : 90),
-                    isMirrored: device.position == .front ? 1 : 0,
+                    orientation: exif.degrees,
+                    isMirrored: exif.mirrored ? 1 : 0,
                     timestamp: Int64(Date().timeIntervalSince1970 * 1000)
                 ))
             } catch {
@@ -443,13 +467,19 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
             NSLog("NitroCamera photo: precapture=%dms capture=%dms write=%dms",
                   precaptureMs, captureMs,
                   Int((CFAbsoluteTimeGetCurrent() - processedAt) * 1000))
+            // Orientation/mirroring from the file we actually wrote (its EXIF
+            // tag), so the reported metadata can never contradict the JPEG.
+            // The old hard-coded values (front 0 / back 90, front = mirrored)
+            // ignored the real capture orientation, and the photo connection is
+            // never mirrored — front stills are saved unmirrored.
+            let exif = Self.exifOrientation(of: data)
             cont.resume(returning: PhotoResult(
                 path: tmp.path,
                 width: w,
                 height: h,
                 fileSize: Int64(data.count),
-                orientation: Int64(device.position == .front ? 0 : 90),
-                isMirrored: device.position == .front ? 1 : 0,
+                orientation: exif.degrees,
+                isMirrored: exif.mirrored ? 1 : 0,
                 timestamp: Int64(Date().timeIntervalSince1970 * 1000)
             ))
         } catch {

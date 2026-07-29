@@ -53,6 +53,10 @@ class VideoOutput(
     /// Invoked when MediaRecorder hits a configured maxDuration/maxFileSize limit.
     var onMaxReached: (() -> Unit)? = null
 
+    /// Invoked on an async MediaRecorder error (encoder died, mediaserver
+    /// crash). Args: (what, extra) from MediaRecorder.OnErrorListener.
+    var onRecorderError: ((Int, Int) -> Unit)? = null
+
     // --- Persistent recorder surface (instant recording start) -----------------
     // One MediaCodec persistent input surface is created lazily and reused across
     // recordings. A fresh persistent surface has no defined buffer size, which
@@ -192,6 +196,15 @@ class VideoOutput(
                 }
             }
         }
+        // Without a listener, an async recorder error (encoder death,
+        // mediaserver crash) is completely invisible: isRecording stays true
+        // and a later stop() blesses a corrupt file. Mark the recording failed
+        // and let the session auto-stop it.
+        recorder.setOnErrorListener { _, what, extra ->
+            Log.e("NitroCamera", "VideoOutput: MediaRecorder error what=$what extra=$extra")
+            recordingFinishedReason = 3L
+            onRecorderError?.invoke(what, extra)
+        }
 
         recorder.setOutputFile(outputPath)
         if (inputSurface != null) recorder.setInputSurface(inputSurface)
@@ -286,7 +299,9 @@ class VideoOutput(
         val duration = (now - recordingStartMs - pausedAccumulatedMs).coerceAtLeast(0L)
         val file = File(path)
 
-        if (stopFailed) {
+        // recordingFinishedReason == 3L: the async error listener fired — the
+        // stream is compromised even if stop() happened not to throw.
+        if (stopFailed || recordingFinishedReason == 3L) {
             if (file.exists()) file.delete()
             // finishedReason 3 = failed (see Dart RecordingFinishedReason).
             return RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 3L)

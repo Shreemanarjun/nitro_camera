@@ -15,6 +15,7 @@ import android.util.Log
 import dev.shreeman.nitro_camera.extensions.isFrontFacing
 import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
 import dev.shreeman.nitro_camera.session.CameraSession
+import dev.shreeman.nitro_camera.utils.ExifOrientation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -437,7 +438,6 @@ class PhotoOutput(private val session: CameraSession) {
             }
 
             val sensorOrientation = characteristics.sensorOrientationDegrees(0)
-            val isFront = characteristics.isFrontFacing
 
             val file = withContext(Dispatchers.IO) {
                 val dng = DngCreator(characteristics, totalResult)
@@ -469,8 +469,11 @@ class PhotoOutput(private val session: CameraSession) {
                 width       = rawSize.width.toLong(),
                 height      = rawSize.height.toLong(),
                 fileSize    = file.length(),
+                // Matches the orientation written into the DNG via setOrientation
+                // above — the rotation a viewer must still apply. Raw sensor data
+                // is never mirrored (front included), so isMirrored is 0.
                 orientation = sensorOrientation.toLong(),
-                isMirrored  = if (isFront) 1L else 0L,
+                isMirrored  = 0L,
                 timestamp   = System.currentTimeMillis(),
             )
         } catch (e: Exception) {
@@ -549,15 +552,20 @@ class PhotoOutput(private val session: CameraSession) {
                     }
 
                     if (cont.isActive) {
-                        val sensorOrient = characteristics.sensorOrientationDegrees(0).toLong()
-                        val isFront = characteristics.isFrontFacing
+                        // Report the rotation actually PENDING on the saved file
+                        // (its EXIF tag), not the raw sensor orientation: Camera2
+                        // lets a HAL satisfy JPEG_ORIENTATION either by rotating
+                        // pixels (EXIF = normal) or by writing the tag. Echoing
+                        // sensorOrientation on a rotate-the-pixels HAL makes any
+                        // consumer honouring it rotate a second time.
+                        val (exifDegrees, exifMirrored) = readExifOrientation(tmp.absolutePath)
                         cont.resumeWith(Result.success(PhotoResult(
                             path        = tmp.absolutePath,
                             width       = imgWidth,
                             height      = imgHeight,
                             fileSize    = tmp.length(),
-                            orientation = sensorOrient,
-                            isMirrored  = if (isFront) 1L else 0L,
+                            orientation = exifDegrees,
+                            isMirrored  = if (exifMirrored) 1L else 0L,
                             timestamp   = System.currentTimeMillis(),
                         )))
                     }
@@ -601,6 +609,23 @@ class PhotoOutput(private val session: CameraSession) {
             onComplete?.invoke()
             if (cont.isActive) cont.resumeWith(Result.failure(e))
         }
+    }
+
+    /**
+     * Reads the saved file's EXIF orientation as (pending rotation degrees,
+     * mirrored). A file the HAL already rotated reads as (0, false) — exactly
+     * what a consumer should apply. Unreadable/absent EXIF also maps to
+     * (0, false): never fail a capture over metadata.
+     */
+    private fun readExifOrientation(path: String): Pair<Long, Boolean> {
+        val tag = try {
+            ExifInterface(path).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (e: Exception) {
+            Log.w("NitroCamera", "EXIF orientation read failed: ${e.message}")
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        return ExifOrientation.degrees(tag) to ExifOrientation.mirrored(tag)
     }
 
     /** Writes GPS EXIF tags into an already-written JPEG file. */

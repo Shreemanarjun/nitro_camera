@@ -39,6 +39,18 @@
   enumerated format — 4K on Android, the smallest size on iOS. It now targets
   1080p and negotiates the closest supported size (pass `width`/`height` or a
   `format` for anything else).
+* **Android**: async `MediaRecorder` errors (encoder death, mediaserver crash)
+  were invisible — no error listener was registered, so `isRecording` stayed
+  true forever and a later stop returned a corrupt file. The recording is now
+  auto-stopped (file deleted, `failed` reason) and a session `error` event is
+  emitted.
+* `PhotoResult.orientation` / `isMirrored` now report what the saved file
+  actually carries (its EXIF/TIFF orientation) instead of guesses: iOS
+  hard-coded `front 0 / back 90` and claimed front stills were mirrored (they
+  are saved unmirrored); Android echoed the raw sensor orientation, which
+  double-rotates on HALs that satisfy `JPEG_ORIENTATION` by rotating pixels.
+  `orientation` is the rotation still pending on the file (0 = already
+  upright); `isMirrored` reflects an actual EXIF flip.
 
 * `CameraController.frameStream` delivered frames from *other* open sessions
   (multi-cam / the device-switch window); it is now filtered to its session.
