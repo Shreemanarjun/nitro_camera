@@ -51,14 +51,22 @@ class CameraDeviceDetails(
         val apertures  = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
         val aperture   = apertures?.firstOrNull() ?: 1.8f
 
+        // External (UVC) cameras rarely publish focal length/aperture — the
+        // fallbacks above would classify a webcam as a phone wide-angle lens.
+        // Report them honestly: unknown lens, named "External Camera".
         val lensType = when {
+            position == 2      -> 0  // unknown
             focalLength < 2.3f -> 2  // ultra-wide
             focalLength > 6.0f -> 3  // telephoto
             else               -> 1  // wide-angle
         }
 
         val lensName = when (lensType) { 2 -> "Ultra Wide" 3 -> "Telephoto" else -> "Wide" }
-        val name     = if (position == 0) "Front Camera" else "$lensName Camera"
+        val name = when (position) {
+            0    -> "Front Camera"
+            2    -> "External Camera"
+            else -> "$lensName Camera"
+        }
 
         val evRange  = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
         val evStep   = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 1.0
@@ -226,7 +234,10 @@ class CameraDeviceDetails(
         val apertures  = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
         val aperture   = apertures?.firstOrNull() ?: 1.8f
 
+        // Same external-honesty rule as buildCameraDeviceJson: no fabricated
+        // phone-lens classification or "Lens 3.5" label for a USB webcam.
         val lensType = when {
+            position == 2L     -> 0L // unknown
             focalLength < 2.3f -> 2L // ultra-wide
             focalLength > 6.0f -> 3L // telephoto
             else               -> 1L // wide-angle
@@ -234,7 +245,11 @@ class CameraDeviceDetails(
 
         return CameraDevice(
             id                = cameraId,
-            name              = if (position == 0L) "Front Camera" else "Lens $focalLength",
+            name              = when (position) {
+                0L   -> "Front Camera"
+                2L   -> "External Camera"
+                else -> "Lens $focalLength"
+            },
             position          = position,
             lensType          = lensType,
             sensorOrientation = orientation,

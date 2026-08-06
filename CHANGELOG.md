@@ -44,6 +44,20 @@
   true forever and a later stop returned a corrupt file. The recording is now
   auto-stopped (file deleted, `failed` reason) and a session `error` event is
   emitted.
+* Photos now orient for the PHYSICAL device orientation instead of always
+  tagging as portrait: Android folds the device rotation (the locked
+  `setTargetOrientation` target, else the display rotation) into
+  `JPEG_ORIENTATION` / DNG orientation via the official Camera2 formula; iOS
+  sets the photo connection's `videoOrientation` from the locked target
+  (previously `setTargetOrientation` was dead code on iOS). Landscape captures
+  no longer save 90° off.
+* **iOS**: `setFrameFormat` validated against the output's
+  `availableVideoPixelFormatTypes` before assigning `videoSettings` — an
+  unsupported format raised an uncatchable `NSException` (same crash class as
+  vision-camera #4081).
+* **Android**: external (USB/UVC) cameras are no longer misreported as phone
+  lenses — name is now "External Camera" and lens type `unknown` instead of a
+  fabricated wide-angle classification derived from fallback focal lengths.
 * `PhotoResult.orientation` / `isMirrored` now report what the saved file
   actually carries (its EXIF/TIFF orientation) instead of guesses: iOS
   hard-coded `front 0 / back 90` and claimed front stills were mirrored (they

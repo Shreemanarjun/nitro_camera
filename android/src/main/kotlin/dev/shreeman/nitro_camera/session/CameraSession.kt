@@ -20,6 +20,7 @@ import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
 import dev.shreeman.nitro_camera.outputs.FrameOutput
 import dev.shreeman.nitro_camera.outputs.PhotoOutput
 import dev.shreeman.nitro_camera.outputs.VideoOutput
+import dev.shreeman.nitro_camera.utils.JpegOrientation
 import dev.shreeman.nitro_camera.utils.NitraDetectors
 import io.flutter.view.TextureRegistry
 import kotlinx.coroutines.Dispatchers
@@ -985,6 +986,16 @@ class CameraSession(
         renderer.displayRotationDegrees =
             if (degrees >= 0) degrees else currentDisplayRotationDegrees()
     }
+
+    /**
+     * The physical device orientation (clockwise from natural, 0/90/180/270)
+     * photo captures should orient for: the locked target when one is set,
+     * else derived from the current display rotation (its inverse). Feeds
+     * JPEG_ORIENTATION / DNG orientation — see JpegOrientation.compute.
+     */
+    fun effectiveDeviceOrientationDegrees(): Int =
+        if (targetOrientationDeg >= 0) targetOrientationDeg
+        else JpegOrientation.deviceOrientationFromDisplayRotation(currentDisplayRotationDegrees())
 
     fun setTorchLevel(level: Double) {
         torchLevel = level.coerceIn(0.0, 1.0)

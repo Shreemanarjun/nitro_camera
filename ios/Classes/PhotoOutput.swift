@@ -57,6 +57,11 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
     /// filter (the app's shaders are simple colour ops that map to built-ins).
     var filterShader: String = ""
 
+    /// Locked physical device orientation (0/90/180/270; -1 = none). Written
+    /// and read on the session queue (CameraSession.setTargetOrientation
+    /// forwards there); applied to the photo connection per capture.
+    var targetOrientationDeg: Int64 = -1
+
     /// Maps one of the example app's GLSL colour shaders to a Core Image filter.
     /// Returns nil for shaders we don't recognise (unfiltered — same as before),
     /// so this never makes a capture worse. Full arbitrary-GLSL support would
@@ -112,6 +117,22 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
             dest, outCG, [kCGImagePropertyOrientation: orientation] as CFDictionary)
         guard CGImageDestinationFinalize(dest) else { return nil }
         return outData as Data
+    }
+
+    /// Physical device orientation degrees (OrientationManager convention:
+    /// portrait 0, landscapeLeft 90, upsideDown 180, landscapeRight 270) →
+    /// the AVCaptureVideoOrientation the connection needs so the capture
+    /// displays upright. Landscape cases cross over (device left = video
+    /// right — the canonical UIDeviceOrientation↔AVCaptureVideoOrientation
+    /// pairing). Non-quadrant values map to nil (leave the connection alone).
+    static func videoOrientation(fromDeviceDegrees degrees: Int64) -> AVCaptureVideoOrientation? {
+        switch degrees {
+        case 0:   return .portrait
+        case 90:  return .landscapeRight
+        case 180: return .portraitUpsideDown
+        case 270: return .landscapeLeft
+        default:  return nil
+        }
     }
 
     /// EXIF/TIFF orientation of encoded image [data] as (pending rotation
@@ -264,6 +285,17 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
                     self.takePhotoContinuation(seq: seq)?
                         .resume(throwing: CameraError.sessionNotRunning)
                     return
+                }
+                // Orient the still for the locked device orientation
+                // (OrientationManager device-mode → setTargetOrientation).
+                // Without this the photo connection stays at its default and
+                // landscape captures save with a portrait EXIF tag. -1 keeps
+                // the pre-lock behaviour.
+                if self.targetOrientationDeg >= 0,
+                   let conn = self.output.connection(with: .video),
+                   conn.isVideoOrientationSupported,
+                   let vo = Self.videoOrientation(fromDeviceDegrees: self.targetOrientationDeg) {
+                    conn.videoOrientation = vo
                 }
                 self.output.capturePhoto(with: settings, delegate: self)
             }

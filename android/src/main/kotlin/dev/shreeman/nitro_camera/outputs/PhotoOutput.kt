@@ -16,6 +16,7 @@ import dev.shreeman.nitro_camera.extensions.isFrontFacing
 import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
 import dev.shreeman.nitro_camera.session.CameraSession
 import dev.shreeman.nitro_camera.utils.ExifOrientation
+import dev.shreeman.nitro_camera.utils.JpegOrientation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -261,7 +262,15 @@ class PhotoOutput(private val session: CameraSession) {
                 AndroidCameraDevice.TEMPLATE_STILL_CAPTURE)
             builder.addTarget(photoReader.surface)
 
-            val orientation = characteristics.sensorOrientationDegrees(0)
+            // Fold the DEVICE orientation in, not just the sensor's — sensor-only
+            // means every landscape shot saves 90° off. Uses the locked target
+            // orientation when set (OrientationManager device-mode), else the
+            // display rotation.
+            val orientation = JpegOrientation.compute(
+                sensorOrientation = characteristics.sensorOrientationDegrees(0),
+                deviceOrientationDeg = session.effectiveDeviceOrientationDegrees(),
+                isFrontFacing = characteristics.isFrontFacing,
+            )
             builder.set(CaptureRequest.JPEG_ORIENTATION, orientation)
 
             // PhotoOptions.qualityPrioritization → JPEG compression level
@@ -437,12 +446,18 @@ class PhotoOutput(private val session: CameraSession) {
                 throw e
             }
 
-            val sensorOrientation = characteristics.sensorOrientationDegrees(0)
+            // Same device-orientation fold as the JPEG path (JPEG_ORIENTATION):
+            // sensor-only tags every landscape raw 90° off.
+            val orientationDeg = JpegOrientation.compute(
+                sensorOrientation = characteristics.sensorOrientationDegrees(0),
+                deviceOrientationDeg = session.effectiveDeviceOrientationDegrees(),
+                isFrontFacing = characteristics.isFrontFacing,
+            )
 
             val file = withContext(Dispatchers.IO) {
                 val dng = DngCreator(characteristics, totalResult)
                 try {
-                    dng.setOrientation(when (sensorOrientation) {
+                    dng.setOrientation(when (orientationDeg) {
                         90 -> android.media.ExifInterface.ORIENTATION_ROTATE_90
                         180 -> android.media.ExifInterface.ORIENTATION_ROTATE_180
                         270 -> android.media.ExifInterface.ORIENTATION_ROTATE_270
@@ -472,7 +487,7 @@ class PhotoOutput(private val session: CameraSession) {
                 // Matches the orientation written into the DNG via setOrientation
                 // above — the rotation a viewer must still apply. Raw sensor data
                 // is never mirrored (front included), so isMirrored is 0.
-                orientation = sensorOrientation.toLong(),
+                orientation = orientationDeg.toLong(),
                 isMirrored  = 0L,
                 timestamp   = System.currentTimeMillis(),
             )

@@ -438,6 +438,14 @@ public class CameraSession: NSObject {
             // in-flight capture) for hundreds of ms.
             let current = (self.frameOutput.output.videoSettings?[kCVPixelBufferPixelFormatTypeKey as String] as? NSNumber)?.uint32Value
             guard current != type else { return }
+            // Assigning a pixel format the output doesn't support raises an
+            // UNCATCHABLE NSException (vision-camera hit the same class of
+            // crash in setOutputSettings, #4081) — validate first.
+            guard self.frameOutput.output.availableVideoPixelFormatTypes.contains(type) else {
+                NSLog("NitroCamera setFrameFormat(%lld): pixel format %u not supported by this output — keeping current",
+                      format, type)
+                return
+            }
 
             self.session.beginConfiguration()
             self.frameOutput.output.videoSettings = [
@@ -530,7 +538,18 @@ public class CameraSession: NSObject {
     }
 
     private(set) var targetOrientationDeg: Int64 = -1
-    func setTargetOrientation(_ degrees: Int64) { targetOrientationDeg = degrees }
+    /// Locks output orientation to the given physical device orientation
+    /// (0/90/180/270, OrientationManager convention; -1 resumes default).
+    /// On iOS this currently orients STILLS: the photo connection's
+    /// `videoOrientation` is set per-capture from this value. Preview and
+    /// recording stay portrait-fixed (the Flutter layer owns preview rotation).
+    func setTargetOrientation(_ degrees: Int64) {
+        targetOrientationDeg = degrees
+        // Forwarded on the session queue — capturePhoto reads it there.
+        sessionQueue.async { [weak self] in
+            self?.photoOutput.targetOrientationDeg = degrees
+        }
+    }
 
     // MARK: - Read-back
 
