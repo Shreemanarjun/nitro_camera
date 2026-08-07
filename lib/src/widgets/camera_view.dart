@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../controller/camera_controller.dart';
+import '../nitro_camera.native.dart' show NitroCamera;
 import 'camera_preview.dart';
 
 /// Declarative camera widget — the Flutter analogue of vision-camera's `<Camera>`.
@@ -45,6 +46,7 @@ class CameraView extends StatefulWidget {
     this.onConfigResolved,
     this.onEvent,
     this.onError,
+    this.native,
   });
 
   /// The device to open.
@@ -103,6 +105,13 @@ class CameraView extends StatefulWidget {
 
   /// Called if opening/reconfiguring fails, or a native `error` event arrives.
   final ValueChanged<Object>? onError;
+
+  /// Native bridge handed to every [CameraController] this view opens.
+  ///
+  /// Null in production (the controller falls back to [NitroCamera.instance]);
+  /// tests inject a fake to drive the open/retry/swap state machine without a
+  /// camera.
+  final NitroCamera? native;
 
   @override
   State<CameraView> createState() => _CameraViewState();
@@ -196,6 +205,7 @@ class _CameraViewState extends State<CameraView> {
       device: widget.device,
       format: widget.format,
       audio: widget.audio,
+      native: widget.native,
     );
     await controller.initialize(
       width: widget.width,

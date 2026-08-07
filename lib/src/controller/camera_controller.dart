@@ -48,19 +48,27 @@ class CameraController extends ChangeNotifier {
     _requireInitialized();
     if (active == _isActive) return;
     if (active) {
-      NitroCamera.instance.startPreview(_textureId!);
+      _native.startPreview(_textureId!);
     } else {
-      NitroCamera.instance.stopPreview(_textureId!);
+      _native.stopPreview(_textureId!);
     }
     _isActive = active;
     notifyListeners();
   }
 
+  /// The native bridge this controller drives.
+  ///
+  /// Defaults to the process-wide [NitroCamera.instance]; tests substitute a
+  /// fake so controller behaviour can be exercised without a camera. Mirrors
+  /// the seam [OrientationManager] already exposes.
+  final NitroCamera _native;
+
   CameraController({
     required this.device,
     this.format,
     this.audio = false,
-  });
+    NitroCamera? native,
+  }) : _native = native ?? NitroCamera.instance;
 
   // ---- State ----
 
@@ -143,20 +151,28 @@ class CameraController extends ChangeNotifier {
   /// Returns all available camera devices, each with their supported formats.
   ///
   /// This is the vision_camera equivalent of `Camera.getAvailableCameraDevices()`.
-  static Future<List<CameraDeviceInfo>> getAvailableCameraDevices() async {
-    final json = await NitroCamera.instance.getAvailableCameraDevicesJson();
+  static Future<List<CameraDeviceInfo>> getAvailableCameraDevices({
+    NitroCamera? native,
+  }) async {
+    final json =
+        await (native ?? NitroCamera.instance).getAvailableCameraDevicesJson();
     return CameraDeviceInfo.listFromJson(json);
   }
 
   /// Shorthand: request camera permission and return the status.
-  static Future<PermissionStatus> requestCameraPermission() async {
-    final v = await NitroCamera.instance.requestCameraPermission();
+  static Future<PermissionStatus> requestCameraPermission({
+    NitroCamera? native,
+  }) async {
+    final v = await (native ?? NitroCamera.instance).requestCameraPermission();
     return _permissionFrom(v);
   }
 
   /// Shorthand: request microphone permission and return the status.
-  static Future<PermissionStatus> requestMicrophonePermission() async {
-    final v = await NitroCamera.instance.requestMicrophonePermission();
+  static Future<PermissionStatus> requestMicrophonePermission({
+    NitroCamera? native,
+  }) async {
+    final v = await (native ?? NitroCamera.instance)
+        .requestMicrophonePermission();
     return _permissionFrom(v);
   }
 
@@ -183,7 +199,7 @@ class CameraController extends ChangeNotifier {
     final h = height ?? fmt?.videoHeight ?? 1080;
     final targetFps = fps ?? fmt?.maxFps.toInt() ?? 30;
 
-    final tid = await NitroCamera.instance.openCamera(
+    final tid = await _native.openCamera(
       device.id,
       w,
       h,
@@ -237,10 +253,10 @@ class CameraController extends ChangeNotifier {
 
     if (d.requiresReopen) {
       final old = _textureId;
-      if (old != null) await NitroCamera.instance.closeCamera(old);
+      if (old != null) await _native.closeCamera(old);
       final w = next.format?.videoWidth ?? _width;
       final h = next.format?.videoHeight ?? _height;
-      final tid = await NitroCamera.instance.openCamera(
+      final tid = await _native.openCamera(
         next.deviceId ?? device.id,
         w,
         h,
@@ -257,7 +273,7 @@ class CameraController extends ChangeNotifier {
       _isActive = true;
     }
 
-    final cam = NitroCamera.instance;
+    final cam = _native;
     final tid = _textureId!;
 
     // Batch-apply every live setting in ONE native call and read back what the
@@ -311,7 +327,7 @@ class CameraController extends ChangeNotifier {
     _sessionClosed = true;
     final tid = _textureId;
     if (tid != null) {
-      await NitroCamera.instance.closeCamera(tid);
+      await _native.closeCamera(tid);
     }
   }
 
@@ -323,7 +339,7 @@ class CameraController extends ChangeNotifier {
     _textureId = null;
     if (tid != null && !_sessionClosed) {
       _sessionClosed = true;
-      await NitroCamera.instance.closeCamera(tid);
+      await _native.closeCamera(tid);
     }
     super.dispose();
   }
@@ -347,7 +363,7 @@ class CameraController extends ChangeNotifier {
   void setZoom(double zoom) {
     _requireInitialized();
     final clamped = zoom.clamp(device.minZoom, device.maxZoom);
-    NitroCamera.instance.setZoom(_textureId!, clamped);
+    _native.setZoom(_textureId!, clamped);
     _zoom = clamped;
     _patchConfig((c) => c.copyWith(zoom: clamped));
     notifyListeners();
@@ -357,20 +373,20 @@ class CameraController extends ChangeNotifier {
   /// Mirrors `camera.focus(point)` in vision_camera.
   void focus(double x, double y) {
     _requireInitialized();
-    NitroCamera.instance.setFocusPoint(_textureId!, x, y);
+    _native.setFocusPoint(_textureId!, x, y);
   }
 
   /// Sets the auto-focus mode.
   void setAutoFocus(AutoFocusMode mode) {
     _requireInitialized();
-    NitroCamera.instance.setAutoFocus(_textureId!, mode.nativeValue);
+    _native.setAutoFocus(_textureId!, mode.nativeValue);
     _patchConfig((c) => c.copyWith(autoFocus: mode));
   }
 
   /// Exposure bias in the range [device.minExposure] .. [device.maxExposure].
   void setExposure(double value) {
     _requireInitialized();
-    NitroCamera.instance.setExposure(_textureId!, value);
+    _native.setExposure(_textureId!, value);
     _exposure = value;
     _patchConfig((c) => c.copyWith(exposure: value));
     notifyListeners();
@@ -379,7 +395,7 @@ class CameraController extends ChangeNotifier {
   /// Flash mode for photo capture.
   void setFlash(FlashMode mode) {
     _requireInitialized();
-    NitroCamera.instance.setFlash(_textureId!, mode.nativeValue);
+    _native.setFlash(_textureId!, mode.nativeValue);
     _flash = mode;
     _patchConfig((c) => c.copyWith(flash: mode));
     notifyListeners();
@@ -388,7 +404,7 @@ class CameraController extends ChangeNotifier {
   /// Continuous torch (flashlight) on/off.
   void setTorch({required bool enabled}) {
     _requireInitialized();
-    NitroCamera.instance.setTorch(_textureId!, enabled ? 1 : 0);
+    _native.setTorch(_textureId!, enabled ? 1 : 0);
     _torch = enabled;
     _patchConfig((c) => c.copyWith(torch: enabled));
     notifyListeners();
@@ -397,21 +413,21 @@ class CameraController extends ChangeNotifier {
   /// White balance colour temperature in Kelvin. Pass 0 to restore auto.
   void setWhiteBalance(int kelvin) {
     _requireInitialized();
-    NitroCamera.instance.setWhiteBalance(_textureId!, kelvin);
+    _native.setWhiteBalance(_textureId!, kelvin);
     _patchConfig((c) => c.copyWith(whiteBalanceKelvin: kelvin));
   }
 
   /// Enables or disables HDR mode.
   void setHdr({required bool enabled}) {
     _requireInitialized();
-    NitroCamera.instance.setHdr(_textureId!, enabled ? 1 : 0);
+    _native.setHdr(_textureId!, enabled ? 1 : 0);
     _patchConfig((c) => c.copyWith(videoHdr: enabled));
   }
 
   /// Frame-stream pixel format.
   void setPixelFormat(PixelFormat format) {
     _requireInitialized();
-    NitroCamera.instance.setFrameFormat(_textureId!, format.nativeValue);
+    _native.setFrameFormat(_textureId!, format.nativeValue);
     _patchConfig((c) => c.copyWith(pixelFormat: format));
   }
 
@@ -420,35 +436,35 @@ class CameraController extends ChangeNotifier {
   SessionState getSessionState() {
     _requireInitialized();
     return SessionState.fromJson(
-      NitroCamera.instance.getSessionStateJson(_textureId!),
+      _native.getSessionStateJson(_textureId!),
     );
   }
 
   /// Deliver every Nth frame to [frameStream] (1 = every frame).
   void setSamplingRate(int rate) {
     _requireInitialized();
-    NitroCamera.instance.setSamplingRate(_textureId!, rate);
+    _native.setSamplingRate(_textureId!, rate);
     _patchConfig((c) => c.copyWith(samplingRate: rate));
   }
 
   /// Video stabilization mode.
   void setVideoStabilization(VideoStabilizationMode mode) {
     _requireInitialized();
-    NitroCamera.instance.setVideoStabilization(_textureId!, mode.nativeValue);
+    _native.setVideoStabilization(_textureId!, mode.nativeValue);
     _patchConfig((c) => c.copyWith(videoStabilization: mode));
   }
 
   /// Enables or disables low-light boost (night mode).
   void setLowLightBoost({required bool enabled}) {
     _requireInitialized();
-    NitroCamera.instance.setLowLightBoost(_textureId!, enabled ? 1 : 0);
+    _native.setLowLightBoost(_textureId!, enabled ? 1 : 0);
     _patchConfig((c) => c.copyWith(lowLightBoost: enabled));
   }
 
   /// Torch brightness in 0.0..1.0 (1.0 = max). Values > 0 imply torch on.
   void setTorchLevel(double level) {
     _requireInitialized();
-    NitroCamera.instance.setTorchLevel(_textureId!, level.clamp(0.0, 1.0));
+    _native.setTorchLevel(_textureId!, level.clamp(0.0, 1.0));
     _torch = level > 0;
     _patchConfig((c) => c.copyWith(torch: level > 0));
   }
@@ -456,25 +472,25 @@ class CameraController extends ChangeNotifier {
   /// Locks / unlocks auto-exposure at its current value.
   void lockExposure({required bool locked}) {
     _requireInitialized();
-    NitroCamera.instance.lockExposure(_textureId!, locked ? 1 : 0);
+    _native.lockExposure(_textureId!, locked ? 1 : 0);
   }
 
   /// Locks / unlocks focus at its current position.
   void lockFocus({required bool locked}) {
     _requireInitialized();
-    NitroCamera.instance.lockFocus(_textureId!, locked ? 1 : 0);
+    _native.lockFocus(_textureId!, locked ? 1 : 0);
   }
 
   /// Locks / unlocks white balance at its current gains.
   void lockWhiteBalance({required bool locked}) {
     _requireInitialized();
-    NitroCamera.instance.lockWhiteBalance(_textureId!, locked ? 1 : 0);
+    _native.lockWhiteBalance(_textureId!, locked ? 1 : 0);
   }
 
   /// Sets the target output orientation in degrees (0 / 90 / 180 / 270).
   void setTargetOrientation(int degrees) {
     _requireInitialized();
-    NitroCamera.instance.setTargetOrientation(_textureId!, degrees);
+    _native.setTargetOrientation(_textureId!, degrees);
   }
 
   /// Enables / disables lens distortion correction (default ON where the
@@ -482,7 +498,7 @@ class CameraController extends ChangeNotifier {
   /// `enableDistortionCorrection`.
   void setDistortionCorrection({required bool enabled}) {
     _requireInitialized();
-    NitroCamera.instance.setDistortionCorrection(_textureId!, enabled ? 1 : 0);
+    _native.setDistortionCorrection(_textureId!, enabled ? 1 : 0);
   }
 
   /// Starts a NATIVE ML Kit detector ([NativeDetector.barcode] /
@@ -503,14 +519,14 @@ class CameraController extends ChangeNotifier {
   /// Prefer [startDetector] / [stopDetector] + the typed [detections] stream.
   void setNativeDetector(String detector) {
     _requireInitialized();
-    NitroCamera.instance.setNativeDetector(_textureId!, detector);
+    _native.setNativeDetector(_textureId!, detector);
   }
 
   /// Decoded native-detector results for THIS session, as parsed JSON maps
   /// (`{detector, width, height, rotation, results: [...]}`).
   ///
   /// Prefer the typed [detections] stream.
-  Stream<Map<String, dynamic>> get nativeDetections => NitroCamera.instance.eventStream.where((e) => e.type == CameraEventType.detection.index && (e.textureId == _textureId || e.textureId == 0)).map((e) {
+  Stream<Map<String, dynamic>> get nativeDetections => _native.eventStream.where((e) => e.type == CameraEventType.detection.index && (e.textureId == _textureId || e.textureId == 0)).map((e) {
     try {
       return jsonDecode(e.message) as Map<String, dynamic>;
     } catch (_) {
@@ -521,8 +537,10 @@ class CameraController extends ChangeNotifier {
   /// Camera-ID combinations that can stream CONCURRENTLY (multi-cam, API 30+).
   /// Each inner list is one combination that [initialize] can open as
   /// simultaneous [CameraController] instances. Empty when unsupported.
-  static List<List<String>> getConcurrentCameraIds() {
-    final json = NitroCamera.instance.getConcurrentCameraIdsJson();
+  static List<List<String>> getConcurrentCameraIds({
+    NitroCamera? native,
+  }) {
+    final json = (native ?? NitroCamera.instance).getConcurrentCameraIdsJson();
     try {
       final raw = jsonDecode(json);
       return (raw as List).map((combo) => (combo as List).cast<String>()).toList();
@@ -538,20 +556,20 @@ class CameraController extends ChangeNotifier {
   /// Captures a photo. Returns the file path and metadata.
   Future<PhotoResult> takePhoto() async {
     _requireInitialized();
-    return await NitroCamera.instance.takePhoto(_textureId!);
+    return await _native.takePhoto(_textureId!);
   }
 
   /// Captures a photo with explicit [options] (flash, quality, shutter sound…).
   Future<PhotoResult> takePhotoWithOptions(PhotoCaptureOptions options) async {
     _requireInitialized();
-    return await NitroCamera.instance.takePhotoWithOptions(_textureId!, options.toNative());
+    return await _native.takePhotoWithOptions(_textureId!, options.toNative());
   }
 
   /// Captures the current preview frame as a fast JPEG snapshot (no full
   /// still-capture round-trip).
   Future<PhotoResult> takeSnapshot() async {
     _requireInitialized();
-    return await NitroCamera.instance.takeSnapshot(_textureId!);
+    return await _native.takeSnapshot(_textureId!);
   }
 
   // ---- Video recording (mirrors vision_camera) ----
@@ -567,7 +585,7 @@ class CameraController extends ChangeNotifier {
     _requireInitialized();
     if (_isRecording) return;
     try {
-      await NitroCamera.instance.startVideoRecording(
+      await _native.startVideoRecording(
         _textureId!,
         outputPath,
         options ?? const RecordingOptions(),
@@ -590,7 +608,7 @@ class CameraController extends ChangeNotifier {
   void pauseRecording() {
     _requireInitialized();
     if (!_isRecording || _isRecordingPaused) return;
-    NitroCamera.instance.pauseRecording(_textureId!);
+    _native.pauseRecording(_textureId!);
     _isRecordingPaused = true;
     notifyListeners();
   }
@@ -599,7 +617,7 @@ class CameraController extends ChangeNotifier {
   void resumeRecording() {
     _requireInitialized();
     if (!_isRecording || !_isRecordingPaused) return;
-    NitroCamera.instance.resumeRecording(_textureId!);
+    _native.resumeRecording(_textureId!);
     _isRecordingPaused = false;
     notifyListeners();
   }
@@ -614,7 +632,7 @@ class CameraController extends ChangeNotifier {
     _requireInitialized();
     final RecordingResult result;
     try {
-      result = await NitroCamera.instance.stopVideoRecording(_textureId!);
+      result = await _native.stopVideoRecording(_textureId!);
     } catch (e) {
       // iOS surfaces a failed finalize as a thrown error; normalise it to the
       // same typed exception Android's `failed` reason maps to below.
@@ -640,7 +658,7 @@ class CameraController extends ChangeNotifier {
   void cancelRecording() {
     _requireInitialized();
     if (!_isRecording) return;
-    NitroCamera.instance.cancelRecording(_textureId!);
+    _native.cancelRecording(_textureId!);
     _isRecording = false;
     _isRecordingPaused = false;
     notifyListeners();
@@ -651,7 +669,7 @@ class CameraController extends ChangeNotifier {
   /// Enables or disables raw frame delivery via [frameStream].
   void setFrameProcessing({required bool enabled}) {
     _requireInitialized();
-    NitroCamera.instance.enableFrameProcessing(_textureId!, enabled ? 1 : 0);
+    _native.enableFrameProcessing(_textureId!, enabled ? 1 : 0);
     _patchConfig((c) => c.copyWith(enableFrameProcessing: enabled));
   }
 
@@ -664,17 +682,25 @@ class CameraController extends ChangeNotifier {
   /// Stream of raw camera frames for **this** session (only active after
   /// [enableFrameProcessing]). Frames from other concurrently-open sessions
   /// (multi-cam, the double-buffered switch window) are filtered out.
-  Stream<CameraFrame> get frameStream => NitroCamera.instance.frameStream.where((f) => f.textureId == _textureId);
+  Stream<CameraFrame> get frameStream => _native.frameStream.where((f) => f.textureId == _textureId);
 
   /// Typed session events (started / stopped / error / interruption) for **this**
   /// session. Mirrors vision-camera's session listeners.
   ///
   /// Events with a type index unknown to this plugin version (native/plugin
   /// version skew) are skipped rather than crashing the stream.
-  Stream<CameraSessionEvent> get events => NitroCamera.instance.eventStream.where(CameraSessionEvent.isKnownType).map(CameraSessionEvent.fromNative).where((e) => e.textureId == _textureId || e.textureId == 0);
+  Stream<CameraSessionEvent> get events => _native.eventStream.where(CameraSessionEvent.isKnownType).map(CameraSessionEvent.fromNative).where((e) => e.textureId == _textureId || e.textureId == 0);
+
+  /// Typed session events from an explicit bridge — the injectable form of
+  /// [allEvents], used by [thermalStates] and by tests.
+  static Stream<CameraSessionEvent> allEventsOf(NitroCamera native) => native
+      .eventStream
+      .where(CameraSessionEvent.isKnownType)
+      .map(CameraSessionEvent.fromNative);
 
   /// Typed session events across **all** open sessions.
-  static Stream<CameraSessionEvent> get allEvents => NitroCamera.instance.eventStream.where(CameraSessionEvent.isKnownType).map(CameraSessionEvent.fromNative);
+  static Stream<CameraSessionEvent> get allEvents =>
+      allEventsOf(NitroCamera.instance);
 
   /// Typed frame-drop reasons for **this** session (vision-camera's
   /// `onFrameDropped`) — a sustained stream of these means the frame processor
@@ -685,12 +711,14 @@ class CameraController extends ChangeNotifier {
   /// load (fps / resolution / HDR) as this climbs toward
   /// [ThermalState.critical] to avoid a HAL throttle or shutdown. Monitoring
   /// auto-starts with the session (no enable call needed).
-  Stream<ThermalState> get thermalStates => CameraController.allEvents.where((e) => e.type == CameraEventType.thermalStateChanged).map((e) => ThermalState.fromLevel(e.rawReason));
+  Stream<ThermalState> get thermalStates => allEventsOf(_native)
+      .where((e) => e.type == CameraEventType.thermalStateChanged)
+      .map((e) => ThermalState.fromLevel(e.rawReason));
 
   /// Updates the GPU filter shader applied to the preview.
   void setFilterShader(String glslSource) {
     _requireInitialized();
-    NitroCamera.instance.setFilterShader(_textureId!, glslSource);
+    _native.setFilterShader(_textureId!, glslSource);
     _patchConfig((c) => c.copyWith(filterShader: glslSource));
   }
 
