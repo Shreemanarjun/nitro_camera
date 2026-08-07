@@ -133,7 +133,7 @@ void main() {
   });
 
   group('configure', () {
-    test('an empty diff touches native at all', () async {
+    test('an empty diff never touches native', () async {
       final c = controllerFor(format: testFormat());
       await c.initialize();
       fake.clear();

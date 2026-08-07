@@ -1,3 +1,7 @@
+// Options are constructed NON-const on purpose: a const invocation is folded at
+// compile time, so the generative constructor never actually runs.
+// ignore_for_file: prefer_const_constructors
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/native.dart' show PhotoOptions;
 import 'package:nitro_camera/nitro_camera.dart';

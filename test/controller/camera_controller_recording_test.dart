@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nitro_camera/native.dart' show RecordingOptions;
 import 'package:nitro_camera/nitro_camera.dart';
 
 import '../support/fake_nitro_camera.dart';

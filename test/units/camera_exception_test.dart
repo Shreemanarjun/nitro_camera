@@ -1,3 +1,8 @@
+// Constructions here are deliberately NON-const: a const invocation is folded
+// at compile time and never executes the generative constructor, which both
+// hides it from coverage and stops the test from exercising real construction.
+// ignore_for_file: prefer_const_constructors
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 

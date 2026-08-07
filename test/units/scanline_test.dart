@@ -101,7 +101,7 @@ void main() {
     test('only the rows that actually carry a code contribute', () {
       // Rows 0..3 blank, rows 4..7 hold the pattern: the 0.26 fraction lands on
       // row 2 (blank) and is dropped; 0.5 / 0.38 / 0.62 / 0.74 land on 4/3/5/6.
-      final pattern = '#.#.#.#.#';
+      const pattern = '#.#.#.#.#';
       const height = 8;
       const left = 1, top = 0, stride = 16;
       final plane = Uint8List(height * stride)..fillRange(0, height * stride, 255);
