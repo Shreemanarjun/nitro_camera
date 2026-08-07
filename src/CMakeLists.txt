@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(nitro_camera_library VERSION 0.0.1 LANGUAGES C CXX)
+project(nitro_camera_library VERSION 0.0.2 LANGUAGES C CXX)
 
 # ── Optimization guard ───────────────────────────────────────────────────────
 # The Android Gradle Plugin passes the VARIANT name (e.g. "profile") as
