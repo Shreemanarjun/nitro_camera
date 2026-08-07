@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart' show MaterialApp, SizedBox, Widget;
 import 'package:flutter_test/flutter_test.dart'
     show
-        TestFailure,
         expect,
+        fail,
         greaterThan,
         greaterThanOrEqualTo,
         isFalse,
@@ -62,39 +62,48 @@ final class ComboRecording extends Module {
   /// (`android/.../outputs/PhotoOutput.kt:513-524`). Patrol's global timeout
   /// would report that as an opaque suite abort, so race the call against an
   /// explicit deadline that names the operation.
+  /// Awaits [op] while KEEPING REAL FRAMES PUMPING, failing with [label] if it
+  /// does not settle within [deadline] — a wedged native call then reports as
+  /// our own descriptive failure instead of an opaque suite timeout.
+  ///
+  /// The pump loop is SEQUENTIAL, not concurrent: `flutter_test` guards
+  /// `WidgetTester.pump`, and starting any other guarded call (`expect`, a
+  /// second `pump`) while one is still in flight throws "Guarded function
+  /// conflict". An earlier version pumped from an unawaited background loop
+  /// and failed every test that used it for exactly that reason.
   Future<T> awaitWithDeadline<T>(
     Future<T> op, {
     required Duration deadline,
     required String label,
   }) async {
-    final guard = Completer<T>();
-    final timer = Timer(deadline, () {
-      if (!guard.isCompleted) {
-        guard.completeError(
-          TestFailure(
-            '$label did not complete within ${deadline.inMilliseconds}ms — '
-            'the call is STUCK (store error: '
-            '${cameraStore.errorMessage.value})',
-          ),
-        );
-      }
-    });
-    var pumping = true;
-    unawaited(() async {
-      while (pumping) {
-        await $.tester.pump();
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
-    }());
-    try {
-      // Future.any ignores whichever future loses the race, so a late
-      // completion of [op] after the deadline fired cannot surface as an
-      // unhandled error.
-      return await Future.any<T>([op, guard.future]);
-    } finally {
-      pumping = false;
-      timer.cancel();
+    var settled = false;
+    Object? error;
+    StackTrace? stack;
+    unawaited(
+      op.then(
+        (_) => settled = true,
+        onError: (Object e, StackTrace s) {
+          error = e;
+          stack = s;
+          settled = true;
+        },
+      ),
+    );
+
+    final sw = Stopwatch()..start();
+    while (!settled && sw.elapsed < deadline) {
+      await $.tester.pump(const Duration(milliseconds: 50));
     }
+    if (!settled) {
+      fail(
+        '$label did not complete within ${deadline.inMilliseconds}ms — '
+        'the call is STUCK (store error: ${cameraStore.errorMessage.value})',
+      );
+    }
+    if (error != null) Error.throwWithStackTrace(error!, stack!);
+    // Already completed: awaiting is immediate and yields the typed value,
+    // which also keeps `void` generic instantiations working.
+    return op;
   }
 
   /// Pumps until [condition] holds or [timeout] elapses, WITHOUT failing —
@@ -258,16 +267,23 @@ final class ComboRecording extends Module {
 
   // ── 2. recording × target orientation ──────────────────────────────────────
 
-  /// The requested target orientation must reach the CONTAINER, not just the
-  /// preview: a clip recorded under `setTargetOrientation(90)` has to carry a
-  /// 90° `tkhd` transform matrix.
+  /// The requested output orientation must reach the CONTAINER, not just the
+  /// preview.
   ///
-  /// Defect hunted: `MediaRecorder.setOrientationHint` is never called
+  /// Defect hunted: `MediaRecorder.setOrientationHint` was never called
   /// anywhere in the Android source, so the persistent-input-surface path
-  /// stores frames in SENSOR orientation and every player shows the clip
+  /// stored frames in SENSOR orientation and every player showed the clip
   /// rotated. The bytes are fine; only the `tkhd` matrix reveals it, which is
   /// why this reads [Mp4Info.rotationDegrees] rather than the plugin's own
-  /// [RecordingResult]. EXPECTED TO FAIL on Android until the hint is wired.
+  /// [RecordingResult].
+  ///
+  /// The expected value is NOT the requested number. `setTargetOrientation(d)`
+  /// takes the PHYSICAL DEVICE orientation (the `OrientationManager`
+  /// convention — `drive()` feeds it raw sensor degrees), not a rotation to
+  /// stamp on the file. Making a clip display upright therefore requires
+  /// `sensorOrientation + d` (mirrored for front lenses) — the Camera2
+  /// `getJpegOrientation` formula, mirrored natively by `JpegOrientation`.
+  /// Asserting `observed == d` would encode the bug as the contract.
   Future<void> recordedVideoCarriesRequestedOrientation() async {
     final c = _ctrl;
     const requested = [0, 90];
@@ -303,15 +319,23 @@ final class ComboRecording extends Module {
     cameraStore.setTargetOrientation(-1); // restore AUTO
     await pumpFor(const Duration(milliseconds: 300));
 
+    // Back lenses add the device rotation to the sensor mount; front lenses
+    // are mirrored, so it subtracts.
+    final sensor = c.device.sensorOrientation;
+    final front = c.device.position == CameraPosition.front;
     for (final degrees in requested) {
+      final signed = front ? -degrees : degrees;
+      final expected = ((sensor + signed) % 360 + 360) % 360;
       expect(
         observed[degrees],
-        degrees,
+        expected,
         reason:
-            'recorded orientation does not match the request — '
-            'requested→observed: $observed. MediaRecorder.setOrientationHint '
-            'is never called, so the clip is muxed in sensor orientation '
-            'and plays back rotated.',
+            'recorded orientation is wrong for targetOrientation=$degrees on a '
+            '${front ? 'front' : 'back'} lens with sensorOrientation=$sensor: '
+            'expected $expected, requested→observed: $observed. '
+            'MediaRecorder.setOrientationHint must be set to '
+            'JpegOrientation.compute(sensor, target, isFrontFacing) so the '
+            'clip plays upright.',
       );
     }
   }

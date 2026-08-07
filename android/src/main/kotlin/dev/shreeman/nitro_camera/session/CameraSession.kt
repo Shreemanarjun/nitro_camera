@@ -997,6 +997,29 @@ class CameraSession(
         if (targetOrientationDeg >= 0) targetOrientationDeg
         else JpegOrientation.deviceOrientationFromDisplayRotation(currentDisplayRotationDegrees())
 
+    /**
+     * The clockwise rotation a player must apply to a recorded clip
+     * (`MediaRecorder.setOrientationHint`) for the PERSISTENT-INPUT-SURFACE
+     * path, which muxes RAW sensor buffers: nothing rotates the pixels, so the
+     * container has to carry the sensor mount plus the physical device
+     * orientation — exactly the JPEG_ORIENTATION formula stills already use.
+     *
+     * [targetOrientationDeg] is a physical device orientation (the
+     * OrientationEventListener convention `setTargetOrientation` is driven
+     * with), and -1/unset falls through [JpegOrientation.compute] to the
+     * sensor mount — the upright answer in natural portrait.
+     *
+     * The GL pipeline does NOT use this: its renderer rotates every surface it
+     * draws, the recorder surface included (NitraRenderer.kt:358 → :411-414,
+     * applied at :461), so the pixels already arrive upright and any hint
+     * would rotate the clip a second time.
+     */
+    private fun recordedClipOrientationHint(): Int = JpegOrientation.compute(
+        sensorOrientation = characteristics.sensorOrientationDegrees(90),
+        deviceOrientationDeg = targetOrientationDeg,
+        isFrontFacing = characteristics.isFrontFacing,
+    )
+
     fun setTorchLevel(level: Double) {
         torchLevel = level.coerceIn(0.0, 1.0)
         torchEnabled = torchLevel > 0.0
@@ -1089,6 +1112,10 @@ class CameraSession(
                         try {
                             videoOutput.prepareVideoRecorder(
                                 outputPath,
+                                // RAW sensor buffers reach the encoder untouched
+                                // on this path, so the container carries the
+                                // whole rotation.
+                                orientationHintDeg = recordedClipOrientationHint(),
                                 codec = options.codec.toInt(),
                                 bitRate = options.bitRate.toInt(),
                                 maxDurationMs = options.maxDurationMs.toInt(),
@@ -1121,6 +1148,11 @@ class CameraSession(
                     // 1. Prepare recorder + surface (throws if the encoder rejects the config)
                     val recSurface = videoOutput.prepareVideoRecorder(
                         outputPath,
+                        // NitraRenderer rotates every surface it draws, the
+                        // recorder surface included (NitraRenderer.kt:358 →
+                        // :411-414, applied at :461), so these pixels are ALREADY
+                        // upright. A container hint would rotate them twice.
+                        orientationHintDeg = 0,
                         codec = options.codec.toInt(),
                         bitRate = options.bitRate.toInt(),
                         maxDurationMs = options.maxDurationMs.toInt(),

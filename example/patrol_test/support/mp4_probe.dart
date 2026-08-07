@@ -41,14 +41,19 @@ class Mp4Info {
   /// A `trak` whose `hdlr` handler type is `vide` is present.
   final bool hasVideoTrack;
 
-  /// Display rotation encoded in the video track's `tkhd` transform matrix,
-  /// normalised to 0/90/180/270. Null when there is no video `tkhd`.
+  /// Rotation encoded in the video track's `tkhd` transform matrix, normalised
+  /// to 0/90/180/270. Null when there is no video `tkhd`.
   ///
-  /// This is the SAME convention as `MediaRecorder.setOrientationHint(d)` and
-  /// `ffprobe`'s `stream_side_data=rotation`, i.e. the clockwise rotation a
-  /// player must apply for correct display. The stored matrix encodes the
-  /// inverse of that, so [_readTkhd] negates it — verified against ffmpeg
-  /// fixtures built with `-display_rotation {0,90,180,270}`.
+  /// **Clockwise** — the same convention as Android's
+  /// `MediaRecorder.setOrientationHint(d)` and the legacy QuickTime `rotate`
+  /// tag, i.e. `setOrientationHint(90)` reads back as `90`. That is the
+  /// convention this suite needs, because what it verifies is the hint the
+  /// recorder wrote.
+  ///
+  /// NOTE it is the NEGATION of ffmpeg's `-display_rotation` and of ffprobe's
+  /// `stream_side_data=rotation`, both of which are counter-clockwise. An
+  /// earlier revision matched ffprobe and was wrong for this purpose: it made
+  /// a correct `setOrientationHint(90)` read back as `270`.
   final int? rotationDegrees;
 
   /// Video track dimensions from `tkhd` (pre-rotation, as stored).
@@ -220,10 +225,10 @@ void _readTkhd(ByteData d, int start, int end, _ProbeState s) {
   if (a == 0 && b == 0 && c == 0 && dd == 0) {
     rotation = 0;
   } else {
-    // Negated: atan2(b, a) is the matrix's own rotation, and the matrix maps
-    // stored frames -> display, so the rotation a player applies is its
-    // inverse. Matches setOrientationHint / ffprobe.
-    final deg = -math.atan2(b, a) * 180 / math.pi;
+    // atan2(b, a) of the stored matrix IS the clockwise display rotation, which
+    // is what setOrientationHint writes. Do not negate — that yields ffmpeg's
+    // counter-clockwise convention instead.
+    final deg = math.atan2(b, a) * 180 / math.pi;
     rotation = ((deg.round() % 360) + 360) % 360;
   }
 

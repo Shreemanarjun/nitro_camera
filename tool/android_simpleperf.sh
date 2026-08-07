@@ -52,35 +52,55 @@ echo "symbols : $SYMS"
 echo "duration: ${SECONDS_TO_RECORD}s"
 echo
 
-# cpu-clock rather than the default cpu-cycles: cpu-clock is a software event,
-# so it works on devices whose kernels gate the PMU from userspace (most
-# consumer phones, this OnePlus included). -g captures call graphs via dwarf
-# fallback; 1 kHz is plenty of samples for a 20s window without distorting the
-# workload.
-ADB_SERIAL="$SERIAL" python3 "$SP/app_profiler.py" \
+# Which sampling event works is device-specific and cannot be assumed: some
+# kernels gate the hardware PMU from userspace (only the software `cpu-clock`
+# works), others disable `cpu-clock` and expose the PMU (this OnePlus). And
+# `simpleperf list` is NOT authoritative — it advertises cpu-clock on devices
+# where recording it fails — so probe with a real 1-second record instead.
+SP_DEV=/data/local/tmp/simpleperf
+EVENT=""
+for candidate in cpu-clock cpu-cycles; do
+  if adb -s "$SERIAL" shell "$SP_DEV record -e $candidate -o /data/local/tmp/.probe.data \
+       --duration 1 --app $PKG" 2>&1 | grep -qi 'not supported\|Failed to'; then
+    continue
+  fi
+  EVENT="$candidate"
+  break
+done
+adb -s "$SERIAL" shell "rm -f /data/local/tmp/.probe.data" >/dev/null 2>&1
+[ -n "$EVENT" ] || { echo "no usable sampling event (tried cpu-clock, cpu-cycles)"; exit 1; }
+echo "event   : $EVENT"
+echo
+
+# -g captures call graphs; 1 kHz gives plenty of samples over a 20-25s window
+# without perturbing the workload being measured.
+# simpleperf's helper shells out to bare `adb`, so with more than one device
+# attached it bails with "No Android device is connected". ANDROID_SERIAL is
+# the env var adb itself honours for disambiguation.
+ANDROID_SERIAL="$SERIAL" python3 "$SP/app_profiler.py" \
   -p "$PKG" \
   --ndk_path "$NDK" \
   -lib "$SYMS" \
   -o "$DATA" \
-  -r "-e cpu-clock -f 1000 -g --duration $SECONDS_TO_RECORD" || {
+  -r "-e $EVENT -f 1000 -g --duration $SECONDS_TO_RECORD" || {
     echo "record failed"; exit 1;
   }
 
 echo
 echo "== top symbols by self time =="
-python3 "$SP/report.py" -i "$DATA" --sort dso,symbol -n 2>/dev/null | head -45
+ANDROID_SERIAL="$SERIAL" python3 "$SP/report.py" -i "$DATA" --sort dso,symbol -n 2>/dev/null | head -45
 
 echo
 echo "== nitro_camera only =="
-python3 "$SP/report.py" -i "$DATA" --sort symbol --dsos libnitro_camera.so -n 2>/dev/null | head -30
+ANDROID_SERIAL="$SERIAL" python3 "$SP/report.py" -i "$DATA" --sort symbol --dsos libnitro_camera.so -n 2>/dev/null | head -30
 
 echo
 echo "== per-thread breakdown =="
-python3 "$SP/report.py" -i "$DATA" --sort thread -n 2>/dev/null | head -20
+ANDROID_SERIAL="$SERIAL" python3 "$SP/report.py" -i "$DATA" --sort thread -n 2>/dev/null | head -20
 
 # A folded stack file feeds any flamegraph renderer and is far easier to diff
 # between a before and an after run than the textual report.
-python3 "$SP/stackcollapse.py" -i "$DATA" --kernel-only=no > "$OUT_DIR/folded.txt" 2>/dev/null \
+ANDROID_SERIAL="$SERIAL" python3 "$SP/stackcollapse.py" -i "$DATA" --kernel-only=no > "$OUT_DIR/folded.txt" 2>/dev/null \
   && echo && echo "folded stacks -> $OUT_DIR/folded.txt ($(wc -l < "$OUT_DIR/folded.txt") stacks)"
 
 echo "perf.data -> $DATA"

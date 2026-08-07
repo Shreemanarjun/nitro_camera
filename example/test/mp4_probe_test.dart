@@ -78,14 +78,20 @@ void main() {
     expect(info.durationMs, isNull);
   });
 
-  test('reads display rotation in the setOrientationHint convention', () {
+  test('reads rotation clockwise, as setOrientationHint writes it', () {
     if (!ffmpeg) return;
-    // Ground truth from `ffprobe -show_entries stream_side_data=rotation`,
-    // normalised to [0,360): 0, 90, -180 -> 180, -90 -> 270.
+    // ffmpeg's `-display_rotation` and ffprobe's `stream_side_data=rotation`
+    // are COUNTER-clockwise; `MediaRecorder.setOrientationHint` and this parser
+    // are clockwise. So a fixture built with `-display_rotation 90` carries a
+    // matrix a player rotates 270° clockwise, and vice versa.
+    //
+    // ffprobe ground truth (CCW) -> expected probeMp4 (CW):
+    //     0   -> 0        90 -> 270
+    //  -180   -> 180     -90 -> 90
     expect(probe('rot0').rotationDegrees, 0);
-    expect(probe('rot90').rotationDegrees, 90);
+    expect(probe('rot90').rotationDegrees, 270);
     expect(probe('rot180').rotationDegrees, 180);
-    expect(probe('rot270').rotationDegrees, 270);
+    expect(probe('rot270').rotationDegrees, 90);
   });
 
   test('distinguishes muxed audio from video-only', () {

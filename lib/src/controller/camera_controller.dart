@@ -229,6 +229,7 @@ class CameraController extends ChangeNotifier {
     _height = ah;
     _sensorOrientation = device.sensorOrientation;
     _isActive = true;
+    _watchNativeRecordingState();
     _configuration = CameraConfiguration(
       deviceId: device.id,
       format: fmt,
@@ -301,6 +302,7 @@ class CameraController extends ChangeNotifier {
     _height = height;
     _sensorOrientation = sensorOrientation;
     _isActive = true;
+    _watchNativeRecordingState();
     _configuration = CameraConfiguration(
       deviceId: device.id,
       fps: fps,
@@ -308,6 +310,33 @@ class CameraController extends ChangeNotifier {
     );
     _resolvedConfig = _resolvedFrom(_configuration!);
     notifyListeners();
+  }
+
+  /// Subscription that keeps Dart-side recording state honest.
+  StreamSubscription<CameraEvent>? _recordingWatch;
+
+  /// Mirrors NATIVE recording termination into Dart state.
+  ///
+  /// A recording can end without Dart asking: `maxDurationMs` / `maxFileSizeBytes`
+  /// auto-stops and an encoder failure are all finalised natively, which emits a
+  /// `stopped` (or `error`) event and never returns through [stopRecording].
+  /// Without this, [isRecording] stays `true` forever and every app built on it
+  /// keeps showing a live-recording UI for a recording that already ended —
+  /// reproduced on a OnePlus CPH2447 by `combo/record_auto_stop_test.dart`.
+  void _watchNativeRecordingState() {
+    _recordingWatch?.cancel();
+    _recordingWatch = _native.eventStream
+        .where((e) => e.textureId == _textureId)
+        .where(CameraSessionEvent.isKnownType)
+        .listen((e) {
+          final type = CameraSessionEvent.fromNative(e).type;
+          final ended =
+              type == CameraEventType.stopped || type == CameraEventType.error;
+          if (!ended || !_isRecording) return;
+          _isRecording = false;
+          _isRecordingPaused = false;
+          notifyListeners();
+        });
   }
 
   /// True once [closeSession] (or [dispose]) has closed the native session.
@@ -335,6 +364,8 @@ class CameraController extends ChangeNotifier {
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
+    unawaited(_recordingWatch?.cancel());
+    _recordingWatch = null;
     final tid = _textureId;
     _textureId = null;
     if (tid != null && !_sessionClosed) {

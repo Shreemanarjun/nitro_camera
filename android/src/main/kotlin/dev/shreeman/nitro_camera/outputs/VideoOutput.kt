@@ -144,8 +144,17 @@ class VideoOutput(
             MediaRecorder()
         }
 
+    /**
+     * [orientationHintDeg] — clockwise rotation a player must apply to the
+     * stored frames (the MPEG-4 `tkhd` transform matrix). The caller owns the
+     * value because it depends on the recording path: the persistent-surface
+     * path muxes RAW sensor buffers and needs the full sensor-mount + device
+     * rotation, while the GL pipeline has already rotated the pixels itself
+     * and passes 0 so the clip is not rotated twice.
+     */
     fun prepareVideoRecorder(
         outputPath: String,
+        orientationHintDeg: Int,
         codec: Int = 0,            // 0 = H.264, 1 = HEVC
         bitRate: Int = 0,          // 0 = default (6 Mbps)
         maxDurationMs: Int = 0,    // 0 = unlimited
@@ -181,6 +190,12 @@ class VideoOutput(
         }
         recorder.setVideoEncoder(encoder)
         if (enableAudio) recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+
+        // The muxer's `tkhd` transform matrix — for the persistent-surface path
+        // the ONLY thing that tells a player which way is up, since the raw
+        // sensor buffers reach the encoder unrotated. Must be set before
+        // prepare().
+        recorder.setOrientationHint(((orientationHintDeg % 360) + 360) % 360)
 
         if (maxDurationMs > 0) recorder.setMaxDuration(maxDurationMs)
         if (maxFileSizeBytes > 0) recorder.setMaxFileSize(maxFileSizeBytes)

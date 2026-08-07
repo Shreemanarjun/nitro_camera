@@ -64,22 +64,38 @@ final class ComboStress extends Module {
   /// wedged native call is reported by our own descriptive failure rather than
   /// by Patrol timing out the whole test. Returns [_deadlineExpired] when the
   /// deadline won.
+  ///
+  /// The pump loop is SEQUENTIAL, not concurrent: `flutter_test` guards
+  /// `WidgetTester.pump`, and starting any other guarded call (`expect`, a
+  /// second `pump`) while one is still in flight throws "Guarded function
+  /// conflict". An earlier version pumped from an unawaited background loop
+  /// and failed every test that used it for exactly that reason.
   Future<Object?> _race(Future<Object?> future, Duration deadline) async {
     var settled = false;
-    unawaited(() async {
-      while (!settled) {
-        await $.tester.pump();
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      }
-    }());
-    try {
-      return await Future.any<Object?>([
-        future,
-        Future<Object?>.delayed(deadline, () => _deadlineExpired),
-      ]);
-    } finally {
-      settled = true;
+    Object? result;
+    Object? error;
+    StackTrace? stack;
+    unawaited(
+      future.then(
+        (v) {
+          result = v;
+          settled = true;
+        },
+        onError: (Object e, StackTrace s) {
+          error = e;
+          stack = s;
+          settled = true;
+        },
+      ),
+    );
+
+    final sw = Stopwatch()..start();
+    while (!settled && sw.elapsed < deadline) {
+      await $.tester.pump(const Duration(milliseconds: 50));
     }
+    if (!settled) return _deadlineExpired;
+    if (error != null) Error.throwWithStackTrace(error!, stack!);
+    return result;
   }
 
   /// Awaits a void call, failing with [label] if it does not return in time.
