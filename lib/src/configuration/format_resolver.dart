@@ -11,9 +11,7 @@ import '../models/session_state.dart';
 /// priority-weighted sum of each constraint's penalty, and the lowest-scoring
 /// format wins. Because we already expose the device's formats over the bridge,
 /// negotiation can run entirely in Dart — no extra native round-trip.
-class FormatResolver {
-  const FormatResolver._();
-
+abstract final class FormatResolver {
   /// Returns the best-matching format for [device] given [constraints], or
   /// `null` if the device has no formats. With an empty constraint list the
   /// highest-resolution format is returned (a sensible default).

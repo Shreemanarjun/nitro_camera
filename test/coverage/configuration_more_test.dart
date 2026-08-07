@@ -1,3 +1,9 @@
+// The constraint value types all have `const` constructors, but this suite
+// deliberately constructs them at RUNTIME: a const-folded invocation never
+// executes the constructor, so `dart fix`-ing these into const literals would
+// silently drop constraints.dart's constructor lines from coverage.
+// ignore_for_file: prefer_const_constructors
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/native.dart' show CameraConfig, FlashModeNativeExt, AutoFocusModeNativeExt, VideoStabilizationModeNativeExt;
 import 'package:nitro_camera/nitro_camera.dart';

@@ -134,7 +134,4 @@ class _StridedLuminanceSource extends zxing.LuminanceSource {
     }
     return m;
   }
-
-  @override
-  bool get isCropSupported => false;
 }

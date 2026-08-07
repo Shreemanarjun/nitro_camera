@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nitro_camera/native.dart' show CameraEvent;
 import 'package:nitro_camera/nitro_camera.dart';
 
 /// Gap-closing tests for the pure model layer: the event decode/dispatch
@@ -107,7 +106,7 @@ void main() {
       expect(run(_s(CameraEventType.error, message: 'bad')), 'error:bad');
       expect(
         run(
-          CameraSessionEvent(
+          const CameraSessionEvent(
             type: CameraEventType.interruptionStarted,
             textureId: 1,
             reason: InterruptionReason.audioDeviceInUseByAnotherClient,
@@ -118,7 +117,7 @@ void main() {
       );
       expect(
         run(
-          CameraSessionEvent(
+          const CameraSessionEvent(
             type: CameraEventType.interruptionEnded,
             textureId: 1,
             reason: InterruptionReason.audioDeviceInUseByAnotherClient,
