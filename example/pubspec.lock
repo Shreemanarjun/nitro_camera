@@ -555,18 +555,18 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: b8de9df345ceeca1f32cce609c769c23f27eaa7aa74eed6547ac7fbae2280984
+      sha256: fd8d8b996bb26705273823bff670725048e4a0ed6add3525a15dc4011a3060a2
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.17"
+    version: "0.6.1"
   nitro_annotations:
     dependency: transitive
     description:
       name: nitro_annotations
-      sha256: fae9b709f035080342cb30c84472b9637ad78d7af49c4afff54666cdea224f45
+      sha256: "2fd6494c81dbc94fa09523fe741194d84718c8311ab9510ef96199bd040d609d"
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.17"
+    version: "0.6.1"
   nitro_camera:
     dependency: "direct main"
     description:
@@ -578,10 +578,10 @@ packages:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: "06f57015223e102cd5903b6c054fe64025009197e4367129d593dcf116bf389e"
+      sha256: "7d0d0aa3d365deb8b13ef2da0dfc74f0969e379a823dcba538a0b25ce42ff5e2"
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.17"
+    version: "0.6.1"
   objective_c:
     dependency: transitive
     description:
