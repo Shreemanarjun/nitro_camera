@@ -5,6 +5,12 @@ listed under `0.0.1`; they never shipped in it.
 
 ### Fixed
 
+* **Android**: `RecordingResult.durationMs` was inflated by the encoder's
+  finalize latency — the end timestamp was sampled *after* `MediaRecorder.stop()`
+  returned (100–300 ms on hardware, seconds on the emulator, so a 2 s clip
+  reported 4.7 s). It now reads the finalized container's own duration
+  (paused spans already excluded), with a stop-requested wall clock as
+  fallback.
 * **Videos no longer save sideways.** Recordings ignored the requested
   orientation and were stored in sensor orientation, so every player showed
   them rotated.

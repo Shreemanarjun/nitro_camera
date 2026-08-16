@@ -3,6 +3,7 @@ package dev.shreeman.nitro_camera.outputs
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.media.MediaCodec
+import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
@@ -284,6 +285,12 @@ class VideoOutput(
         // file on disk is truncated and unplayable. Delete it and report the
         // failure instead of returning a corrupt file as a successful recording.
         var stopFailed = false
+        // Sample the stop instant BEFORE recorder.stop(): the recorded media
+        // ends when stop is requested, but stop() itself blocks for the encoder
+        // flush + moov finalise (100-300 ms on hardware, seconds on the
+        // emulator's software encoder). Sampling afterwards leaked that
+        // latency into durationMs — a 2 s clip reported 4.7 s.
+        val stopRequestedMs = System.currentTimeMillis()
         try {
             recorder.stop()
         } catch (e: Exception) {
@@ -305,13 +312,12 @@ class VideoOutput(
 
         val path = recordingOutputPath
         // Stopped while paused: close the open span first, then exclude ALL
-        // paused time so durationMs is the recorded-media length.
-        val now = System.currentTimeMillis()
+        // paused time so the wall-clock estimate is the recorded-media length.
         if (pauseStartMs > 0L) {
-            pausedAccumulatedMs += now - pauseStartMs
+            pausedAccumulatedMs += stopRequestedMs - pauseStartMs
             pauseStartMs = 0L
         }
-        val duration = (now - recordingStartMs - pausedAccumulatedMs).coerceAtLeast(0L)
+        val wallDuration = (stopRequestedMs - recordingStartMs - pausedAccumulatedMs).coerceAtLeast(0L)
         val file = File(path)
 
         // recordingFinishedReason == 3L: the async error listener fired — the
@@ -322,6 +328,10 @@ class VideoOutput(
             return RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 3L)
         }
         val size = if (file.exists()) file.length() else 0L
+        // Prefer the container's own duration (what a player will report;
+        // MediaRecorder.pause() stops writing, so paused spans are already
+        // excluded) — the wall clock is the fallback for an unparsable file.
+        val duration = mediaDurationMs(file) ?: wallDuration
 
         return RecordingResult(
             path,
@@ -333,6 +343,22 @@ class VideoOutput(
             recordingFileType,
             recordingFinishedReason,
         )
+    }
+
+    /** Duration from the finalised container's metadata, or null if unreadable. */
+    private fun mediaDurationMs(file: File): Long? {
+        if (!file.exists() || file.length() == 0L) return null
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(file.absolutePath)
+            mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()?.takeIf { it > 0L }
+        } catch (e: Exception) {
+            Log.w("NitroCamera", "VideoOutput: could not read media duration: ${e.message}")
+            null
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
+        }
     }
 
     fun release() {

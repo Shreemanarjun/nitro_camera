@@ -211,8 +211,11 @@ void main() {
       final c = ctrl();
       final device = c.device;
 
+      // Zoom is clamped to [minZoom, maxZoom]; some devices (the emulator's
+      // back camera reports zoomRatioRange [1.0, 1.0]) can't zoom at all, so
+      // assert the clamp contract rather than a fixed 2.0.
       c.setZoom(2.0);
-      expect(c.zoom, 2.0);
+      expect(c.zoom, 2.0.clamp(device.minZoom, device.maxZoom));
       c.setZoom(device.maxZoom + 100); // clamps, never throws
       expect(c.zoom, device.maxZoom);
       c.setZoom(1.0);
