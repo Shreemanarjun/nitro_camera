@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../services/capture_storage.dart';
 import '../video_player_page.dart';
 import 'media_tile.dart';
+import '../../../camera/ui/theme/app_theme.dart';
 
 /// Opens the dark-glass INFO sheet for a gallery item.
 Future<void> showMediaInfoSheet(
@@ -225,7 +226,7 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                           item.isVideo
                               ? Icons.videocam_rounded
                               : Icons.photo_rounded,
-                          color: Colors.cyanAccent,
+                          color: AppColors.accent,
                           size: 18,
                         ),
                         const SizedBox(width: 10),
@@ -237,7 +238,7 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 13,
-                              fontWeight: FontWeight.w800,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
@@ -254,7 +255,7 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                         child: Padding(
                           padding: EdgeInsets.all(24),
                           child: CircularProgressIndicator(
-                            color: Colors.cyanAccent,
+                            color: AppColors.accent,
                             strokeWidth: 2,
                           ),
                         ),
@@ -279,9 +280,9 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                         const Text(
                           'EXIF',
                           style: TextStyle(
-                            color: Colors.cyanAccent,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
+                            color: AppColors.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                             letterSpacing: 2,
                           ),
                         ),
@@ -336,8 +337,8 @@ class _InfoRow extends StatelessWidget {
               label,
               style: const TextStyle(
                 color: Colors.white38,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.2,
               ),
             ),

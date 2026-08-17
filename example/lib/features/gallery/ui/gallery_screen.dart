@@ -10,6 +10,7 @@ import '../services/media_services.dart';
 import 'media_viewer_screen.dart';
 import 'widgets/gallery_dialogs.dart';
 import 'widgets/media_tile.dart';
+import '../../camera/ui/theme/app_theme.dart';
 
 /// Pushes the gallery with the app's standard 260ms fade/slide transition.
 void openGallery(BuildContext context) {
@@ -130,9 +131,9 @@ class _GalleryScreenState extends State<GalleryScreen> {
           ? Text(
               '${_selected.length} SELECTED',
               style: const TextStyle(
-                color: Colors.cyanAccent,
+                color: AppColors.accent,
                 fontSize: 13,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 2,
               ),
             )
@@ -143,8 +144,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                   'GALLERY',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 2,
                   ),
                 ),
@@ -152,8 +153,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                   '${items.length} ITEM${items.length == 1 ? '' : 'S'}',
                   style: const TextStyle(
                     color: Colors.white38,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 1.5,
                   ),
                 ),
@@ -174,7 +175,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
             tooltip: 'Delete',
             icon: const Icon(
               Icons.delete_outline_rounded,
-              color: Colors.redAccent,
+              color: AppColors.danger,
               size: 22,
             ),
             onPressed: _deleteSelected,
@@ -254,8 +255,8 @@ class _EmptyState extends StatelessWidget {
             'NO CAPTURES YET',
             style: TextStyle(
               color: Colors.white38,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
               letterSpacing: 2,
             ),
           ),

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
 
 /// White full-screen flash fired at the *native* shutter moment
 /// (photoCaptureShutter event).
@@ -97,7 +98,7 @@ class _VideoRecordingHUDState extends State<VideoRecordingHUD> {
                 _timeStr,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                   fontFamily: 'monospace',
                   fontSize: 16,
                 ),
@@ -144,7 +145,7 @@ class _PulseDotState extends State<_PulseDot>
         width: 10,
         height: 10,
         decoration: const BoxDecoration(
-          color: Colors.redAccent,
+          color: AppColors.danger,
           shape: BoxShape.circle,
         ),
       ),
@@ -259,7 +260,7 @@ class _ThumbnailBadgeState extends State<ThumbnailBadge> {
             height: 54,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.cyanAccent, width: 1.5),
+              border: Border.all(color: AppColors.accent, width: 1.5),
               image: DecorationImage(
                 image: FileImage(File(widget.path)),
                 fit: BoxFit.cover,

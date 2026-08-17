@@ -6,6 +6,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
+import '../../theme/app_theme.dart';
 
 /// FRONT/BACK category selector + per-side lens circles (vision-camera-style
 /// device categories with relative-zoom labels).
@@ -161,7 +162,7 @@ class _LensChip extends StatelessWidget {
           height: selected ? 54 : 44,
           margin: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: selected ? Colors.amberAccent : Colors.black45,
+            color: selected ? AppColors.accent : Colors.black45,
             shape: BoxShape.circle,
             border: Border.all(
               color: selected ? Colors.white : Colors.white24,
@@ -170,7 +171,7 @@ class _LensChip extends StatelessWidget {
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: Colors.amberAccent.withValues(alpha: 0.4),
+                      color: AppColors.accent.withValues(alpha: 0.4),
                       blurRadius: 10,
                       spreadRadius: 2,
                     ),
@@ -184,7 +185,7 @@ class _LensChip extends StatelessWidget {
               style: TextStyle(
                 color: selected ? Colors.black : Colors.white70,
                 fontSize: selected ? 11 : 9,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -253,7 +254,7 @@ class _CategoryTabs extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
-            color: selected ? Colors.cyanAccent : Colors.transparent,
+            color: selected ? AppColors.accent : Colors.transparent,
             borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
@@ -269,8 +270,8 @@ class _CategoryTabs extends StatelessWidget {
                 label,
                 style: TextStyle(
                   color: selected ? Colors.black : Colors.white60,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 1,
                 ),
               ),

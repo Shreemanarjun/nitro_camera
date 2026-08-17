@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/capture_storage.dart';
 import '../../services/media_services.dart';
+import '../../../camera/ui/theme/app_theme.dart';
 
 /// mm:ss (h:mm:ss over an hour) badge text for clip durations.
 String formatClipDuration(Duration d) {
@@ -67,7 +68,7 @@ class MediaTile extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: selected ? 0.35 : 0.15),
                   border: selected
-                      ? Border.all(color: Colors.cyanAccent, width: 2)
+                      ? Border.all(color: AppColors.accent, width: 2)
                       : null,
                 ),
                 child: Align(
@@ -78,7 +79,7 @@ class MediaTile extends StatelessWidget {
                       selected
                           ? Icons.check_circle_rounded
                           : Icons.circle_outlined,
-                      color: selected ? Colors.cyanAccent : Colors.white54,
+                      color: selected ? AppColors.accent : Colors.white54,
                       size: 20,
                     ),
                   ),
@@ -171,8 +172,8 @@ class _VideoTileContentState extends State<_VideoTileContent> {
                   formatClipDuration(d),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -217,14 +218,14 @@ Widget rawBadge() {
     decoration: BoxDecoration(
       color: Colors.black54,
       borderRadius: BorderRadius.circular(4),
-      border: Border.all(color: Colors.cyanAccent, width: 0.8),
+      border: Border.all(color: AppColors.accent, width: 0.8),
     ),
     child: const Text(
       'RAW',
       style: TextStyle(
-        color: Colors.cyanAccent,
-        fontSize: 9,
-        fontWeight: FontWeight.w900,
+        color: AppColors.accent,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
         letterSpacing: 1.2,
       ),
     ),

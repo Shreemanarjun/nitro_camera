@@ -5,6 +5,7 @@ import 'dart:io';
 import '../../../../gallery/ui/gallery_screen.dart';
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
+import '../../theme/app_theme.dart';
 
 class BottomControls extends StatelessWidget {
   const BottomControls({super.key});
@@ -28,7 +29,7 @@ class BottomControls extends StatelessWidget {
               end: Alignment.bottomCenter,
               colors: [
                 isRecording
-                    ? Colors.red.withValues(alpha: 0.1)
+                    ? AppColors.danger.withValues(alpha: 0.1)
                     : Colors.transparent,
                 Colors.black.withValues(alpha: 0.6),
               ],
@@ -63,11 +64,11 @@ class BottomControls extends StatelessWidget {
                               m,
                               style: TextStyle(
                                 color: isSelected
-                                    ? Colors.amberAccent
+                                    ? AppColors.accent
                                     : Colors.white54,
                                 fontWeight: isSelected
-                                    ? FontWeight.w900
-                                    : FontWeight.normal,
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
                                 fontSize: 13,
                                 letterSpacing: 1.2,
                               ),
@@ -78,7 +79,7 @@ class BottomControls extends StatelessWidget {
                               width: isSelected ? 4 : 0,
                               height: 4,
                               decoration: const BoxDecoration(
-                                color: Colors.amberAccent,
+                                color: AppColors.accent,
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -97,7 +98,7 @@ class BottomControls extends StatelessWidget {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.red,
+                    color: AppColors.danger,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Watch((context) {
@@ -107,8 +108,8 @@ class BottomControls extends StatelessWidget {
                       style: const TextStyle(
                         fontFamily: 'monospace',
                         color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
                       ),
                     );
                   }),
@@ -130,9 +131,10 @@ class BottomControls extends StatelessWidget {
                           width: 50,
                           height: 50,
                           decoration: BoxDecoration(
-                            color: Colors.white10,
+                            color: AppColors.surfaceRaised,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white24, width: 2),
+                            border: Border.all(color: AppColors.border, width: 2),
+                            boxShadow: AppShadow.soft,
                             image:
                                 lastCapturedPath != null &&
                                     !isLastCapturedVideo &&
@@ -178,29 +180,39 @@ class BottomControls extends StatelessWidget {
                                 }
                               }
                             : null,
-                        child: Container(
-                          width: 82,
-                          height: 82,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isRecording
-                                  ? Colors.redAccent.withValues(alpha: 0.3)
-                                  : Colors.white,
-                              width: 4,
-                            ),
-                          ),
-                          child: Center(
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: isRecording ? 30 : 64,
-                              height: isRecording ? 30 : 64,
-                              decoration: BoxDecoration(
-                                color: (mode == 'VIDEO' || isRecording)
-                                    ? Colors.redAccent
+                        child: AnimatedOpacity(
+                          duration: AppMotion.fast,
+                          opacity: isRunning ? 1 : 0.4,
+                          child: Container(
+                            width: 82,
+                            height: 82,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isRecording
+                                    ? AppColors.danger.withValues(alpha: 0.35)
                                     : Colors.white,
-                                borderRadius: BorderRadius.circular(
-                                  isRecording ? 8 : 40,
+                                width: 4,
+                              ),
+                              // Soft depth + a red glow while recording so the
+                              // active state reads at a glance.
+                              boxShadow: isRecording
+                                  ? AppShadow.glow(AppColors.danger, alpha: 0.45)
+                                  : AppShadow.soft,
+                            ),
+                            child: Center(
+                              child: AnimatedContainer(
+                                duration: AppMotion.normal,
+                                curve: AppMotion.curve,
+                                width: isRecording ? 30 : 64,
+                                height: isRecording ? 30 : 64,
+                                decoration: BoxDecoration(
+                                  color: (mode == 'VIDEO' || isRecording)
+                                      ? AppColors.danger
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(
+                                    isRecording ? 8 : 40,
+                                  ),
                                 ),
                               ),
                             ),

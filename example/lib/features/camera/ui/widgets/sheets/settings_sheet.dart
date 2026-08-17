@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../controls/control_panel.dart' show ConfigBody;
 import '../controls/pro_controls.dart' show ProControlsBody;
+import '../../theme/app_theme.dart';
 
 /// The unified settings surface: PRO (full controller API — exposure, WB,
 /// focus, stabilization, orientation, toggles, session read-backs) and CONFIG
@@ -169,7 +170,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? Colors.cyanAccent : Colors.transparent,
+          color: selected ? AppColors.accent : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -186,7 +187,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
               style: TextStyle(
                 color: selected ? Colors.black : Colors.white60,
                 fontSize: 11,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.2,
               ),
             ),

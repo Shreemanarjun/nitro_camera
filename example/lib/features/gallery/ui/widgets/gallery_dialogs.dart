@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../camera/ui/theme/app_theme.dart';
 
 /// Dark-glass delete confirmation. Resolves true when the user confirms.
 Future<bool> confirmDelete(BuildContext context, {required int count}) async {
@@ -16,14 +17,14 @@ Future<bool> confirmDelete(BuildContext context, {required int count}) async {
         style: const TextStyle(
           color: Colors.white,
           fontSize: 13,
-          fontWeight: FontWeight.w900,
+          fontWeight: FontWeight.w600,
           letterSpacing: 1.5,
         ),
       ),
       content: Text(
         'This permanently removes the file${count == 1 ? '' : 's'} '
         'from this device.',
-        style: const TextStyle(color: Colors.white54, fontSize: 12),
+        style: const TextStyle(color: Colors.white54, fontSize: 13),
       ),
       actions: [
         TextButton(
@@ -33,7 +34,7 @@ Future<bool> confirmDelete(BuildContext context, {required int count}) async {
             style: TextStyle(
               color: Colors.white54,
               fontSize: 11,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               letterSpacing: 1.2,
             ),
           ),
@@ -43,9 +44,9 @@ Future<bool> confirmDelete(BuildContext context, {required int count}) async {
           child: const Text(
             'DELETE',
             style: TextStyle(
-              color: Colors.redAccent,
+              color: AppColors.danger,
               fontSize: 11,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               letterSpacing: 1.2,
             ),
           ),
@@ -71,7 +72,7 @@ void showGallerySnack(BuildContext context, String message) {
           style: const TextStyle(
             color: Colors.white,
             fontSize: 11,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w600,
             letterSpacing: 1.2,
           ),
         ),

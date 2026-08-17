@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
 
 /// Read-back panel: the negotiated [ResolvedCameraConfig], the live
 /// `getSessionState()`, and the rolling native event log. Demonstrates the
@@ -51,8 +52,8 @@ class SessionPanel extends StatelessWidget {
                     '${e.reason.name != 'none' ? ' (${e.reason.name})' : ''}'
                     '${e.message.isNotEmpty ? ': ${e.message}' : ''}',
                     style: TextStyle(
-                      color: e.isError ? Colors.redAccent : Colors.white54,
-                      fontSize: 9,
+                      color: e.isError ? AppColors.danger : Colors.white54,
+                      fontSize: 11,
                       fontFamily: 'monospace',
                     ),
                   ),
@@ -64,8 +65,8 @@ class SessionPanel extends StatelessWidget {
 }
 
 const _mono = TextStyle(
-  color: Colors.cyanAccent,
-  fontSize: 10,
+  color: AppColors.accent,
+  fontSize: 11,
   fontFamily: 'monospace',
   fontWeight: FontWeight.w600,
 );
@@ -80,8 +81,8 @@ class _Header extends StatelessWidget {
       title,
       style: const TextStyle(
         color: Colors.white30,
-        fontSize: 8,
-        fontWeight: FontWeight.w900,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
         letterSpacing: 1.4,
       ),
     ),

@@ -7,6 +7,7 @@ import 'package:signals_flutter/signals_flutter.dart';
 import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
+import '../../theme/app_theme.dart';
 
 class FrameOverlay extends StatefulWidget {
   final bool isProcessing;
@@ -339,7 +340,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.cyanAccent.withValues(alpha: 0.1),
+                          color: AppColors.accent.withValues(alpha: 0.1),
                           blurRadius: 10,
                         ),
                       ],
@@ -441,7 +442,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                     ),
                     decoration: BoxDecoration(
                       color: oneShot
-                          ? Colors.cyanAccent
+                          ? AppColors.accent
                           : Colors.black.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
@@ -452,8 +453,8 @@ class _FrameOverlayState extends State<FrameOverlay> {
                       oneShot ? 'ONE-SHOT' : 'CONTINUOUS',
                       style: TextStyle(
                         color: oneShot ? Colors.black : Colors.white60,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 1.2,
                       ),
                     ),
@@ -503,15 +504,15 @@ class _FrameOverlayState extends State<FrameOverlay> {
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.cyanAccent.withValues(alpha: 0.5),
+                        color: AppColors.accent.withValues(alpha: 0.5),
                       ),
                     ),
                     child: const Text(
                       'TAP TO SCAN AGAIN',
                       style: TextStyle(
-                        color: Colors.cyanAccent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
+                        color: AppColors.accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 1.4,
                       ),
                     ),
@@ -570,7 +571,7 @@ class _CodeHighlightPainter extends CustomPainter {
     if (mapped.isEmpty) return;
 
     final stroke = Paint()
-      ..color = Colors.greenAccent
+      ..color = AppColors.success
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
@@ -594,7 +595,7 @@ class _CodeHighlightPainter extends CustomPainter {
         stroke,
       );
     }
-    final dot = Paint()..color = Colors.greenAccent;
+    final dot = Paint()..color = AppColors.success;
     for (final p in mapped) {
       canvas.drawCircle(p, 4, dot);
     }
@@ -637,23 +638,23 @@ class _PulsingChipState extends State<_PulsingChip>
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.amberAccent),
+          border: Border.all(color: AppColors.accent),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(
               Icons.flashlight_on_rounded,
-              color: Colors.amberAccent,
+              color: AppColors.accent,
               size: 15,
             ),
             const SizedBox(width: 8),
             Text(
               widget.label,
               style: const TextStyle(
-                color: Colors.amberAccent,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
+                color: AppColors.accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.1,
               ),
             ),
@@ -703,7 +704,7 @@ class _ZoomChips extends StatelessWidget {
                       margin: const EdgeInsets.symmetric(vertical: 2),
                       decoration: BoxDecoration(
                         color: (current - z).abs() < 0.35
-                            ? Colors.cyanAccent
+                            ? AppColors.accent
                             : Colors.transparent,
                         shape: BoxShape.circle,
                       ),
@@ -714,8 +715,8 @@ class _ZoomChips extends StatelessWidget {
                             color: (current - z).abs() < 0.35
                                 ? Colors.black
                                 : Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -776,7 +777,7 @@ class _ScanKindChips extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: kind == selected
-                            ? Colors.cyanAccent
+                            ? AppColors.accent
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -786,8 +787,8 @@ class _ScanKindChips extends StatelessWidget {
                           color: kind == selected
                               ? Colors.black
                               : Colors.white70,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                           letterSpacing: 1,
                         ),
                       ),
@@ -841,7 +842,7 @@ class _AnimatedStatsCard extends StatelessWidget {
                   builder: (ctx, v, _) =>
                       Text("${v.toInt()} FPS", style: _valStyle),
                 ),
-                color: Colors.cyanAccent,
+                color: AppColors.accent,
               ),
               const SizedBox(height: 12),
               _StatItem(
@@ -855,14 +856,14 @@ class _AnimatedStatsCard extends StatelessWidget {
                       color: v == 0
                           ? Colors.white38
                           : v < 20
-                          ? Colors.greenAccent
+                          ? AppColors.success
                           : v < 50
-                          ? Colors.amberAccent
-                          : Colors.redAccent,
+                          ? AppColors.accent
+                          : AppColors.danger,
                     ),
                   ),
                 ),
-                color: Colors.cyanAccent,
+                color: AppColors.accent,
               ),
               const SizedBox(height: 12),
               _StatItem(
@@ -873,11 +874,11 @@ class _AnimatedStatsCard extends StatelessWidget {
                   builder: (ctx, v, _) => Text(
                     v == 0 ? "—" : "${v.toStringAsFixed(1)} ms",
                     style: _valStyle.copyWith(
-                      color: v == 0 ? Colors.white38 : Colors.greenAccent,
+                      color: v == 0 ? Colors.white38 : AppColors.success,
                     ),
                   ),
                 ),
-                color: Colors.greenAccent,
+                color: AppColors.success,
               ),
               const SizedBox(height: 12),
               _StatItem(
@@ -897,11 +898,11 @@ class _AnimatedStatsCard extends StatelessWidget {
                   lastResult != null ? "FOUND" : "SCANNING",
                   style: _valStyle.copyWith(
                     color: lastResult != null
-                        ? Colors.greenAccent
+                        ? AppColors.success
                         : Colors.white38,
                   ),
                 ),
-                color: lastResult != null ? Colors.greenAccent : Colors.white24,
+                color: lastResult != null ? AppColors.success : Colors.white24,
               ),
             ],
           ),
@@ -913,7 +914,7 @@ class _AnimatedStatsCard extends StatelessWidget {
   static const _valStyle = TextStyle(
     color: Colors.white,
     fontSize: 11,
-    fontWeight: FontWeight.w900,
+    fontWeight: FontWeight.w600,
     fontFamily: 'monospace',
   );
 }
@@ -944,8 +945,8 @@ class _StatItem extends StatelessWidget {
               label,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 8,
-                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 0.5,
               ),
             ),
@@ -965,7 +966,7 @@ class _PremiumViewfinder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = hasResult ? Colors.greenAccent : Colors.cyanAccent;
+    final color = hasResult ? AppColors.success : AppColors.accent;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.9, end: 1.0),
       duration: const Duration(milliseconds: 600),
@@ -1003,13 +1004,13 @@ class _PremiumViewfinder extends StatelessWidget {
                 ),
                 if (isScanning && !hasResult) const _ScanningBeam(),
                 if (hasResult)
-                  Center(child: _PulseCircle(color: Colors.greenAccent)),
+                  Center(child: _PulseCircle(color: AppColors.success)),
                 if (hasResult) ...[
                   const _SuccessFlash(),
                   const Center(
                     child: Icon(
                       Icons.check_circle_outline,
-                      color: Colors.greenAccent,
+                      color: AppColors.success,
                       size: 60,
                     ),
                   ),
@@ -1119,16 +1120,16 @@ class _ScanningBeamState extends State<_ScanningBeam>
           decoration: BoxDecoration(
             boxShadow: [
               BoxShadow(
-                color: Colors.cyanAccent.withValues(alpha: 0.6),
+                color: AppColors.accent.withValues(alpha: 0.6),
                 blurRadius: 20,
                 spreadRadius: 2,
               ),
             ],
             gradient: LinearGradient(
               colors: [
-                Colors.cyanAccent.withValues(alpha: 0),
-                Colors.cyanAccent,
-                Colors.cyanAccent.withValues(alpha: 0),
+                AppColors.accent.withValues(alpha: 0),
+                AppColors.accent,
+                AppColors.accent.withValues(alpha: 0),
               ],
             ),
           ),
@@ -1148,7 +1149,7 @@ class _SuccessFlash extends StatelessWidget {
       curve: Curves.easeOut,
       builder: (context, value, _) => Container(
         decoration: BoxDecoration(
-          color: Colors.greenAccent.withValues(alpha: (1.0 - value) * 0.2),
+          color: AppColors.success.withValues(alpha: (1.0 - value) * 0.2),
           borderRadius: BorderRadius.circular(48),
         ),
       ),
@@ -1216,7 +1217,7 @@ class _QRResultCard extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
-                  color: Colors.greenAccent.withValues(alpha: 0.3),
+                  color: AppColors.success.withValues(alpha: 0.3),
                   width: 2,
                 ),
               ),
@@ -1225,12 +1226,12 @@ class _QRResultCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.greenAccent.withValues(alpha: 0.1),
+                      color: AppColors.success.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
                       Icons.qr_code_scanner_rounded,
-                      color: Colors.greenAccent,
+                      color: AppColors.success,
                       size: 28,
                     ),
                   ),
@@ -1247,9 +1248,9 @@ class _QRResultCard extends StatelessWidget {
                             if (result.isbn != null) 'ISBN',
                           ].join('  ·  '),
                           style: const TextStyle(
-                            color: Colors.greenAccent,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900,
+                            color: AppColors.success,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                             letterSpacing: 1.5,
                           ),
                         ),

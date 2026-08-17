@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nitro_camera/native.dart';
+import '../../theme/app_theme.dart';
 
 /// Small glassy pill button (SETTINGS entry point etc.).
 class PillButton extends StatelessWidget {
@@ -22,19 +23,19 @@ class PillButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.black45,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.cyanAccent, width: 1),
+          border: Border.all(color: AppColors.accent, width: 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.cyanAccent, size: 14),
+            Icon(icon, color: AppColors.accent, size: 14),
             const SizedBox(width: 6),
             Text(
               label,
               style: const TextStyle(
-                color: Colors.cyanAccent,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
+                color: AppColors.accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.2,
               ),
             ),
@@ -60,7 +61,7 @@ class PreviewError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            const Icon(Icons.error_outline, color: AppColors.danger, size: 48),
             const SizedBox(height: 16),
             Text(
               '$error',
@@ -74,7 +75,7 @@ class PreviewError extends StatelessWidget {
               },
               child: const Text(
                 "RETRY",
-                style: TextStyle(color: Colors.cyanAccent),
+                style: TextStyle(color: AppColors.accent),
               ),
             ),
           ],

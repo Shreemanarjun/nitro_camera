@@ -9,6 +9,7 @@ import '../../../processors/luminance_processor.dart';
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
 import 'quick_panel.dart';
+import '../../theme/app_theme.dart';
 
 /// Top control strip — a single compact, non-scrolling row of icon toggles
 /// (stock-camera style): flash · filters · preview path · RAW · frame
@@ -60,10 +61,10 @@ class TopBar extends StatelessWidget {
                 final flash = cameraStore.flashMode.value;
                 final (icon, color) = switch (flash) {
                   FlashMode.off => (Icons.flash_off_rounded, Colors.white70),
-                  FlashMode.on => (Icons.flash_on_rounded, Colors.amberAccent),
+                  FlashMode.on => (Icons.flash_on_rounded, AppColors.accent),
                   FlashMode.auto => (
                     Icons.flash_auto_rounded,
-                    Colors.cyanAccent,
+                    AppColors.accent,
                   ),
                 };
                 return _StripIcon(
@@ -181,8 +182,8 @@ class TopBar extends StatelessWidget {
                   '$res · $fps',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.62),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 1.6,
                   ),
                 ),
@@ -226,7 +227,7 @@ class _StripIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = activeColor ?? Colors.cyanAccent;
+    final accent = activeColor ?? AppColors.accent;
     return GlassTooltip(
       message: tooltip,
       child: GestureDetector(
@@ -286,12 +287,12 @@ class _StripBadge extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               decoration: BoxDecoration(
                 color: active
-                    ? Colors.cyanAccent.withValues(alpha: 0.16)
+                    ? AppColors.accent.withValues(alpha: 0.16)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
                   color: active
-                      ? Colors.cyanAccent
+                      ? AppColors.accent
                       : Colors.white.withValues(alpha: 0.45),
                   width: 1,
                 ),
@@ -299,9 +300,9 @@ class _StripBadge extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  color: active ? Colors.cyanAccent : Colors.white70,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w900,
+                  color: active ? AppColors.accent : Colors.white70,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.8,
                 ),
               ),

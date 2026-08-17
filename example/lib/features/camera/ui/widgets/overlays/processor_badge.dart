@@ -5,6 +5,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../processors/luminance_processor.dart';
 import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
 
 /// Small glass badge showing the active custom [FrameProcessor]'s name and
 /// its live output (the demo LUMA processor's mean scene luminance). Purely
@@ -51,15 +52,15 @@ class ProcessorBadge extends StatelessWidget {
                     const Icon(
                       Icons.memory_rounded,
                       size: 12,
-                      color: Colors.cyanAccent,
+                      color: AppColors.accent,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       '${processor.name}$value$stats',
                       style: const TextStyle(
-                        color: Colors.cyanAccent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
+                        color: AppColors.accent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                         letterSpacing: 1.2,
                       ),
                     ),

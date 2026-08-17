@@ -8,6 +8,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
+import '../../theme/app_theme.dart';
 
 /// Mode-aware PRO strip: a slim horizontally-scrollable pill row that sits
 /// directly above the mode tabs and puts the high-value pro settings one tap
@@ -426,12 +427,12 @@ class _ProPill extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: active
-                    ? Colors.cyanAccent
+                    ? AppColors.accent
                     : Colors.black.withValues(alpha: 0.40),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: active
-                      ? Colors.cyanAccent
+                      ? AppColors.accent
                       : Colors.white.withValues(alpha: 0.10),
                 ),
               ),
@@ -444,8 +445,8 @@ class _ProPill extends StatelessWidget {
                     label,
                     style: TextStyle(
                       color: fg,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 1.1,
                     ),
                   ),
@@ -488,8 +489,8 @@ class _SliderBubble extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     color: Colors.white38,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     letterSpacing: 1.4,
                   ),
                 ),
@@ -534,7 +535,7 @@ class _BubbleSlider extends StatelessWidget {
               value: value.clamp(min, max),
               min: min,
               max: max,
-              activeColor: Colors.cyanAccent,
+              activeColor: AppColors.accent,
               inactiveColor: Colors.white24,
               onChanged: onChanged,
             ),
@@ -546,9 +547,9 @@ class _BubbleSlider extends StatelessWidget {
             valueLabel,
             textAlign: TextAlign.right,
             style: const TextStyle(
-              color: Colors.cyanAccent,
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
+              color: AppColors.accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
               letterSpacing: 0.6,
             ),
           ),

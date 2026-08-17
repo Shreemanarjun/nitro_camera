@@ -7,6 +7,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import '../sheets/settings_sheet.dart';
+import '../../theme/app_theme.dart';
 
 /// Quick-settings dropdown anchored under the top icon strip (opened by the
 /// tune icon or the config caption): segmented rows for RESOLUTION
@@ -278,18 +279,18 @@ class QuickPanel extends StatelessWidget {
                           children: [
                             const Icon(
                               Icons.settings_rounded,
-                              color: Colors.cyanAccent,
+                              color: AppColors.accent,
                               size: 15,
                             ),
                             const SizedBox(width: 8),
                             Text(
                               'ALL SETTINGS',
                               style: TextStyle(
-                                color: Colors.cyanAccent.withValues(
+                                color: AppColors.accent.withValues(
                                   alpha: 0.95,
                                 ),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
                                 letterSpacing: 1.6,
                               ),
                             ),
@@ -327,8 +328,8 @@ class _PanelRow extends StatelessWidget {
               label,
               style: const TextStyle(
                 color: Colors.white38,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.4,
               ),
             ),
@@ -358,7 +359,7 @@ class _PanelRow extends StatelessWidget {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: selected
-                              ? Colors.cyanAccent
+                              ? AppColors.accent
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -366,8 +367,8 @@ class _PanelRow extends StatelessWidget {
                           text,
                           style: TextStyle(
                             color: selected ? Colors.black : Colors.white60,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
                             letterSpacing: 0.6,
                           ),
                         ),

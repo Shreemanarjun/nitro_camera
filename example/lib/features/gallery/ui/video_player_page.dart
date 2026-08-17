@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../services/media_services.dart';
 import 'widgets/media_tile.dart';
+import '../../camera/ui/theme/app_theme.dart';
 
 /// Resolution + duration reported by the player once known (for INFO).
 typedef VideoMeta = ({int width, int height, Duration duration});
@@ -311,10 +312,10 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                         child: SliderTheme(
                           data: SliderThemeData(
                             trackHeight: 2.5,
-                            activeTrackColor: Colors.cyanAccent,
+                            activeTrackColor: AppColors.accent,
                             inactiveTrackColor: Colors.white24,
                             thumbColor: Colors.white,
-                            overlayColor: Colors.cyanAccent.withValues(
+                            overlayColor: AppColors.accent.withValues(
                               alpha: 0.15,
                             ),
                             thumbShape: const RoundSliderThumbShape(
@@ -361,7 +362,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
   static const _timeStyle = TextStyle(
     color: Colors.white,
     fontSize: 11,
-    fontWeight: FontWeight.w700,
+    fontWeight: FontWeight.w600,
     fontFamily: 'monospace',
   );
 }
@@ -402,7 +403,7 @@ class _ScrubBubble extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.black87,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.cyanAccent, width: 1),
+                    border: Border.all(color: AppColors.accent, width: 1),
                   ),
                   child: Stack(
                     fit: StackFit.expand,
@@ -424,8 +425,8 @@ class _ScrubBubble extends StatelessWidget {
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
                               fontFamily: 'monospace',
                             ),
                           ),

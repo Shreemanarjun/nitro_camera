@@ -3,6 +3,7 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
 
 class ControlPanel extends StatelessWidget {
   const ControlPanel({super.key});
@@ -225,10 +226,10 @@ class ConfigBody extends StatelessWidget {
                   (context) => SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       trackHeight: 2,
-                      activeTrackColor: Colors.cyanAccent,
+                      activeTrackColor: AppColors.accent,
                       inactiveTrackColor: Colors.white10,
-                      thumbColor: Colors.cyanAccent,
-                      overlayColor: Colors.cyanAccent.withValues(alpha: 0.1),
+                      thumbColor: AppColors.accent,
+                      overlayColor: AppColors.accent.withValues(alpha: 0.1),
                       thumbShape: const RoundSliderThumbShape(
                         enabledThumbRadius: 6,
                       ),
@@ -250,8 +251,8 @@ class ConfigBody extends StatelessWidget {
                 "EVERY $samplingRate'th FRAME",
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                   fontFamily: 'monospace',
                 ),
               ),
@@ -363,14 +364,14 @@ class _PanelHeader extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(icon, color: Colors.cyanAccent.withValues(alpha: 0.6), size: 10),
+      Icon(icon, color: AppColors.accent.withValues(alpha: 0.6), size: 10),
       const SizedBox(width: 8),
       Text(
         title.toUpperCase(),
         style: TextStyle(
           color: Colors.white.withValues(alpha: 0.3),
-          fontSize: 8,
-          fontWeight: FontWeight.w900,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
           letterSpacing: 1.5,
         ),
       ),
@@ -397,12 +398,12 @@ class _PremiumChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
-              ? Colors.cyanAccent
+              ? AppColors.accent
               : Colors.white.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected
-                ? Colors.cyanAccent
+                ? AppColors.accent
                 : Colors.white.withValues(alpha: 0.1),
           ),
         ),
@@ -410,8 +411,8 @@ class _PremiumChip extends StatelessWidget {
           label.toUpperCase(),
           style: TextStyle(
             color: isSelected ? Colors.black : Colors.white60,
-            fontSize: 8,
-            fontWeight: FontWeight.w900,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -438,21 +439,21 @@ class _ChoiceBtn extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
-              ? Colors.cyanAccent.withValues(alpha: 0.1)
+              ? AppColors.accent.withValues(alpha: 0.1)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
-                ? Colors.cyanAccent
+                ? AppColors.accent
                 : Colors.white.withValues(alpha: 0.05),
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.cyanAccent : Colors.white38,
-            fontSize: 9,
-            fontWeight: FontWeight.w900,
+            color: isSelected ? AppColors.accent : Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -473,8 +474,8 @@ class _StreamToggle extends StatelessWidget {
         Switch.adaptive(
           value: isActive,
           onChanged: onChanged,
-          activeThumbColor: Colors.cyanAccent,
-          activeTrackColor: Colors.cyanAccent.withValues(alpha: 0.2),
+          activeThumbColor: AppColors.accent,
+          activeTrackColor: AppColors.accent.withValues(alpha: 0.2),
         ),
       ],
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 
 class PermissionGuard extends StatelessWidget {
   final int cameraStatus; // 0: unknown, 1: granted, 2: denied
@@ -18,14 +19,14 @@ class PermissionGuard extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.camera_rounded, color: Colors.cyanAccent, size: 80),
+          const Icon(Icons.camera_rounded, color: AppColors.accent, size: 80),
           const SizedBox(height: 30),
           const Text(
             "Nitro Camera Ready",
             style: TextStyle(
               color: Colors.white,
               fontSize: 24,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               letterSpacing: 2,
             ),
           ),
@@ -35,14 +36,14 @@ class PermissionGuard extends StatelessWidget {
             style: TextStyle(
               color: Colors.white54,
               fontSize: 13,
-              fontWeight: FontWeight.normal,
+              fontWeight: FontWeight.w400,
             ),
           ),
           const SizedBox(height: 40),
           ElevatedButton(
             onPressed: onGrant,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.cyanAccent,
+              backgroundColor: AppColors.accent,
               foregroundColor: Colors.black,
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
               shape: RoundedRectangleBorder(
@@ -53,7 +54,7 @@ class PermissionGuard extends StatelessWidget {
             child: const Text(
               "GRANT CAMERA PERMISSION",
               style: TextStyle(
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w600,
                 fontSize: 13,
                 letterSpacing: 1.5,
               ),
@@ -75,15 +76,15 @@ class ErrorCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
       decoration: BoxDecoration(
-        color: Colors.redAccent.withValues(alpha: 0.1),
+        color: AppColors.danger.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
           const Icon(
             Icons.warning_amber_rounded,
-            color: Colors.redAccent,
+            color: AppColors.danger,
             size: 22,
           ),
           const SizedBox(width: 14),
@@ -91,9 +92,9 @@ class ErrorCard extends StatelessWidget {
             child: Text(
               message,
               style: const TextStyle(
-                color: Colors.redAccent,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+                color: AppColors.danger,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

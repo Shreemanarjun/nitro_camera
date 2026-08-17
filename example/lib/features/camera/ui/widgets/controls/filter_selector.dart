@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
 
 class FilterSelector extends StatelessWidget {
   final Map<String, String>? filters;
@@ -53,7 +54,7 @@ class FilterSelector extends StatelessWidget {
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: isSelected
-                              ? Colors.cyanAccent
+                              ? AppColors.accent
                               : Colors.white24,
                           width: isSelected ? 2 : 1,
                         ),
@@ -61,7 +62,7 @@ class FilterSelector extends StatelessWidget {
                         boxShadow: isSelected
                             ? [
                                 BoxShadow(
-                                  color: Colors.cyanAccent.withValues(
+                                  color: AppColors.accent.withValues(
                                     alpha: 0.3,
                                   ),
                                   blurRadius: 10,
@@ -73,7 +74,7 @@ class FilterSelector extends StatelessWidget {
                       child: isSelected
                           ? const Icon(
                               Icons.check,
-                              color: Colors.cyanAccent,
+                              color: AppColors.accent,
                               size: 16,
                             )
                           : null,
@@ -82,11 +83,11 @@ class FilterSelector extends StatelessWidget {
                     Text(
                       name,
                       style: TextStyle(
-                        color: isSelected ? Colors.cyanAccent : Colors.white60,
-                        fontSize: 8,
+                        color: isSelected ? AppColors.accent : Colors.white60,
+                        fontSize: 11,
                         fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                         letterSpacing: 0.8,
                       ),
                     ),
@@ -119,8 +120,8 @@ class FilterSelector extends StatelessWidget {
       default:
         return LinearGradient(
           colors: [
-            Colors.cyanAccent.withValues(alpha: 0.2),
-            Colors.cyanAccent.withValues(alpha: 0.6),
+            AppColors.accent.withValues(alpha: 0.2),
+            AppColors.accent.withValues(alpha: 0.6),
           ],
         );
     }

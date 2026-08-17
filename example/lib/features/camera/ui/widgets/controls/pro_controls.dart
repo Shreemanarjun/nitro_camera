@@ -6,6 +6,7 @@ import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import 'session_panel.dart';
+import '../../theme/app_theme.dart';
 
 /// Advanced controls sheet — exercises the full [CameraController] API surface:
 /// exposure (+lock), white balance (+lock), auto-focus mode (+lock), HDR,
@@ -244,8 +245,8 @@ class ProControlsBody extends StatelessWidget {
           icon: const Icon(Icons.bolt, size: 16),
           label: const Text('TAKE SNAPSHOT'),
           style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.cyanAccent,
-            side: const BorderSide(color: Colors.cyanAccent),
+            foregroundColor: AppColors.accent,
+            side: const BorderSide(color: AppColors.accent),
           ),
         ),
 
@@ -274,8 +275,8 @@ class _LabelRow extends StatelessWidget {
               label,
               style: const TextStyle(
                 color: Colors.white38,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.4,
               ),
             ),
@@ -310,9 +311,9 @@ class _SliderRow extends StatelessWidget {
     child: SliderTheme(
       data: SliderTheme.of(context).copyWith(
         trackHeight: 2,
-        activeTrackColor: Colors.cyanAccent,
+        activeTrackColor: AppColors.accent,
         inactiveTrackColor: Colors.white10,
-        thumbColor: Colors.cyanAccent,
+        thumbColor: AppColors.accent,
         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
       ),
       child: Slider(
@@ -355,19 +356,19 @@ class _SegmentRow<T> extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: sel
-                    ? Colors.cyanAccent.withValues(alpha: 0.15)
+                    ? AppColors.accent.withValues(alpha: 0.15)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: sel ? Colors.cyanAccent : Colors.white12,
+                  color: sel ? AppColors.accent : Colors.white12,
                 ),
               ),
               child: Text(
                 e.value,
                 style: TextStyle(
-                  color: sel ? Colors.cyanAccent : Colors.white54,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
+                  color: sel ? AppColors.accent : Colors.white54,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -396,14 +397,14 @@ class _ToggleRow extends StatelessWidget {
         style: const TextStyle(
           color: Colors.white70,
           fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
         ),
       ),
       Switch.adaptive(
         value: value,
         onChanged: onChanged,
-        activeThumbColor: Colors.cyanAccent,
-        activeTrackColor: Colors.cyanAccent.withValues(alpha: 0.2),
+        activeThumbColor: AppColors.accent,
+        activeTrackColor: AppColors.accent.withValues(alpha: 0.2),
       ),
     ],
   );
@@ -419,7 +420,7 @@ class _LockChip extends StatelessWidget {
     child: Icon(
       locked ? Icons.lock : Icons.lock_open,
       size: 16,
-      color: locked ? Colors.amberAccent : Colors.white38,
+      color: locked ? AppColors.accent : Colors.white38,
     ),
   );
 }
@@ -434,9 +435,9 @@ class _MiniBtn extends StatelessWidget {
     child: Text(
       label,
       style: const TextStyle(
-        color: Colors.cyanAccent,
-        fontSize: 9,
-        fontWeight: FontWeight.w900,
+        color: AppColors.accent,
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
       ),
     ),
   );

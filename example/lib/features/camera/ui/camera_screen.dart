@@ -17,6 +17,7 @@ import 'widgets/overlays/processor_badge.dart';
 import 'widgets/overlays/frame_overlay.dart';
 import 'widgets/transitions/camera_switch_loader.dart';
 import 'widgets/transitions/switch_dim_overlay.dart';
+import 'theme/app_theme.dart';
 
 /// The camera screen: preview + gestures (tap-to-focus, pinch-zoom, mode
 /// swipe), the control trays, the scanner overlay and the capture overlays.
@@ -132,7 +133,7 @@ class _CameraScreenState extends State<CameraScreen>
         final loading = cameraStore.loading.value;
         if (loading) {
           return const Center(
-            child: CircularProgressIndicator(color: Colors.cyanAccent),
+            child: CircularProgressIndicator(color: AppColors.accent),
           );
         }
 
@@ -226,9 +227,9 @@ class _CameraScreenState extends State<CameraScreen>
                     child: Text(
                       "${zoom.toStringAsFixed(1)}x",
                       style: const TextStyle(
-                        color: Colors.amberAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        color: AppColors.accent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),

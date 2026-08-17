@@ -15,6 +15,7 @@ import 'video_player_page.dart';
 import 'widgets/gallery_dialogs.dart';
 import 'widgets/media_info_sheet.dart';
 import 'widgets/media_tile.dart';
+import '../../camera/ui/theme/app_theme.dart';
 
 /// Opens the full-screen viewer at [initialIndex] (newest-first gallery order).
 void openMediaViewer(BuildContext context, {required int initialIndex}) {
@@ -207,16 +208,16 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                             Text(
                               '${index + 1} / ${items.length}',
                               style: const TextStyle(
                                 color: Colors.white38,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
                                 letterSpacing: 1.5,
                               ),
                             ),
@@ -258,39 +259,49 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            _ActionButton(
-                              icon: Icons.ios_share_rounded,
-                              label: 'SHARE',
-                              onTap: () => _share(current.path),
+                            Expanded(
+                              child: _ActionButton(
+                                icon: Icons.ios_share_rounded,
+                                label: 'SHARE',
+                                onTap: () => _share(current.path),
+                              ),
                             ),
                             if (!current.isVideo)
-                              _ActionButton(
-                                icon: Icons.rotate_90_degrees_cw_rounded,
-                                label: 'ROTATE',
-                                onTap: () => _rotate(current.path),
+                              Expanded(
+                                child: _ActionButton(
+                                  icon: Icons.rotate_90_degrees_cw_rounded,
+                                  label: 'ROTATE',
+                                  onTap: () => _rotate(current.path),
+                                ),
                               ),
                             // RAW is view-only rotate: no re-encode offered.
                             if (rotated && !isRaw)
-                              _ActionButton(
-                                icon: Icons.save_alt_rounded,
-                                label: 'SAVE',
-                                color: Colors.cyanAccent,
-                                busy: _savingRotation,
-                                onTap: () => _saveRotation(current.path),
+                              Expanded(
+                                child: _ActionButton(
+                                  icon: Icons.save_alt_rounded,
+                                  label: 'SAVE',
+                                  color: AppColors.accent,
+                                  busy: _savingRotation,
+                                  onTap: () => _saveRotation(current.path),
+                                ),
                               ),
-                            _ActionButton(
-                              icon: Icons.delete_outline_rounded,
-                              label: 'DELETE',
-                              color: Colors.redAccent,
-                              onTap: () => _delete(current.path),
+                            Expanded(
+                              child: _ActionButton(
+                                icon: Icons.delete_outline_rounded,
+                                label: 'DELETE',
+                                color: AppColors.danger,
+                                onTap: () => _delete(current.path),
+                              ),
                             ),
-                            _ActionButton(
-                              icon: Icons.info_outline_rounded,
-                              label: 'INFO',
-                              onTap: () => showMediaInfoSheet(
-                                context,
-                                current,
-                                videoMeta: _videoMeta[current.path],
+                            Expanded(
+                              child: _ActionButton(
+                                icon: Icons.info_outline_rounded,
+                                label: 'INFO',
+                                onTap: () => showMediaInfoSheet(
+                                  context,
+                                  current,
+                                  videoMeta: _videoMeta[current.path],
+                                ),
                               ),
                             ),
                           ],
@@ -329,7 +340,7 @@ class _ActionButton extends StatelessWidget {
       onTap: busy ? null : onTap,
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -348,9 +359,9 @@ class _ActionButton extends StatelessWidget {
               label,
               style: TextStyle(
                 color: color.withValues(alpha: 0.9),
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.2,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.6,
               ),
             ),
           ],
@@ -498,9 +509,9 @@ class _RawPreview extends StatelessWidget {
           const Text(
             'RAW · DNG',
             style: TextStyle(
-              color: Colors.cyanAccent,
+              color: AppColors.accent,
               fontSize: 13,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w600,
               letterSpacing: 2,
             ),
           ),
@@ -514,7 +525,7 @@ class _RawPreview extends StatelessWidget {
             p.basename(path),
             style: const TextStyle(
               color: Colors.white24,
-              fontSize: 10,
+              fontSize: 11,
               fontFamily: 'monospace',
             ),
           ),
