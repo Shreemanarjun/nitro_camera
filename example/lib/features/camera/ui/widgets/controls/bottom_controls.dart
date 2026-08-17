@@ -65,22 +65,23 @@ class BottomControls extends StatelessWidget {
                               style: TextStyle(
                                 color: isSelected
                                     ? AppColors.accent
-                                    : Colors.white54,
-                                fontWeight: isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
+                                    : AppColors.onSurfaceMuted,
+                                fontWeight: FontWeight.w600,
                                 fontSize: 13,
                                 letterSpacing: 1.2,
                               ),
                             ),
                             const SizedBox(height: 4),
+                            // A short yellow underline marks the active mode
+                            // (the iOS Camera dial indicator).
                             AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              width: isSelected ? 4 : 0,
-                              height: 4,
-                              decoration: const BoxDecoration(
+                              duration: AppMotion.normal,
+                              curve: AppMotion.curve,
+                              width: isSelected ? 16 : 0,
+                              height: 2,
+                              decoration: BoxDecoration(
                                 color: AppColors.accent,
-                                shape: BoxShape.circle,
+                                borderRadius: BorderRadius.circular(2),
                               ),
                             ),
                           ],

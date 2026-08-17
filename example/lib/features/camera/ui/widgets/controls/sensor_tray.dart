@@ -162,29 +162,23 @@ class _LensChip extends StatelessWidget {
           height: selected ? 54 : 44,
           margin: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: selected ? AppColors.accent : Colors.black45,
+            // iOS Camera zoom buttons: a dark disc always, the active factor
+            // in yellow with a hairline yellow ring — not a solid fill.
+            color: AppColors.surfaceStrong,
             shape: BoxShape.circle,
             border: Border.all(
-              color: selected ? Colors.white : Colors.white24,
-              width: selected ? 2 : 1,
+              color: selected ? AppColors.accent : AppColors.border,
+              width: selected ? 1.5 : 1,
             ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.4),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ]
-                : [],
+            boxShadow: selected ? AppShadow.glow(AppColors.accent, alpha: 0.28) : null,
           ),
           child: Center(
             child: Text(
               label,
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: selected ? Colors.black : Colors.white70,
-                fontSize: selected ? 11 : 9,
+                color: selected ? AppColors.accent : AppColors.onSurfaceMuted,
+                fontSize: selected ? 13 : 11,
                 fontWeight: FontWeight.w600,
               ),
             ),

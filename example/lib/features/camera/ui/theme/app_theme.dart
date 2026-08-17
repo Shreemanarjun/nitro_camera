@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 /// meaningful success moments (a scanner hit) — never for decoration.
 abstract final class AppColors {
   /// The single accent — active mode, selected lens/chip, focus ring.
-  static const Color accent = Color(0xFFFFCC00);
+  static const Color accent = Color(0xFFFFD60A); // iOS Camera yellow
   static const Color onAccent = Color(0xFF141414);
 
   /// Recording state + destructive / error moments only.
