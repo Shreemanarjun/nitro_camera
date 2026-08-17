@@ -438,6 +438,13 @@ class CameraStore {
 
   Future<void> selectDevice(CameraDeviceInfo d) async {
     if (currentDevice.value?.id == d.id) return;
+    // Stop routing the OUTGOING session's frames to the processor right now,
+    // not when CameraView gets around to onClosing. The switch itself needs a
+    // rebuild frame to start; every frame we keep unpacking for a session
+    // that's about to close competes with it on the isolate. The processor is
+    // re-adopted on the fresh session (reapplyCurrentSettings).
+    _processorSub?.cancel();
+    _processorSub = null;
     currentDevice.value = d;
     currentZoom.value = d.neutralZoom;
     status.value = CameraStatus.opening;

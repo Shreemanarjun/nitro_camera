@@ -37,6 +37,8 @@ class _FrameOverlayState extends State<FrameOverlay> {
   StreamSubscription<CameraFrame>? _assistSub;
   late final void Function() _kindWatchDispose;
   late final void Function() _oneShotWatchDispose;
+  late final void Function() _processingWatchDispose;
+  bool _scannerActive = false;
 
   // Live highlight state (from raw detections).
   List<double>? _highlightPoints;
@@ -64,7 +66,24 @@ class _FrameOverlayState extends State<FrameOverlay> {
     super.initState();
     _scannerKind = cameraStore.scanKind.value;
     _scannerOneShot = cameraStore.scanOneShot.value;
-    _initScanner(_scannerKind);
+    _scannerActive = cameraStore.isProcessingFrames.value;
+    if (_scannerActive) _initScanner(_scannerKind);
+    // Tear the frame subscriptions down the MOMENT scanning is switched off —
+    // not in dispose(). This overlay leaves the tree through an
+    // AnimatedSwitcher fade, and a fade only completes when frames render;
+    // under load (three frame subscriptions flooding the isolate's port
+    // queue) frames stall, the fade never completes, dispose() never runs,
+    // and the still-live scanner subscriptions keep the flood going — a
+    // self-sustaining starvation that also blocks the next device switch.
+    _processingWatchDispose = cameraStore.isProcessingFrames.subscribe((on) {
+      if (on == _scannerActive) return; // subscribe() fires immediately
+      _scannerActive = on;
+      if (on) {
+        _initScanner(_scannerKind);
+      } else {
+        _stopScanner();
+      }
+    });
     // Restart the worker with the new format family / mode when switched.
     _kindWatchDispose = cameraStore.scanKind.subscribe((kind) {
       if (kind == _scannerKind) return;
@@ -202,18 +221,34 @@ class _FrameOverlayState extends State<FrameOverlay> {
     }
   }
 
-  Future<void> _restartScanner(CodeScanKind kind) async {
-    await _resultSub?.cancel();
-    await _detectionSub?.cancel();
-    await _statsSub?.cancel();
-    await _assistSub?.cancel();
-    await _scanner?.dispose();
+  /// Cancels every frame/result subscription and disposes the scanner worker.
+  /// Bumps the epoch so an in-flight [_initScanner] can't resurrect them.
+  Future<void> _stopScanner() async {
+    _scannerEpoch++;
+    final resultSub = _resultSub;
+    final detectionSub = _detectionSub;
+    final statsSub = _statsSub;
+    final assistSub = _assistSub;
+    final scanner = _scanner;
+    _resultSub = null;
+    _detectionSub = null;
+    _statsSub = null;
+    _assistSub = null;
     _scanner = null;
+    await resultSub?.cancel();
+    await detectionSub?.cancel();
+    await statsSub?.cancel();
+    await assistSub?.cancel();
+    await scanner?.dispose();
     _lastStatAt = null;
     _windowFrames = 0;
     _highlightPoints = null;
     _oneShotDone = false;
-    if (!mounted) return;
+  }
+
+  Future<void> _restartScanner(CodeScanKind kind) async {
+    await _stopScanner();
+    if (!mounted || !_scannerActive) return;
     await _initScanner(kind);
   }
 
@@ -251,6 +286,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
     _scannerEpoch++; // invalidate any in-flight _initScanner
     _kindWatchDispose();
     _oneShotWatchDispose();
+    _processingWatchDispose();
     _assistTimer?.cancel();
     _resultSub?.cancel();
     _detectionSub?.cancel();
