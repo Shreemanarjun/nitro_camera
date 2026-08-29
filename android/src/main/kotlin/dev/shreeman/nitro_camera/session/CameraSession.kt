@@ -1016,7 +1016,10 @@ class CameraSession(
      */
     private fun recordedClipOrientationHint(): Int = JpegOrientation.compute(
         sensorOrientation = characteristics.sensorOrientationDegrees(90),
-        deviceOrientationDeg = targetOrientationDeg,
+        // Fold in the display rotation when no orientation is locked, exactly
+        // like stills (JPEG_ORIENTATION) — raw targetOrientationDeg alone left
+        // every un-locked landscape clip hinted portrait.
+        deviceOrientationDeg = effectiveDeviceOrientationDegrees(),
         isFrontFacing = characteristics.isFrontFacing,
     )
 
@@ -1146,12 +1149,17 @@ class CameraSession(
                     // FALLBACK — GL pipeline (previous behaviour): the renderer copies
                     // frames into the recorder-owned surface.
                     // 1. Prepare recorder + surface (throws if the encoder rejects the config)
+                    val recPortrait = renderer.isContentPortrait()
+                    Log.i("NitroCamera", "startRecording[GL]: sensor=${characteristics.sensorOrientationDegrees(90)} " +
+                        "display=${currentDisplayRotationDegrees()} target=$targetOrientationDeg " +
+                        "effContent=${renderer.effectiveContentOrientation()} portrait=$recPortrait front=${characteristics.isFrontFacing}")
                     val recSurface = videoOutput.prepareVideoRecorder(
                         outputPath,
                         // NitraRenderer rotates every surface it draws, the
                         // recorder surface included (NitraRenderer.kt:358 →
                         // :411-414, applied at :461), so these pixels are ALREADY
-                        // upright. A container hint would rotate them twice.
+                        // upright — and the surface is sized to match (portrait
+                        // below), so no squish and no container hint.
                         orientationHintDeg = 0,
                         codec = options.codec.toInt(),
                         bitRate = options.bitRate.toInt(),
@@ -1160,6 +1168,7 @@ class CameraSession(
                         lat = options.latitude,
                         lon = options.longitude,
                         hasLocation = options.hasLocation != 0L,
+                        portrait = recPortrait,
                     )
                     // 2. Start the hardware recorder FIRST (important for some drivers)
                     videoOutput.startVideoRecorder()

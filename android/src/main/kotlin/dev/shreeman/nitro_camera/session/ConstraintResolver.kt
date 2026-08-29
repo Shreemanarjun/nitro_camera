@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCharacteristics
 import android.media.MediaRecorder
 import android.util.Range
 import android.util.Size
+import dev.shreeman.nitro_camera.utils.RecordingOrientation
 
 /**
  * Native-side format / FPS negotiation: picks the concrete stream sizes and AE
@@ -104,6 +105,7 @@ object ConstraintResolver {
         characteristics: CameraCharacteristics,
         width: Int,
         height: Int,
+        portrait: Boolean = false,
     ): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val supported = map?.getOutputSizes(MediaRecorder::class.java)
@@ -115,9 +117,12 @@ object ConstraintResolver {
                 Math.abs(it.width.toLong() * it.height - width.toLong() * height)
             }
             ?: Size(width, height)
-        // H.264 requires even dimensions on many devices.
-        val safeWidth = if (target.width % 2 == 0) target.width else target.width - 1
-        val safeHeight = if (target.height % 2 == 0) target.height else target.height - 1
-        return Size(safeWidth, safeHeight)
+        // Encoder output sizes are reported LANDSCAPE (long edge = width). The GL
+        // pipeline draws already-upright content, so a portrait recording needs a
+        // TALL surface — otherwise the upright portrait frame is squished into a
+        // 16:9 landscape surface (the "video is squished/sideways" bug). The
+        // persistent/raw-sensor path keeps landscape (portrait=false) + a hint.
+        val (w, h) = RecordingOrientation.orientSize(target.width, target.height, portrait)
+        return Size(w, h)
     }
 }

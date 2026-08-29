@@ -164,6 +164,7 @@ class VideoOutput(
         lon: Double = 0.0,
         hasLocation: Boolean = false,
         inputSurface: Surface? = null, // persistent surface (instant start) or null → recorder-owned surface
+        portrait: Boolean = false, // GL path: size the surface tall for upright portrait content
     ): Surface {
         // A persistent-surface recording takes the surface over from the dormant
         // warm-up recorder.
@@ -179,8 +180,10 @@ class VideoOutput(
         // Android's MediaRecorder container is MPEG-4 for both mp4 & mov requests.
         recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
 
-        val size = ConstraintResolver.resolveRecordingSize(characteristics, width, height)
+        val size = ConstraintResolver.resolveRecordingSize(characteristics, width, height, portrait)
         recorder.setVideoSize(size.width, size.height)
+        Log.i("NitroCamera", "prepareVideoRecorder: size=${size.width}x${size.height} " +
+            "portrait=$portrait hint=$orientationHintDeg persistent=${inputSurface != null} path=$outputPath")
         recorder.setVideoEncodingBitRate(if (bitRate > 0) bitRate else 6_000_000)
         recorder.setVideoFrameRate(30)
 

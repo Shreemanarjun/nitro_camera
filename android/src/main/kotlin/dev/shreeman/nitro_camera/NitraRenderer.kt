@@ -44,6 +44,20 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         distFocal = if (focalNorm > 0.01f) focalNorm else 0.5f
     }
 
+    /**
+     * Effective content orientation (sensor mount combined with the current
+     * display/target rotation) — the same value renderToSurface draws with.
+     * Portrait when 90/270; used to size the GL recorder surface so upright
+     * content is not squished into a landscape surface.
+     */
+    fun effectiveContentOrientation(): Int =
+        dev.shreeman.nitro_camera.utils.RecordingOrientation.effectiveContent(
+            sensorOrientation, displayRotationDegrees, isFrontCamera)
+
+    fun isContentPortrait(): Boolean =
+        dev.shreeman.nitro_camera.utils.RecordingOrientation.isPortrait(
+            sensorOrientation, displayRotationDegrees, isFrontCamera)
+
     fun setSensorOrientation(orientation: Int) {
         this.sensorOrientation = orientation
     }
