@@ -17,3 +17,8 @@ formatter:
 analyzer:
   errors:
     non_constant_identifier_names: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - macos/**
