@@ -5,18 +5,18 @@ packages:
     dependency: transitive
     description:
       name: _fe_analyzer_shared
-      sha256: cd6add6f846f35fb79f3c315296703c1a24f3cfd7f4739d91a74961c1c7e9f1b
+      sha256: "1b0e6a07425a3e460666e88bf1c949ccc7bb0116ad562ce94a1eca60fe820725"
       url: "https://pub.dev"
     source: hosted
-    version: "100.0.0"
+    version: "103.0.0"
   analyzer:
     dependency: transitive
     description:
       name: analyzer
-      sha256: "6ba98576948803398b69e3a444df24eacdbe12ed699c7014e120ea38552debbf"
+      sha256: "61c04d0c1bfed555c681ea079519933f071a5a026578ff73c4ff0df2d3462e5e"
       url: "https://pub.dev"
     source: hosted
-    version: "13.0.0"
+    version: "13.3.0"
   archive:
     dependency: transitive
     description:
@@ -181,10 +181,10 @@ packages:
     dependency: transitive
     description:
       name: dart_style
-      sha256: "59d53ef8eaed9d288ed9767618e2b31c4fa0383a127db59d5eb2e737a7638a60"
+      sha256: "82ade9fc4273f29ed673e33166944465225b4f7fc5d4aaef48605cc751c18fc1"
       url: "https://pub.dev"
     source: hosted
-    version: "3.1.9"
+    version: "3.1.13"
   dbus:
     dependency: transitive
     description:
@@ -555,18 +555,18 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: fd8d8b996bb26705273823bff670725048e4a0ed6add3525a15dc4011a3060a2
+      sha256: "6da05527ae957a9fd5d029a72a9b10c168834ae484702cff815645fd503afb40"
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.1"
+    version: "0.7.5"
   nitro_annotations:
     dependency: transitive
     description:
       name: nitro_annotations
-      sha256: "2fd6494c81dbc94fa09523fe741194d84718c8311ab9510ef96199bd040d609d"
+      sha256: deab8f034c1bf1edabd6736184973d4c164bfa0c65ff3b1e888ef6f2b7130827
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.1"
+    version: "0.7.5"
   nitro_camera:
     dependency: "direct main"
     description:
@@ -578,10 +578,10 @@ packages:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: "7d0d0aa3d365deb8b13ef2da0dfc74f0969e379a823dcba538a0b25ce42ff5e2"
+      sha256: "8965366a4d4eb07a6852d531a6c7a6de8550a50c26df0a52a8f29f73b589f584"
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.1"
+    version: "0.7.5"
   objective_c:
     dependency: transitive
     description:
