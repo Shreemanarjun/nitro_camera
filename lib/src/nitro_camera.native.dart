@@ -425,6 +425,12 @@ abstract class NitroCamera extends HybridObject {
   /// and devices without custom-lens-position support ignore it.
   void setFocusDistance(int textureId, double distance);
 
+  /// Manual exposure: fixes ISO ([iso], e.g. 100..3200) and shutter time
+  /// ([exposureNanos], in nanoseconds, e.g. 1/50s = 20_000_000). Both are
+  /// clamped to the device's supported range. Pass [iso] <= 0 to restore
+  /// automatic exposure (and re-enable exposure-compensation bias).
+  void setManualExposure(int textureId, double iso, double exposureNanos);
+
   /// Sets exposure compensation. [value] is -1.0 (darkest) to 1.0 (brightest).
   void setExposure(int textureId, double value);
 

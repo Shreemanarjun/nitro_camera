@@ -428,4 +428,22 @@ void main() {
       expect(fake.calls, isEmpty, reason: 'nothing reached native');
     });
   });
+
+  group('manual focus & exposure', () {
+    test('setFocusDistance forwards the normalized distance', () {
+      c.setFocusDistance(0.8);
+      expect(fake.argsOf('setFocusDistance'), [7, 0.8]);
+    });
+
+    test('setManualExposure converts the Duration to nanoseconds', () {
+      c.setManualExposure(iso: 400, exposureDuration: const Duration(microseconds: 20000));
+      // 20000 µs = 1/50s = 20_000_000 ns.
+      expect(fake.argsOf('setManualExposure'), [7, 400.0, 20000000.0]);
+    });
+
+    test('setAutoExposure sends the auto sentinel (-1, -1)', () {
+      c.setAutoExposure();
+      expect(fake.argsOf('setManualExposure'), [7, -1.0, -1.0]);
+    });
+  });
 }

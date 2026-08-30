@@ -423,6 +423,21 @@ class CameraController extends ChangeNotifier {
     _native.setFocusDistance(_textureId!, distance);
   }
 
+  /// Manual exposure: fixes ISO ([iso], e.g. 100-3200) and shutter time
+  /// ([exposureDuration]). Both are clamped to the device's range. Pass a
+  /// non-positive [iso] to restore automatic exposure.
+  void setManualExposure({required double iso, required Duration exposureDuration}) {
+    _requireInitialized();
+    _native.setManualExposure(
+        _textureId!, iso, exposureDuration.inMicroseconds * 1000.0);
+  }
+
+  /// Restores automatic exposure after [setManualExposure].
+  void setAutoExposure() {
+    _requireInitialized();
+    _native.setManualExposure(_textureId!, -1, -1);
+  }
+
   /// Exposure bias in the range [device.minExposure] .. [device.maxExposure].
   void setExposure(double value) {
     _requireInitialized();

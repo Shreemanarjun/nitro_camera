@@ -132,6 +132,35 @@ class ProControlsBody extends StatelessWidget {
           );
         }),
 
+        // Manual ISO
+        Watch((_) {
+          final iso = s.manualIso.value;
+          return _SliderRow(
+            label: 'ISO',
+            value: iso < 0 ? 100 : iso.clamp(50, 3200),
+            min: 50,
+            max: 3200,
+            display: iso < 0 ? 'AUTO' : iso.round().toString(),
+            onChanged: s.setManualIso,
+            trailing: _MiniBtn('AUTO', s.setAutoExposure),
+          );
+        }),
+
+        // Manual shutter (1/x s). Slider is the denominator 4..8000.
+        Watch((_) {
+          final ns = s.manualShutterNs.value;
+          final denom = ns <= 0 ? 60.0 : (1e9 / ns);
+          return _SliderRow(
+            label: 'SHUTTER',
+            value: denom.clamp(4, 8000),
+            min: 4,
+            max: 8000,
+            display: ns <= 0 ? 'AUTO' : '1/${denom.round()}s',
+            onChanged: (d) => s.setManualShutter(1e9 / d),
+            trailing: _MiniBtn('AUTO', s.setAutoExposure),
+          );
+        }),
+
         // White balance
         Watch((_) {
           final k = s.whiteBalanceKelvin.value;

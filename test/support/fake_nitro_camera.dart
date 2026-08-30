@@ -257,6 +257,10 @@ class FakeNitroCamera extends NitroCamera {
       _rec('setFocusDistance', [textureId, distance], null);
 
   @override
+  void setManualExposure(int textureId, double iso, double exposureNanos) =>
+      _rec('setManualExposure', [textureId, iso, exposureNanos], null);
+
+  @override
   void setExposure(int textureId, double value) =>
       _rec('setExposure', [textureId, value], null);
 

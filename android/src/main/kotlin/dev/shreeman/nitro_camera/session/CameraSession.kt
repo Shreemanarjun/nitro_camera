@@ -166,6 +166,9 @@ class CameraSession(
     private var afLocked: Boolean = false
     // Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
     private var manualFocusDistance: Double = -1.0
+    // Manual exposure: iso/nanos <= 0 = auto (AE on).
+    private var manualIso: Double = -1.0
+    private var manualExposureNanos: Double = -1.0
     private var targetOrientationDeg: Int = -1
     private var whiteBalanceKelvin: Long = 0L
     private var hdrEnabled: Boolean = false
@@ -703,6 +706,23 @@ class CameraSession(
         }
         builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, stab)
 
+        // Manual exposure (AE OFF + fixed ISO/shutter) takes precedence over the
+        // auto flash/AE logic below. Only when both are set and the sensor
+        // advertises the ranges.
+        val isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+        val expRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+        val manualExposure = manualIso > 0.0 && manualExposureNanos > 0.0 && isoRange != null && expRange != null
+        if (manualExposure) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            val cIso = dev.shreeman.nitro_camera.utils.ExposureMath.clampIso(manualIso, isoRange!!.lower, isoRange.upper)
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, cIso)
+            val cNs = dev.shreeman.nitro_camera.utils.ExposureMath.clampExposureNanos(manualExposureNanos, expRange!!.lower, expRange.upper)
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, cNs)
+            if (hasFlashUnit) {
+                builder.set(CaptureRequest.FLASH_MODE,
+                    if (torchEnabled) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF)
+            }
+        } else {
         // Handle Flash/Torch logic — gated on FLASH_INFO_AVAILABLE: cameras
         // without a flash unit (typically the front sensor) ignore or reject
         // FLASH_MODE / AE flash modes, so they get plain AE. Front "flash" is
@@ -742,6 +762,7 @@ class CameraSession(
             }
             builder.set(CaptureRequest.CONTROL_AE_MODE, ae)
         }
+        }
         // Keep the precapture trigger IDLE on every request built here — the
         // still-capture path drives the AE precapture sequence explicitly with
         // a one-shot TRIGGER_START frame (see PhotoOutput.runFlashPrecapture).
@@ -771,7 +792,7 @@ class CameraSession(
         }
 
         val range = characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
-        if (range != null) {
+        if (range != null && !manualExposure) {
             val step = characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 1.0
             val ev = if (step == 0.0) 0 else (exposureValue / step).toInt().coerceIn(range.lower, range.upper)
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ev)
@@ -875,6 +896,10 @@ class CameraSession(
     fun setFlash(mode: Long) { flashMode = mode; triggerUpdate() }
     fun setTorch(enabled: Boolean) { torchEnabled = enabled; triggerUpdate() }
     fun setExposure(value: Double) { exposureValue = value; triggerUpdate() }
+    /** Manual exposure: iso/nanos <= 0 restores auto exposure. */
+    fun setManualExposure(iso: Double, exposureNanos: Double) {
+        manualIso = iso; manualExposureNanos = exposureNanos; triggerUpdate()
+    }
     fun setAutoFocus(mode: Long) { afMode = mode; triggerUpdate() }
     /** Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near). */
     fun setFocusDistance(distance: Double) { manualFocusDistance = distance; triggerUpdate() }

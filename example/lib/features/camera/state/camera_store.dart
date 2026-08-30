@@ -185,6 +185,9 @@ class CameraStore {
   final exposure = signal(0.0);
   /// Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
   final focusDistance = signal(-1.0);
+  /// Manual exposure: ISO (-1 = auto) and shutter time in nanoseconds (-1 = auto).
+  final manualIso = signal(-1.0);
+  final manualShutterNs = signal(-1.0);
   final whiteBalanceKelvin = signal(0); // 0 = auto
   final hdrEnabled = signal(false);
   final lowLightBoost = signal(false);
@@ -537,6 +540,36 @@ class CameraStore {
   void setFocusDistance(double v) {
     focusDistance.value = v;
     activeController.value?.setFocusDistance(v);
+  }
+
+  /// Manual exposure — ISO and shutter drive it together; setting one seeds a
+  /// sane default for the other so the mode actually engages (native needs both).
+  void setManualIso(double iso) {
+    manualIso.value = iso;
+    if (manualShutterNs.value <= 0) manualShutterNs.value = 16666667; // 1/60s
+    _applyManualExposure();
+  }
+
+  void setManualShutter(double ns) {
+    manualShutterNs.value = ns;
+    if (manualIso.value <= 0) manualIso.value = 400;
+    _applyManualExposure();
+  }
+
+  void setAutoExposure() {
+    manualIso.value = -1;
+    manualShutterNs.value = -1;
+    activeController.value?.setAutoExposure();
+  }
+
+  void _applyManualExposure() {
+    final iso = manualIso.value, ns = manualShutterNs.value;
+    if (iso > 0 && ns > 0) {
+      activeController.value?.setManualExposure(
+        iso: iso,
+        exposureDuration: Duration(microseconds: (ns / 1000).round()),
+      );
+    }
   }
 
   void setWhiteBalance(int kelvin) {

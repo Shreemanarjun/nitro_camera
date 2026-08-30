@@ -188,6 +188,8 @@ void _readmeLiveControls(CameraController controller) {
   controller.setZoom(2.0);
   controller.focus(0.5, 0.5);
   controller.setFocusDistance(0.8);
+  controller.setManualExposure(iso: 400, exposureDuration: const Duration(microseconds: 20000));
+  controller.setAutoExposure();
   controller.setAutoFocus(AutoFocusMode.continuous);
   controller.setExposure(0.0);
   controller.setFlash(FlashMode.auto);

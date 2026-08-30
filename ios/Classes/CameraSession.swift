@@ -382,6 +382,30 @@ public class CameraSession: NSObject {
         device.unlockForConfiguration()
     }
 
+    /// Manual exposure: fixes ISO and shutter [exposureNanos]; iso <= 0
+    /// restores continuous auto-exposure. Values are clamped to the active
+    /// format's supported range to avoid an uncatchable NSException.
+    func setManualExposure(iso: Double, exposureNanos: Double) throws {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        if iso <= 0 || exposureNanos <= 0 {
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            return
+        }
+        guard device.isExposureModeSupported(.custom) else { return }
+        let fmt = device.activeFormat
+        let clampedIso = max(fmt.minISO, min(Float(iso), fmt.maxISO))
+        let want = CMTime(value: CMTimeValue(exposureNanos), timescale: 1_000_000_000)
+        let minD = fmt.minExposureDuration
+        let maxD = fmt.maxExposureDuration
+        let clampedDur: CMTime =
+            CMTimeCompare(want, minD) < 0 ? minD :
+            (CMTimeCompare(want, maxD) > 0 ? maxD : want)
+        device.setExposureModeCustom(duration: clampedDur, iso: clampedIso, completionHandler: nil)
+    }
+
     func setTorch(enabled: Bool) throws {
         guard device.hasTorch else { return }
         try device.lockForConfiguration()
