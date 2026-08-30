@@ -1,55 +1,51 @@
-## 0.0.2 - 2026-08-08
+## 0.0.2
 
-Bug-fix release, focused on video recording. Some entries were previously
-listed under `0.0.1`; they never shipped in it.
+### Added
+
+* **High-speed (slow-motion) recording** — `startHighSpeedRecording(path, fps)` /
+  `stopHighSpeedRecording()`: 120/240 fps → 8× slow-mo.
+* **Native detector plugin registry** — `NitraDetectors.register(name, factory)`;
+  select custom detectors from Dart by name. `barcode` / `face` built-in.
+* **Manual focus & exposure** — `setFocusDistance`, `setManualExposure`,
+  `setAutoExposure` (clamped natively).
+* **Keep-screen-on** — `setKeepScreenOn(bool)` (FFI, no extra plugin).
+* **Frame helpers** — `FrameData.resized / cropped / rotated`.
+* **Scanner ROI** — `CodeScanner(windowFraction: …)`.
+* **Multi-cam discovery** — typed `ConcurrentCameraSet` + `getConcurrentCameraSets`.
 
 ### Fixed
 
+* Android: recorded video no longer squished — encoder size matches session aspect.
+* Android: fixed a persistent-surface teardown race that could crash the camera.
+* iOS: back↔front switch with manual white balance no longer crashes.
+* RAW/DNG on HALs that gate it now fails fast + falls back to JPEG (no freeze).
 * **Android**: `RecordingResult.durationMs` was inflated by the encoder's
-  finalize latency — the end timestamp was sampled *after* `MediaRecorder.stop()`
-  returned (100–300 ms on hardware, seconds on the emulator, so a 2 s clip
-  reported 4.7 s). It now reads the finalized container's own duration
-  (paused spans already excluded), with a stop-requested wall clock as
-  fallback.
-* **Videos no longer save sideways.** Recordings ignored the requested
-  orientation and were stored in sensor orientation, so every player showed
-  them rotated.
-* **`isRecording` no longer gets stuck on.** When a recording ended by itself —
-  a duration or file-size limit, or an encoder failure — nothing told Dart, so
-  apps kept showing a live recording that had already finished.
-* **Encoder crashes are no longer silent.** A dying recorder now stops the
-  recording, deletes the unusable file and emits an `error` event, instead of
-  leaving a corrupt file to be returned later.
-* **Photos no longer save 90° off** in landscape, on both platforms.
-* `PhotoResult.orientation` / `isMirrored` now describe the saved file
-  accurately instead of guessing per platform.
-* A failed stop no longer returns a truncated, unplayable file as a success —
-  it throws `RecorderException('recorder/finalize-failed')`. Adds
+  finalize latency (a 2 s clip could report 4.7 s). It now reads the finalized
+  container's own duration, with a stop-requested wall clock as fallback.
+* **Videos no longer save sideways** — recordings ignored the requested
+  orientation and were stored in sensor orientation.
+* **`isRecording` no longer gets stuck on** when a recording ends by itself
+  (duration/file-size limit or encoder failure) — Dart is now notified.
+* **Encoder crashes are no longer silent** — a dying recorder stops the
+  recording, deletes the unusable file and emits an `error` event.
+* **Photos no longer save 90° off** in landscape, on both platforms;
+  `PhotoResult.orientation` / `isMirrored` now describe the saved file accurately.
+* A failed stop no longer returns a truncated, unplayable file as success — it
+  throws `RecorderException('recorder/finalize-failed')`. Adds
   `RecordingFinishedReason.failed` and `RecordingResult.isFinalized`.
-* `initialize()` without a size or format now targets 1080p instead of the
-  platform's first format (which was 4K on Android, the smallest size on iOS).
-* **iOS**: an unsupported `setFrameFormat` value crashed the app; it is now
-  rejected safely.
+* `initialize()` without a size/format now targets 1080p instead of the
+  platform's first format (4K on Android, smallest on iOS).
+* **iOS**: an unsupported `setFrameFormat` value no longer crashes the app.
 * **iOS**: external and Continuity Cameras (iOS 17+) now appear in
   `getAvailableCameraDevices()`.
-* **Android**: opening a camera no longer crashes on external/UVC devices whose
-  driver reports no preview sizes.
-* **Android**: external cameras are labelled as such instead of being
-  misreported as phone lenses.
-* **Android**: session state no longer reports `bgra` when frames are actually
-  delivered as `yuv420`.
+* **Android**: opening external/UVC cameras that report no preview sizes no
+  longer crashes; they're also labelled as external instead of phone lenses.
+* **Android**: session state no longer reports `bgra` when frames are delivered
+  as `yuv420`.
 
 ### Changed
 
-* Upgraded to nitro 0.5.17, which fixes a small memory leak on every async
-  native call (photo capture, recording stop, `configure`).
-
-### Internal
-
-* Test coverage raised to 100% of the Dart source (484 tests), plus 16
-  on-device tests that exercise recording combined with backgrounding, lens
-  switches, filters, scanning and frame processing — these found the two
-  recording bugs above.
+* Upgraded to nitro 0.7.5.
 
 ## 0.0.1 - 2026-07-12
 
