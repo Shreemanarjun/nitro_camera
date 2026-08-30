@@ -232,6 +232,15 @@ void main() {
       c.setAutoFocus(AutoFocusMode.locked);
       c.setAutoFocus(AutoFocusMode.continuous);
 
+      // Manual focus distance + exposure — must clamp, never throw (the iOS
+      // custom-lens-position / setExposureModeCustom NSException guard).
+      c.setFocusDistance(0.8);
+      c.setFocusDistance(1.0);
+      c.setFocusDistance(-1); // restore AF
+      c.setManualExposure(iso: 400, exposureDuration: const Duration(microseconds: 20000));
+      c.setManualExposure(iso: 999999, exposureDuration: const Duration(seconds: 10)); // clamps
+      c.setAutoExposure();
+
       c.setWhiteBalance(5600);
       c.setWhiteBalance(0); // back to auto
 
