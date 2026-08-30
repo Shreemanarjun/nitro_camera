@@ -26,6 +26,19 @@ export 'types.dart';
 /// needed to map the UI window into the frame.
 const double kScannerWindowFraction = 0.72;
 
+/// Worker-isolate-local scan-window fraction (centered square as a fraction of
+/// the frame's short side). A CodeScanner sets this once per worker via
+/// [scannerWorkerInit] to shrink the region of interest — a smaller box scans
+/// faster and rejects codes outside the frame. Defaults to
+/// [kScannerWindowFraction].
+double _scanWindowFraction = kScannerWindowFraction;
+
+/// Worker bootstrap: applies the ROI fraction sent as the frame processor's
+/// `workerInitArg`. Top-level so it is isolate-sendable.
+void scannerWorkerInit(Object? arg) {
+  if (arg is double && arg > 0 && arg <= 1.0) _scanWindowFraction = arg;
+}
+
 /// Decodes one frame's luma plane, looking only for [kind]'s formats.
 ///
 /// Engine routing:
@@ -234,7 +247,7 @@ int _frameIdx = 0;
 /// [CodeScanner] worker handlers; call [decodeCodeFrame] for stateless
 /// one-shot decodes.
 CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
-  final win = _windowOf(f, kScannerWindowFraction);
+  final win = _windowOf(f, _scanWindowFraction);
   _frameIdx++;
 
   // Ladder levels: A ≈ ≤300 px (fast), B ≈ 2× A (thorough).
@@ -456,11 +469,16 @@ class CodeScanner {
     this.mode = ScanMode.continuous,
     int confirmationFrames = 2,
     Duration cooldown = const Duration(milliseconds: 1500),
+    double windowFraction = kScannerWindowFraction,
   }) : _confirmer = ScanConfirmer(
          confirmationFrames: confirmationFrames,
          cooldown: cooldown,
        ),
-       _proc = CameraFrameProcessor<CodeResult?>(_handlerFor(kind));
+       _proc = CameraFrameProcessor<CodeResult?>(
+         _handlerFor(kind),
+         workerInit: scannerWorkerInit,
+         workerInitArg: windowFraction.clamp(0.1, 1.0),
+       );
 
   /// CONFIRMED results: same payload on N consecutive frames, deduplicated by
   /// the cooldown. In [ScanMode.oneShot], at most one until [resume].
