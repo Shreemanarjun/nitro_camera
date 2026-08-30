@@ -431,6 +431,19 @@ abstract class NitroCamera extends HybridObject {
   /// automatic exposure (and re-enable exposure-compensation bias).
   void setManualExposure(int textureId, double iso, double exposureNanos);
 
+  /// Starts a high-frame-rate (slow-mo) recording at [fps] (e.g. 120 / 240) to
+  /// [path]. Uses a dedicated high-speed capture session (Android) / high-fps
+  /// format (iOS), separate from the normal preview session. Returns 1 on
+  /// success, 0 when the device advertises no high-speed config for [fps].
+  /// Photo capture and frame processing are unavailable while active.
+  @nitroNativeAsync
+  Future<int> startHighSpeedRecording(int textureId, String path, int fps);
+
+  /// Stops a high-speed recording started with [startHighSpeedRecording] and
+  /// restores the normal preview session. Returns the recorded file metadata.
+  @nitroNativeAsync
+  Future<RecordingResult> stopHighSpeedRecording(int textureId);
+
   /// Sets exposure compensation. [value] is -1.0 (darkest) to 1.0 (brightest).
   void setExposure(int textureId, double value);
 

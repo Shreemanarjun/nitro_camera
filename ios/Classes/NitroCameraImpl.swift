@@ -397,6 +397,16 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         return try await s.recorder.stop()
     }
 
+    public func startHighSpeedRecording(textureId: Int64, path: String, fps: Int64) async throws -> Int64 {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        return try await s.startHighSpeedRecording(to: path, fps: Int(fps)) ? 1 : 0
+    }
+
+    public func stopHighSpeedRecording(textureId: Int64) async throws -> RecordingResult {
+        guard let s = session(for: textureId) else { throw CameraError.deviceNotFound }
+        return try await s.stopHighSpeedRecording()
+    }
+
     public func pauseRecording(textureId: Int64) {
         session(for: textureId)?.recorder.pause()
     }

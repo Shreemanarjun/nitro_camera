@@ -719,6 +719,68 @@ class CameraController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- High-speed (slow-motion) recording ----
+
+  /// Starts a slow-motion recording to [outputPath] at [fps] (typically 120 or
+  /// 240). Uses a dedicated high-speed capture session; photo capture and frame
+  /// processing are unavailable until [stopHighSpeedRecording] is called.
+  ///
+  /// Returns `true` when the recording started, or `false` when the device
+  /// advertises no high-speed configuration reaching [fps] (the normal preview
+  /// keeps running unchanged). Throws a [RecorderException] on a hardware or
+  /// encoder failure while switching sessions.
+  Future<bool> startHighSpeedRecording(String outputPath, {int fps = 240}) async {
+    _requireInitialized();
+    if (_isRecording) return false;
+    final int ok;
+    try {
+      ok = await _native.startHighSpeedRecording(_textureId!, outputPath, fps);
+    } on CameraException {
+      rethrow;
+    } catch (e) {
+      throw RecorderException(
+        'recorder/high-speed-start-failed',
+        'Failed to start high-speed recording: $e',
+        cause: e,
+      );
+    }
+    if (ok == 0) return false;
+    _isRecording = true;
+    _isRecordingPaused = false;
+    notifyListeners();
+    return true;
+  }
+
+  /// Stops a slow-motion recording started with [startHighSpeedRecording] and
+  /// restores the normal preview session. Returns the file path and metadata.
+  Future<RecordingResult> stopHighSpeedRecording() async {
+    _requireInitialized();
+    final RecordingResult result;
+    try {
+      result = await _native.stopHighSpeedRecording(_textureId!);
+    } catch (e) {
+      _isRecording = false;
+      _isRecordingPaused = false;
+      notifyListeners();
+      if (e is CameraException) rethrow;
+      throw RecorderException(
+        'recorder/finalize-failed',
+        'Failed to finalise high-speed recording: $e',
+        cause: e,
+      );
+    }
+    _isRecording = false;
+    _isRecordingPaused = false;
+    notifyListeners();
+    if (result.reason == RecordingFinishedReason.failed) {
+      throw const RecorderException(
+        'recorder/finalize-failed',
+        'High-speed recording could not be finalised; the truncated file was discarded.',
+      );
+    }
+    return result;
+  }
+
   // ---- Frame processing ----
 
   /// Enables or disables raw frame delivery via [frameStream].

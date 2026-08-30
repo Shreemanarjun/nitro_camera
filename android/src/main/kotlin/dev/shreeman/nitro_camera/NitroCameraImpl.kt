@@ -592,6 +592,13 @@ class NitroCameraImpl(
         session(textureId)?.stopVideoRecording()
             ?: RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 0L)
 
+    override suspend fun startHighSpeedRecording(textureId: Long, path: String, fps: Long): Long =
+        if (session(textureId)?.startHighSpeedRecording(path, fps.toInt()) == true) 1L else 0L
+
+    override suspend fun stopHighSpeedRecording(textureId: Long): RecordingResult =
+        session(textureId)?.stopHighSpeedRecording()
+            ?: RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 0L)
+
     override fun pauseRecording(textureId: Long)  { session(textureId)?.pauseVideoRecording() }
     override fun resumeRecording(textureId: Long) { session(textureId)?.resumeVideoRecording() }
     override fun cancelRecording(textureId: Long) { session(textureId)?.cancelVideoRecording() }

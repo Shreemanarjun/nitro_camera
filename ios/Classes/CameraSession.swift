@@ -57,6 +57,11 @@ public class CameraSession: NSObject {
     // below must only restart a session the app WANTS running. Mutated on
     // `sessionQueue` alongside startRunning/stopRunning.
     private var shouldBeRunning = false
+    // Saved so a high-speed (slow-mo) recording can restore the normal format
+    // and frame-duration when it stops.
+    private var preHighSpeedFormat: AVCaptureDevice.Format?
+    private var preHighSpeedMinDur: CMTime?
+    private var preHighSpeedMaxDur: CMTime?
 
     // MARK: - Init
 
@@ -371,6 +376,69 @@ public class CameraSession: NSObject {
         guard device.isLockingFocusWithCustomLensPositionSupported else { return }
         let pos = Float(min(1.0, max(0.0, distance)))
         device.setFocusModeLocked(lensPosition: pos, completionHandler: nil)
+    }
+
+    // MARK: - High-speed (slow-motion) recording
+
+    /// Switches the device to a high-fps format and records a slow-motion clip
+    /// to [path]. Returns false when no format reaches [fps]. The prior format
+    /// and frame-duration are restored by [stopHighSpeedRecording]. Unlike
+    /// Android's constrained-high-speed session, iOS keeps the single running
+    /// session and simply re-negotiates `activeFormat` (vision-camera style);
+    /// the clip is captured at the real [fps] (a player/editor can retime it).
+    func startHighSpeedRecording(to path: String, fps: Int) async throws -> Bool {
+        let target = Double(fps)
+        // Largest-resolution format whose supported range reaches fps.
+        let best = device.formats
+            .filter { fmt in fmt.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= target } }
+            .max { a, b in
+                let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
+                let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
+                return Int(da.width) * Int(da.height) < Int(db.width) * Int(db.height)
+            }
+        guard let format = best else { return false }
+
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            sessionQueue.async {
+                do {
+                    try self.device.lockForConfiguration()
+                    self.preHighSpeedFormat = self.device.activeFormat
+                    self.preHighSpeedMinDur = self.device.activeVideoMinFrameDuration
+                    self.preHighSpeedMaxDur = self.device.activeVideoMaxFrameDuration
+                    self.device.activeFormat = format
+                    let dur = CMTime(value: 1, timescale: CMTimeScale(fps))
+                    self.device.activeVideoMinFrameDuration = dur
+                    self.device.activeVideoMaxFrameDuration = dur
+                    self.device.unlockForConfiguration()
+                    let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                    NSLog("NitroCamera high-speed: %dx%d@%d", dims.width, dims.height, fps)
+                    cont.resume()
+                } catch { cont.resume(throwing: error) }
+            }
+        }
+        try await recorder.start(to: path, options: RecordingOptions(
+            codec: 0, fileType: 0, bitRate: 0, maxDurationMs: 0, maxFileSizeBytes: 0,
+            latitude: 0, longitude: 0, altitude: 0, hasLocation: 0))
+        return true
+    }
+
+    /// Stops a high-speed recording and restores the pre-high-speed format.
+    func stopHighSpeedRecording() async throws -> RecordingResult {
+        let result = try await recorder.stop()
+        sessionQueue.async {
+            guard let fmt = self.preHighSpeedFormat else { return }
+            do {
+                try self.device.lockForConfiguration()
+                self.device.activeFormat = fmt
+                if let mn = self.preHighSpeedMinDur { self.device.activeVideoMinFrameDuration = mn }
+                if let mx = self.preHighSpeedMaxDur { self.device.activeVideoMaxFrameDuration = mx }
+                self.device.unlockForConfiguration()
+            } catch {}
+            self.preHighSpeedFormat = nil
+            self.preHighSpeedMinDur = nil
+            self.preHighSpeedMaxDur = nil
+        }
+        return result
     }
 
     func setExposure(value: Double) throws {

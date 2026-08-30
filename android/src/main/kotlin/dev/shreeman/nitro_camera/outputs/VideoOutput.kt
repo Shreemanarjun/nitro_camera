@@ -146,6 +146,63 @@ class VideoOutput(
         }
 
     /**
+     * Configures a slow-motion recorder for a constrained-high-speed session.
+     * The session pushes frames at [captureFps] (120/240); we store them at a
+     * normal [playbackFps] so the clip plays back captureFps/playbackFps× slower
+     * (240→30 = 8× slow-mo). Size must be an exact advertised high-speed size —
+     * unlike the normal path this does NOT run through [ConstraintResolver], and
+     * writes no audio (high-speed capture has no synchronized audio clock).
+     * Returns the recorder-owned input surface for the high-speed request.
+     */
+    fun prepareHighSpeedRecorder(
+        outputPath: String,
+        width: Int,
+        height: Int,
+        captureFps: Int,
+        orientationHintDeg: Int,
+        playbackFps: Int = 30,
+    ): Surface {
+        val recorder = newRecorder()
+        recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+        recorder.setVideoSize(width, height)
+        // ~0.07 bits/pixel/frame, capped at 60 Mbps — 1080p@240 lands ~35 Mbps.
+        val bits = (width.toLong() * height * captureFps * 7 / 100).coerceIn(8_000_000L, 60_000_000L)
+        recorder.setVideoEncodingBitRate(bits.toInt())
+        recorder.setCaptureRate(captureFps.toDouble())
+        recorder.setVideoFrameRate(playbackFps)
+        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+        recorder.setOrientationHint(((orientationHintDeg % 360) + 360) % 360)
+        recorder.setOnErrorListener { _, what, extra ->
+            Log.e("NitroCamera", "VideoOutput(HS): MediaRecorder error what=$what extra=$extra")
+            recordingFinishedReason = 3L
+            onRecorderError?.invoke(what, extra)
+        }
+        recorder.setOutputFile(outputPath)
+        Log.i("NitroCamera", "prepareHighSpeedRecorder: ${width}x$height capture=$captureFps " +
+            "playback=$playbackFps bits=$bits hint=$orientationHintDeg path=$outputPath")
+        try {
+            recorder.prepare()
+        } catch (e: Exception) {
+            recorder.release()
+            throw e
+        }
+        mediaRecorder = recorder
+        isUsingPersistentSurface = false
+        recordingOutputPath = outputPath
+        recordingWidth = width
+        recordingHeight = height
+        recordingCodec = 0L
+        recordingFileType = 0L
+        recordingFinishedReason = 0L
+        recordingStartMs = System.currentTimeMillis()
+        pausedAccumulatedMs = 0L
+        pauseStartMs = 0L
+        isRecording = true
+        return recorder.surface
+    }
+
+    /**
      * [orientationHintDeg] — clockwise rotation a player must apply to the
      * stored frames (the MPEG-4 `tkhd` transform matrix). The caller owns the
      * value because it depends on the recording path: the persistent-surface

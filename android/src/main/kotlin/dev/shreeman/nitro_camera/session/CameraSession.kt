@@ -20,6 +20,7 @@ import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
 import dev.shreeman.nitro_camera.outputs.FrameOutput
 import dev.shreeman.nitro_camera.outputs.PhotoOutput
 import dev.shreeman.nitro_camera.outputs.VideoOutput
+import dev.shreeman.nitro_camera.utils.HighSpeedConfig
 import dev.shreeman.nitro_camera.utils.JpegOrientation
 import dev.shreeman.nitro_camera.utils.NitraDetectors
 import io.flutter.view.TextureRegistry
@@ -252,6 +253,11 @@ class CameraSession(
     @Volatile internal var isClosed = false
         private set
     @Volatile internal var captureSession: CameraCaptureSession? = null
+
+    // Active only during a slow-mo recording: a dedicated 2-surface
+    // (preview + recorder) constrained-high-speed session that temporarily
+    // replaces [captureSession] on the same open device.
+    @Volatile private var highSpeedSession: CameraCaptureSession? = null
 
     // --- Persistent recorder surface state (instant recording start) ---
     // Non-null while a recording streams through the persistent recorder surface
@@ -1254,6 +1260,135 @@ class CameraSession(
 
         // 2. Now safe to stop the actual recorder
         return videoOutput.stopVideoRecording()
+    }
+
+    // ------------------------------------------------------------------
+    // High-speed (slow-motion) recording — isolated constrained session.
+    // ------------------------------------------------------------------
+
+    /**
+     * Records a slow-motion clip via a dedicated
+     * [CameraConstrainedHighSpeedCaptureSession]. The normal preview session is
+     * torn down (the CameraDevice stays open, mirroring
+     * [reconfigureSessionWithoutRecorder]) and a 2-surface high-speed session
+     * (preview + recorder) takes over at [fps]. Photo and frame-processor
+     * outputs are unavailable while active. Returns false — leaving the normal
+     * session intact — when the device advertises no high-speed config reaching
+     * [fps]. Throws only on a hardware/config failure while switching sessions.
+     */
+    suspend fun startHighSpeedRecording(outputPath: String, fps: Int): Boolean {
+        if (isClosed) throw IllegalStateException("Camera session is closed")
+        if (highSpeedSession != null) throw IllegalStateException("High-speed recording already active")
+
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?: return false
+        val configs = map.highSpeedVideoSizes.flatMap { size ->
+            map.getHighSpeedVideoFpsRangesFor(size).map { r ->
+                HighSpeedConfig.Config(size.width, size.height, r.lower, r.upper)
+            }
+        }
+        // Match the live preview size/aspect first, then the requested fps.
+        val cfg = HighSpeedConfig.pick(configs, resolvedSize.width, resolvedSize.height, fps)
+            ?: return false
+        Log.i("NitroCamera", "startHighSpeedRecording: picked ${cfg.width}x${cfg.height}" +
+            "@[${cfg.fpsMin}-${cfg.fpsMax}] for req $fps (path=$outputPath)")
+
+        return suspendCancellableCoroutine { cont ->
+            cameraHandler.post {
+                try {
+                    if (isClosed) { if (cont.isActive) cont.resume(false); return@post }
+                    val pSurface = renderer.inputSurface
+                        ?: run { if (cont.isActive) cont.resume(false); return@post }
+                    // Both surfaces must be an advertised high-speed size, so
+                    // re-size the renderer's preview stream to the picked config.
+                    renderer.inputSurfaceTexture?.setDefaultBufferSize(cfg.width, cfg.height)
+                    // Recorder is fed RAW sensor frames directly by the session
+                    // (like the persistent-surface path), so the container hint
+                    // carries the whole rotation.
+                    val recSurface = videoOutput.prepareHighSpeedRecorder(
+                        outputPath, cfg.width, cfg.height, cfg.fpsMax,
+                        orientationHintDeg = recordedClipOrientationHint(),
+                    )
+                    // Tear down the normal session; keep the device open.
+                    val old = captureSession
+                    captureSession = null
+                    currentRequestBuilder = null
+                    recordingViaSessionSurface = null
+                    try { old?.stopRepeating() } catch (_: Exception) {}
+                    try { old?.close() } catch (_: Exception) {}
+
+                    val range = android.util.Range(cfg.fpsMin, cfg.fpsMax)
+                    @Suppress("DEPRECATION")
+                    cameraDevice.createConstrainedHighSpeedCaptureSession(
+                        listOf(pSurface, recSurface),
+                        object : CameraCaptureSession.StateCallback() {
+                            override fun onConfigured(session: CameraCaptureSession) {
+                                if (isClosed) {
+                                    session.close()
+                                    if (cont.isActive) cont.resume(false)
+                                    return
+                                }
+                                try {
+                                    val hs = session as CameraConstrainedHighSpeedCaptureSession
+                                    highSpeedSession = session
+                                    val builder = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_RECORD)
+                                    builder.addTarget(pSurface)
+                                    builder.addTarget(recSurface)
+                                    builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range)
+                                    val list = hs.createHighSpeedRequestList(builder.build())
+                                    session.setRepeatingBurst(list, null, cameraHandler)
+                                    videoOutput.startVideoRecorder()
+                                    Log.i("NitroCamera", "High-speed recording started @${cfg.fpsMax}fps")
+                                    if (cont.isActive) cont.resume(true)
+                                } catch (e: Exception) {
+                                    Log.e("NitroCamera", "High-speed start failed after config: ${e.message}")
+                                    highSpeedSession = null
+                                    try { videoOutput.stopVideoRecording() } catch (_: Exception) {}
+                                    try { session.close() } catch (_: Exception) {}
+                                    restoreNormalSessionAfterHighSpeed()
+                                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                                }
+                            }
+                            override fun onConfigureFailed(session: CameraCaptureSession) {
+                                Log.e("NitroCamera", "High-speed session configuration failed")
+                                try { videoOutput.stopVideoRecording() } catch (_: Exception) {}
+                                restoreNormalSessionAfterHighSpeed()
+                                if (cont.isActive) cont.resume(false)
+                            }
+                        },
+                        cameraHandler,
+                    )
+                } catch (e: Exception) {
+                    Log.e("NitroCamera", "startHighSpeedRecording failed: ${e.message}")
+                    try { videoOutput.stopVideoRecording() } catch (_: Exception) {}
+                    restoreNormalSessionAfterHighSpeed()
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+            }
+        }
+    }
+
+    fun stopHighSpeedRecording(): RecordingResult {
+        val hs = highSpeedSession ?: return RecordingResult("", 0L, 0L, 0L, 0L, 0L, 0L, 0L)
+        highSpeedSession = null
+        runOnCameraThreadBlocking {
+            try { hs.stopRepeating() } catch (_: Exception) {}
+        }
+        val result = videoOutput.stopVideoRecording() // encoder flush + moov finalise
+        runOnCameraThreadBlocking {
+            try { hs.close() } catch (_: Exception) {}
+            restoreNormalSessionAfterHighSpeed()
+        }
+        return result
+    }
+
+    /** Restores the renderer's preview size and rebuilds the normal session on
+     *  the same open device. Safe to call from any thread. */
+    private fun restoreNormalSessionAfterHighSpeed() {
+        renderer.inputSurfaceTexture?.setDefaultBufferSize(resolvedSize.width, resolvedSize.height)
+        captureSession = null
+        currentRequestBuilder = null
+        if (!isClosed) startPreview()
     }
 
     /** Runs [block] on the camera thread; inline when already on it (avoids a
