@@ -56,6 +56,7 @@ export 'src/controller/camera_controller.dart';
 
 // Frame processing.
 export 'src/processing/frame_processor.dart';
+export 'src/processing/frame_resizer.dart';
 export 'src/processing/frame_processor_plugin.dart';
 
 // Code scanning (1D / 2D / QR — selectable per frame).
