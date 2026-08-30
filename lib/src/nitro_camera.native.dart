@@ -584,11 +584,13 @@ abstract class NitroCamera extends HybridObject {
   /// so no extra plugin / method channel is needed.)
   void setKeepScreenOn(int enabled);
 
-  /// Runs a NATIVE ML detector on the session's frames, emitting
+  /// Runs a NATIVE detector on the session's frames, emitting
   /// [CameraEventType.detection] events with a JSON payload per hit.
-  /// [detector]: "barcode" | "face" | "" (off). Requires the host app to add
-  /// the matching ML Kit dependency (see docs) — throws a descriptive error
-  /// event if the detector class is not on the classpath.
+  /// [detector]: a registered detector name, or "" to stop. The built-ins are
+  /// "barcode" / "face" (ML Kit on Android — the host app adds the artifact; the
+  /// built-in Vision framework on iOS). Host apps register their own native
+  /// detector plugins by name via `NitraDetectors.register(...)` (Kotlin/Swift)
+  /// and select them here. An unknown name emits a descriptive error event.
   void setNativeDetector(int textureId, String detector);
 
   /// Returns the camera-ID combinations that can stream CONCURRENTLY

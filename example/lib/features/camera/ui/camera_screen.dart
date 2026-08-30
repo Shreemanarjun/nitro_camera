@@ -290,7 +290,9 @@ class _CameraScreenState extends State<CameraScreen>
 
             // 5c. Interactive manual focus + exposure layer (rack-focus rail +
             // shutter/ISO stop wheels). Hidden while recording like the tray.
-            const _HideWhileRecording(child: ManualControlsLayer()),
+            const Positioned.fill(
+              child: _HideWhileRecording(child: ManualControlsLayer()),
+            ),
 
             // 6. Bottom main controls.
             const BottomControls(),

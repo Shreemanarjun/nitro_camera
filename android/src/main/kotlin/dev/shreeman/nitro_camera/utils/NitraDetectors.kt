@@ -63,6 +63,48 @@ object NitraDetectors {
 
     private val states = ConcurrentHashMap<Long, DetectorState>()
 
+    // ── Native detector plugin registry ──────────────────────────────────────
+    // Open registry (vision-camera FrameProcessorPluginRegistry parity): host
+    // apps register their own native detector by name, then select it from Dart
+    // via setNativeDetector(textureId, name). "barcode" / "face" are built-ins.
+    private val registry = ConcurrentHashMap<String, DetectorEngineFactory>()
+
+    init {
+        // Built-ins probe for the optional ML Kit artifact lazily (in the
+        // factory body, so registration itself loads no ML Kit class).
+        register("barcode") {
+            Class.forName("com.google.mlkit.vision.barcode.BarcodeScanning")
+            BarcodeEngine()
+        }
+        register("face") {
+            Class.forName("com.google.mlkit.vision.face.FaceDetection")
+            FaceEngine()
+        }
+    }
+
+    /**
+     * Registers a native detector [factory] under [name], overwriting any
+     * previous binding. Call once at app start (e.g. from your Application /
+     * MainActivity), then drive it from Dart with
+     * `controller.startDetector("$name")`. The factory is invoked lazily the
+     * first time that detector runs; a [DetectorEngine.detect] result JSON is
+     * delivered to Dart on the detection event stream.
+     */
+    @JvmStatic
+    fun register(name: String, factory: DetectorEngineFactory) {
+        registry[name] = factory
+    }
+
+    /** Removes a registered detector. No-op if [name] was not registered. */
+    @JvmStatic
+    fun unregister(name: String) {
+        registry.remove(name)
+    }
+
+    /** Names of all registered detectors (built-ins + host-registered), sorted. */
+    @JvmStatic
+    fun registeredNames(): List<String> = registry.keys.sorted()
+
     /**
      * Retired engines are closed OFF the caller thread: `close()` can race an
      * in-flight detection (typical during a camera switch), and it must never
@@ -239,15 +281,11 @@ object NitraDetectors {
      * is retried on later frames instead of permanently disabling the
      * detector with a misleading message.
      */
-    private fun createEngine(detector: String): EngineResult {
-        val probeClass = when (detector) {
-            "barcode" -> "com.google.mlkit.vision.barcode.BarcodeScanning"
-            "face" -> "com.google.mlkit.vision.face.FaceDetection"
-            else -> return EngineResult.Missing(missingDependencyMessage(detector))
-        }
+    internal fun createEngine(detector: String): EngineResult {
+        val factory = registry[detector]
+            ?: return EngineResult.Missing(missingDependencyMessage(detector))
         return try {
-            Class.forName(probeClass)
-            EngineResult.Ready(if (detector == "barcode") BarcodeEngine() else FaceEngine())
+            EngineResult.Ready(factory.create())
         } catch (e: ClassNotFoundException) {
             Log.w(TAG, "NitraDetectors: '$detector' unavailable: $e")
             EngineResult.Missing(missingDependencyMessage(detector))
@@ -260,12 +298,15 @@ object NitraDetectors {
         }
     }
 
-    private fun missingDependencyMessage(detector: String): String = when (detector) {
-        "barcode" ->
+    private fun missingDependencyMessage(detector: String): String = when {
+        detector == "barcode" ->
             "ML Kit barcode-scanning not found — add com.google.mlkit:barcode-scanning to your app's dependencies"
-        "face" ->
+        detector == "face" ->
             "ML Kit face-detection not found — add com.google.mlkit:face-detection to your app's dependencies"
-        else -> "Unknown detector '$detector' — supported detectors: barcode, face"
+        !registry.containsKey(detector) ->
+            "Unknown detector '$detector' — registered detectors: ${registeredNames().joinToString(", ")}"
+        else ->
+            "Detector '$detector' is registered but its engine could not be created (missing native dependency)."
     }
 
     private fun errorJson(detector: String, message: String): String =
@@ -453,7 +494,7 @@ private class DetectorState(val detector: String) {
 }
 
 /** Outcome of an engine-creation attempt — see [NitraDetectors.createEngine]. */
-private sealed interface EngineResult {
+internal sealed interface EngineResult {
     /** Engine created successfully. */
     class Ready(val engine: DetectorEngine) : EngineResult
 
@@ -465,15 +506,19 @@ private sealed interface EngineResult {
 }
 
 /**
- * Detection engine abstraction — deliberately free of ML Kit types so that
- * [NitraDetectors] itself never triggers ML Kit class loading. Concrete
- * engines are only instantiated after a successful `Class.forName` probe.
+ * A native detector plugin — the public SPI for [NitraDetectors.register].
+ *
+ * Deliberately free of ML Kit types so that registering (or the built-in
+ * factories) never triggers ML Kit class loading; concrete engines are only
+ * instantiated when the detector actually runs. Host apps implement this with
+ * their own library (ML Kit, TFLite, OpenCV, …) and register a factory.
  */
-private interface DetectorEngine {
+interface DetectorEngine {
     /**
      * Runs detection on an NV21 frame asynchronously. Invokes [onDone]
      * exactly once — with the result JSON and the number of detections on
-     * success, or with a null JSON payload on failure.
+     * success, or with a null JSON payload on failure. The JSON is delivered
+     * verbatim to Dart on the detection event stream.
      */
     fun detect(
         nv21: ByteArray,
@@ -483,8 +528,13 @@ private interface DetectorEngine {
         onDone: (json: String?, resultCount: Int) -> Unit,
     )
 
-    /** Releases the underlying ML Kit client. */
+    /** Releases any underlying client/resources. */
     fun close()
+}
+
+/** Creates a [DetectorEngine]; registered by name via [NitraDetectors.register]. */
+fun interface DetectorEngineFactory {
+    fun create(): DetectorEngine
 }
 
 /** ML Kit barcode scanning engine (all formats). */

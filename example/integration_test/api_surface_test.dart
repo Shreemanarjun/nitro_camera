@@ -16,6 +16,7 @@
 //   9. recording controls: options, pause/resume, result metadata, cancel
 //  10. photo option variants (geotag, silent, speed; DNG when supported)
 //  11. native detector smoke (barcode on/off keeps the stream alive)
+//  11b. custom registered native detector (meanLuma) delivers results
 //  12. typed errors + orientation manager / hot-plug observer lifecycles
 //
 // camera_lifecycle_test.dart owns switching/reopen storms;
@@ -624,6 +625,44 @@ void main() {
             'detector on/off must not surface an error '
             '(detections seen: ${detections.length})',
       );
+    },
+  );
+
+  testWidgets(
+    '11b. custom registered native detector (meanLuma) delivers results',
+    semanticsEnabled: false,
+    (tester) async {
+      await bootApp(tester);
+      final c = ctrl();
+
+      // "meanLuma" is a dependency-free detector the example registers on the
+      // NATIVE side (MainActivity / AppDelegate) via NitraDetectors.register —
+      // the open plugin registry. Unlike barcode/face it emits on EVERY frame,
+      // so a camera-bearing device yields results we can assert on.
+      final results = <Map<String, dynamic>>[];
+      final sub = c.nativeDetections.listen(results.add);
+      c.setNativeDetector('meanLuma');
+      // Poll up to ~8s; a camera-bearing device populates results quickly, a
+      // camera-less simulator never does (tolerated below).
+      for (var i = 0; i < 16 && results.isEmpty; i++) {
+        await pumpFor(tester, const Duration(milliseconds: 500));
+      }
+
+      if (results.isNotEmpty) {
+        final r = results.last;
+        expect(r['detector'], 'meanLuma');
+        final list = (r['results'] as List).cast<Map<String, dynamic>>();
+        expect(list, isNotEmpty);
+        final luma = (list.first['luma'] as num).toInt();
+        expect(luma, inInclusiveRange(0, 255),
+            reason: 'mean luma must be a valid 8-bit level');
+      }
+
+      c.setNativeDetector('');
+      await sub.cancel();
+      await pumpFor(tester, const Duration(milliseconds: 400));
+      expect(cameraStore.status.value, CameraStatus.running);
+      expect(cameraStore.errorMessage.value, isNull);
     },
   );
 

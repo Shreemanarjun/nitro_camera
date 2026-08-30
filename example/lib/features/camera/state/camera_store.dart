@@ -692,7 +692,16 @@ class CameraStore {
       HapticFeedback.lightImpact();
     } catch (e) {
       debugPrint('Capture failed: $e');
-      errorMessage.value = 'Capture failed: $e';
+      if (rawPhoto.value) {
+        // RAW/DNG is device-gated (some HALs advertise it but never deliver a
+        // frame — ColorOS). Fall back to JPEG so the next shutter tap works
+        // instead of freezing again, and say so plainly.
+        rawPhoto.value = false;
+        errorMessage.value =
+            "RAW (DNG) isn't available on this camera — switched to JPEG.";
+      } else {
+        errorMessage.value = 'Capture failed: $e';
+      }
     } finally {
       isCapturing.value = false;
     }

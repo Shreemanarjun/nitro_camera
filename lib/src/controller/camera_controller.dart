@@ -568,10 +568,13 @@ class CameraController extends ChangeNotifier {
   /// Typed native-detector results for THIS session (vision-camera-style).
   Stream<DetectionResult> get detections => nativeDetections.map(DetectionResult.fromJson).where((r) => r != null).cast();
 
-  /// Runs a NATIVE ML Kit detector on this session's frames:
-  /// `"barcode"`, `"face"`, or `""` to stop.
+  /// Runs a NATIVE detector on this session's frames by registered name —
+  /// `"barcode"` / `"face"` (built-ins), `""` to stop, or the name of a custom
+  /// detector the host app registered via `NitraDetectors.register(...)`
+  /// (Kotlin/Swift). Results arrive on [detections] / [nativeDetections].
   ///
-  /// Prefer [startDetector] / [stopDetector] + the typed [detections] stream.
+  /// For the built-ins prefer [startDetector] / [stopDetector]; use this string
+  /// overload to select a custom registered detector.
   void setNativeDetector(String detector) {
     _requireInitialized();
     _native.setNativeDetector(_textureId!, detector);
@@ -604,6 +607,62 @@ class CameraController extends ChangeNotifier {
       // (the native side reports that as a well-formed empty array).
       throw SessionException.malformedPayload('concurrent-camera-IDs', e);
     }
+  }
+
+  /// Turns the raw concurrent-camera ID combinations into typed
+  /// [ConcurrentCameraSet]s using the enumerated [devices]. A combo is dropped
+  /// if any of its IDs is not present in [devices] (a stale/foreign id). Pure —
+  /// no native calls, so it is unit-testable off-device.
+  static List<ConcurrentCameraSet> resolveConcurrentSets(
+    List<List<String>> idCombos,
+    List<CameraDeviceInfo> devices,
+  ) {
+    final byId = {for (final d in devices) d.id: d};
+    final sets = <ConcurrentCameraSet>[];
+    for (final combo in idCombos) {
+      final resolved = <CameraDeviceInfo>[];
+      var complete = true;
+      for (final id in combo) {
+        final d = byId[id];
+        if (d == null) {
+          complete = false;
+          break;
+        }
+        resolved.add(d);
+      }
+      if (complete && resolved.isNotEmpty) {
+        sets.add(ConcurrentCameraSet(resolved));
+      }
+    }
+    return sets;
+  }
+
+  /// The first [ConcurrentCameraSet] that contains a device facing [a] and
+  /// (when given) [b] — e.g. `pickConcurrentSet(sets, a: back, b: front)` for a
+  /// main-plus-selfie layout. Returns null when no combination qualifies.
+  static ConcurrentCameraSet? pickConcurrentSet(
+    List<ConcurrentCameraSet> sets, {
+    required CameraPosition a,
+    CameraPosition? b,
+  }) {
+    for (final s in sets) {
+      if (s.byPosition(a) == null) continue;
+      if (b != null && s.byPosition(b) == null) continue;
+      return s;
+    }
+    return null;
+  }
+
+  /// Convenience: the platform's concurrent-camera combinations as typed
+  /// [ConcurrentCameraSet]s (combines [getConcurrentCameraIds] with
+  /// [getAvailableCameraDevices]). Empty when multi-cam is unsupported.
+  static Future<List<ConcurrentCameraSet>> getConcurrentCameraSets({
+    NitroCamera? native,
+  }) async {
+    final n = native ?? NitroCamera.instance;
+    final combos = getConcurrentCameraIds(native: n);
+    final devices = await getAvailableCameraDevices(native: n);
+    return resolveConcurrentSets(combos, devices);
   }
 
   // ---- Photo capture ----

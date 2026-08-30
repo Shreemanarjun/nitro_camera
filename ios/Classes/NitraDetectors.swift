@@ -21,7 +21,7 @@ import Vision
 /// interval. Empty result sets are still emitted (so UIs can clear stale
 /// highlights) but rate-limited to one per 500 ms. Results that complete after
 /// `stop()` / a detector swap are suppressed.
-enum NitraDetectors {
+public enum NitraDetectors {
 
     /// Minimum interval between detection dispatches per texture (~10 Hz).
     private static let minDetectIntervalMs: Double = 100
@@ -56,14 +56,19 @@ enum NitraDetectors {
         let state = obtainState(textureId: textureId, detector: detector)
         if state.disabled { return }
 
-        guard detector == "barcode" || detector == "face" else {
-            // Report once per activation, then stay silent until stop().
-            state.disabled = true
-            onResult(errorJson(
-                detector: detector,
-                message: "Unknown detector '\(detector)' — supported detectors: barcode, face"))
-            return
+        // Resolve the engine from the registry (lazily, cached on the state).
+        if state.engine == nil {
+            guard let factory = engineFactory(detector) else {
+                // Report once per activation, then stay silent until stop().
+                state.disabled = true
+                onResult(errorJson(
+                    detector: detector,
+                    message: "Unknown detector '\(detector)' — registered detectors: \(registeredNames().joined(separator: ", "))"))
+                return
+            }
+            state.engine = factory()
         }
+        let engine = state.engine!
 
         // Drop-while-busy + minimum interval between detections.
         let now = ProcessInfo.processInfo.systemUptime * 1000
@@ -74,9 +79,9 @@ enum NitraDetectors {
 
         detectQueue.async {
             defer { state.endDetection() }
-            // Vision failure → silent drop (mirrors Android's onDone(null, 0)).
-            guard let results = runVision(
-                detector: detector, pixelBuffer: pixelBuffer, width: width, height: height)
+            // Detector failure → silent drop (mirrors Android's onDone(null, 0)).
+            guard let results = engine.detect(
+                pixelBuffer: pixelBuffer, width: width, height: height)
             else { return }
 
             // Suppress results that complete after stop() / a detector swap.
@@ -107,50 +112,48 @@ enum NitraDetectors {
         states[textureId] = nil
     }
 
-    // MARK: - Vision
+    // MARK: - Native detector plugin registry
 
-    /// Performs one synchronous Vision request (on `detectQueue`) and maps the
-    /// observations into Android-compatible result dictionaries. Returns nil
-    /// on Vision failure.
-    private static func runVision(
-        detector: String,
-        pixelBuffer: CVPixelBuffer,
-        width: Int,
-        height: Int
-    ) -> [[String: Any]]? {
-        let request: VNImageBasedRequest = (detector == "barcode")
-            ? VNDetectBarcodesRequest()
-            : VNDetectFaceRectanglesRequest()
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            return nil
-        }
+    // Open registry (vision-camera FrameProcessorPluginRegistry parity): host
+    // apps register a custom native detector by name, then select it from Dart
+    // via setNativeDetector(textureId, name). "barcode" / "face" are built-ins.
+    private static var registry: [String: () -> DetectorEngine] = [
+        "barcode": { BarcodeVisionEngine() },
+        "face":    { FaceVisionEngine() },
+    ]
+    private static let registryLock = NSLock()
 
-        let w = Double(width)
-        let h = Double(height)
-        if detector == "barcode" {
-            let observations = (request.results as? [VNBarcodeObservation]) ?? []
-            return observations.map { obs in
-                [
-                    "text":   obs.payloadStringValue ?? "",
-                    "format": obs.symbology.rawValue,
-                    "bounds": pixelBounds(obs.boundingBox, w: w, h: h),
-                ]
-            }
-        } else {
-            let observations = (request.results as? [VNFaceObservation]) ?? []
-            return observations.map { obs in
-                ["bounds": pixelBounds(obs.boundingBox, w: w, h: h)]
-            }
-        }
+    /// Registers a native detector [factory] under [name], overwriting any
+    /// previous binding. Call once at app start, then drive it from Dart with
+    /// `controller.startDetector("\(name)")`. The engine is created lazily the
+    /// first time that detector runs; each `detect` result is delivered to Dart
+    /// on the detection event stream.
+    public static func register(_ name: String, factory: @escaping () -> DetectorEngine) {
+        registryLock.lock(); defer { registryLock.unlock() }
+        registry[name] = factory
+    }
+
+    /// Removes a registered detector. No-op if `name` was not registered.
+    public static func unregister(_ name: String) {
+        registryLock.lock(); defer { registryLock.unlock() }
+        registry[name] = nil
+    }
+
+    /// Names of all registered detectors (built-ins + host-registered), sorted.
+    public static func registeredNames() -> [String] {
+        registryLock.lock(); defer { registryLock.unlock() }
+        return registry.keys.sorted()
+    }
+
+    private static func engineFactory(_ name: String) -> (() -> DetectorEngine)? {
+        registryLock.lock(); defer { registryLock.unlock() }
+        return registry[name]
     }
 
     /// Vision returns NORMALIZED rects with a BOTTOM-LEFT origin; convert to
     /// PIXEL coordinates with a TOP-LEFT origin as `[left, top, right, bottom]`
     /// (y_topleft = 1 - y - height, then scale by the buffer dimensions).
-    private static func pixelBounds(_ rect: CGRect, w: Double, h: Double) -> [Int] {
+    static func pixelBounds(_ rect: CGRect, w: Double, h: Double) -> [Int] {
         let left   = Double(rect.origin.x) * w
         let top    = (1.0 - Double(rect.origin.y) - Double(rect.height)) * h
         let right  = (Double(rect.origin.x) + Double(rect.width)) * w
@@ -188,12 +191,60 @@ enum NitraDetectors {
     }
 }
 
+/// A native detector plugin — the public SPI for `NitraDetectors.register`.
+///
+/// Host apps implement this with their own library (Vision, Core ML, OpenCV, …)
+/// and register a factory. Each `detect` returns Android-compatible result
+/// dictionaries (JSON-encodable) that are delivered verbatim to Dart on the
+/// detection event stream; return nil to drop the frame silently.
+public protocol DetectorEngine {
+    /// Analyzes one upright pixel buffer on a background queue. `width`/`height`
+    /// are the buffer dimensions; return `[left, top, right, bottom]` pixel
+    /// bounds with a TOP-LEFT origin to match the built-ins.
+    func detect(pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> [[String: Any]]?
+}
+
+/// Built-in barcode detector (Vision `VNDetectBarcodesRequest`).
+struct BarcodeVisionEngine: DetectorEngine {
+    func detect(pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> [[String: Any]]? {
+        let request = VNDetectBarcodesRequest()
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+        do { try handler.perform([request]) } catch { return nil }
+        let w = Double(width), h = Double(height)
+        let observations = request.results ?? []
+        return observations.map { obs in
+            [
+                "text":   obs.payloadStringValue ?? "",
+                "format": obs.symbology.rawValue,
+                "bounds": NitraDetectors.pixelBounds(obs.boundingBox, w: w, h: h),
+            ]
+        }
+    }
+}
+
+/// Built-in face detector (Vision `VNDetectFaceRectanglesRequest`).
+struct FaceVisionEngine: DetectorEngine {
+    func detect(pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> [[String: Any]]? {
+        let request = VNDetectFaceRectanglesRequest()
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+        do { try handler.perform([request]) } catch { return nil }
+        let w = Double(width), h = Double(height)
+        let observations = request.results ?? []
+        return observations.map { obs in
+            ["bounds": NitraDetectors.pixelBounds(obs.boundingBox, w: w, h: h)]
+        }
+    }
+}
+
 /// Mutable per-texture detector state. The throttle fields are shared between
 /// the camera frame queue and `detectQueue`, so they are guarded by a lock;
 /// `disabled` is only touched on the camera frame queue.
 private final class DetectorState {
     let detector: String
     var disabled = false
+    /// The engine instance for this detector (lazily created from the registry,
+    /// only ever set/read on the camera frame queue).
+    var engine: DetectorEngine?
 
     private let lock = NSLock()
     private var inFlight = false

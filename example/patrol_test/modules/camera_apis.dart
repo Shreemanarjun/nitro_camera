@@ -149,6 +149,20 @@ final class CameraApis extends Module {
     c.setAutoFocus(AutoFocusMode.continuous);
     c.setWhiteBalance(5600);
     c.setWhiteBalance(0);
+    // Manual focus distance + manual exposure (ISO/shutter), then restore auto.
+    // Extreme values must clamp natively, never throw an uncatchable NSException.
+    c.setFocusDistance(0.8);
+    c.setFocusDistance(1.0);
+    c.setFocusDistance(-1); // restore AF
+    c.setManualExposure(
+      iso: 400,
+      exposureDuration: const Duration(microseconds: 20000),
+    );
+    c.setManualExposure(
+      iso: 999999,
+      exposureDuration: const Duration(seconds: 10),
+    ); // clamps
+    c.setAutoExposure();
     c.setHdr(enabled: true);
     c.setHdr(enabled: false);
     c.setLowLightBoost(enabled: true);
@@ -442,6 +456,74 @@ final class CameraApis extends Module {
       expect(d.frameWidth, greaterThan(0));
     }
     await pumpFor(const Duration(milliseconds: 500));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// High-speed (slow-mo) recording: records at 240fps or cleanly declines when
+  /// the device advertises no high-speed config, and — critically — the
+  /// high-speed → normal session swap leaves the camera HEALTHY (a plain
+  /// recording still starts + stops afterward; guards the persistent-surface
+  /// teardown that once crashed the camera).
+  Future<void> verifyHighSpeedRecording() async {
+    final c = _ctrl;
+    final dir = await getTemporaryDirectory();
+    final path =
+        '${dir.path}/patrol_slowmo_${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+    final started = await c.startHighSpeedRecording(path, fps: 240);
+    if (started) {
+      expect(c.isRecording, isTrue);
+      await pumpFor(const Duration(seconds: 1));
+      final rec = await c.stopHighSpeedRecording();
+      expect(c.isRecording, isFalse);
+      expect(rec.path, isNotEmpty);
+      final f = File(rec.path);
+      expect(f.existsSync(), isTrue);
+      expect(rec.fileSize, greaterThan(0));
+      expect(rec.reason, RecordingFinishedReason.stopped);
+      f.deleteSync();
+    } else {
+      expect(c.isRecording, isFalse);
+    }
+
+    final normalPath =
+        '${dir.path}/patrol_after_slowmo_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    await c.startRecording(normalPath);
+    expect(c.isRecording, isTrue);
+    await pumpFor(const Duration(milliseconds: 800));
+    final after = await c.stopRecording();
+    final af = File(after.path);
+    if (af.existsSync()) af.deleteSync();
+    await pumpFor(const Duration(milliseconds: 500));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// A custom NATIVE detector the example registers from the host app
+  /// (MainActivity / AppDelegate) via `NitraDetectors.register("meanLuma")` —
+  /// the open native-plugin registry. Selected by name; emits mean scene
+  /// luminance (0..255) every frame, so a real camera yields assertable results.
+  Future<void> verifyCustomNativeDetector() async {
+    final c = _ctrl;
+    final results = <Map<String, dynamic>>[];
+    final sub = c.nativeDetections.listen(results.add);
+    c.setNativeDetector('meanLuma');
+    await pumpUntil(
+      () => results.isNotEmpty,
+      reason: 'a host-registered custom native detector emits detections',
+    );
+
+    final r = results.last;
+    expect(r['detector'], 'meanLuma');
+    final list = (r['results'] as List).cast<Map<String, dynamic>>();
+    expect(list, isNotEmpty);
+    final luma = (list.first['luma'] as num).toInt();
+    expect(luma, inInclusiveRange(0, 255));
+
+    c.setNativeDetector('');
+    await sub.cancel();
+    await pumpFor(const Duration(milliseconds: 400));
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
   }

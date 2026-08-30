@@ -232,6 +232,47 @@ class CameraDeviceInfo {
   String toString() => 'CameraDeviceInfo($id, $name)';
 }
 
+/// A set of cameras that can stream SIMULTANEOUSLY (multi-cam — Android API 30+
+/// concurrent cameras / iOS `AVCaptureMultiCamSession`). Produced from the raw
+/// ID combinations by [CameraController.resolveConcurrentSets] /
+/// [CameraController.getConcurrentCameraSets], so an app can select a pairing
+/// (e.g. back + front) by device rather than cross-referencing ID strings.
+class ConcurrentCameraSet {
+  /// The devices in this combination, in the platform-reported order.
+  final List<CameraDeviceInfo> devices;
+  const ConcurrentCameraSet(this.devices);
+
+  /// The first device facing [position] in this set, or null if it has none.
+  CameraDeviceInfo? byPosition(CameraPosition position) {
+    for (final d in devices) {
+      if (d.position == position) return d;
+    }
+    return null;
+  }
+
+  /// The first device with the given [lens] in this set, or null.
+  CameraDeviceInfo? byLens(CameraLensType lens) {
+    for (final d in devices) {
+      if (d.lensType == lens) return d;
+    }
+    return null;
+  }
+
+  /// The back-facing device in this set, if any.
+  CameraDeviceInfo? get back => byPosition(CameraPosition.back);
+
+  /// The front-facing device in this set, if any.
+  CameraDeviceInfo? get front => byPosition(CameraPosition.front);
+
+  /// True when this set pairs a back-facing and a front-facing camera — the
+  /// canonical multi-cam layout (e.g. PiP selfie over the main feed).
+  bool get isBackFront => back != null && front != null;
+
+  @override
+  String toString() =>
+      'ConcurrentCameraSet(${devices.map((d) => d.id).join(' + ')})';
+}
+
 /// A capture format available on a [CameraDeviceInfo].
 ///
 /// Mirrors vision-camera's `CameraDeviceFormat`.

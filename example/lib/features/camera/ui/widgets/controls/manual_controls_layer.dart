@@ -20,17 +20,24 @@ class ManualControlsLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Returns a plain Stack (no Positioned root) so it can sit under
+    // _HideWhileRecording; the caller wraps it in Positioned.fill.
     return Watch((context) {
-      if (!cameraStore.manualPanelOpen.value) return const SizedBox.shrink();
-      return const Positioned.fill(
-        child: Stack(
-          children: [
-            // Rack-focus rail — centred on the right edge, clear of the tray.
-            Positioned(right: 12, top: 0, bottom: 0, child: Center(child: _FocusRail())),
-            // Exposure wheels sit just above the bottom capture controls.
-            Positioned(left: 0, right: 0, bottom: 170, child: _ExposureWheels()),
-          ],
-        ),
+      // Only meaningful in PHOTO/VIDEO — the pill that opens it lives there.
+      final mode = cameraStore.mode.value;
+      if (!cameraStore.manualPanelOpen.value || mode == 'SCANNER') {
+        return const SizedBox.shrink();
+      }
+      return const Stack(
+        children: [
+          // Rack-focus rail — right edge, anchored in the upper region so it
+          // stays clear of the exposure wheels below (bottom: 300 reserves that
+          // band for the wheels + chrome).
+          Positioned(right: 12, top: 0, bottom: 300, child: Center(child: _FocusRail())),
+          // Exposure wheels sit clear ABOVE the bottom chrome (pro-strip pills
+          // + mode tabs + capture row, ~235 pt of fixed bottom-anchored UI).
+          Positioned(left: 0, right: 0, bottom: 248, child: _ExposureWheels()),
+        ],
       );
     });
   }
@@ -189,16 +196,19 @@ class _Wheel extends StatelessWidget {
     return Row(
       children: [
         SizedBox(
-          width: 68,
+          width: 76,
           child: Padding(
             padding: const EdgeInsets.only(left: 16),
             child: Text(
               title,
+              maxLines: 1,
+              overflow: TextOverflow.visible,
+              softWrap: false,
               style: const TextStyle(
                 color: Colors.white38,
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
+                letterSpacing: 0.8,
               ),
             ),
           ),

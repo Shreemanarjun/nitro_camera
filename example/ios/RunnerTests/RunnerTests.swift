@@ -1,12 +1,14 @@
-import Flutter
-import UIKit
 import XCTest
+import integration_test
 
+// Bridges the Dart integration_test suite into the RunnerTests XCUITest target
+// so it runs on a physical device over CoreDevice (`xcodebuild test`) — the
+// path that works when the iPhone is tethered WIRELESSLY (plain
+// `flutter test integration_test` cannot launch on a wireless iOS device).
 class RunnerTests: XCTestCase {
-
-  func testExample() {
-    // If you add code to the Runner application, consider adding tests here.
-    // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
+  func testIntegrationTest() {
+    var testResult: NSString?
+    let ok = IntegrationTestIosTest().testIntegrationTest(&testResult)
+    XCTAssertTrue(ok, (testResult as String?) ?? "integration test failed")
   }
-
 }

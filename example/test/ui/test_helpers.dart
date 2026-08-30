@@ -80,6 +80,10 @@ void resetStore() {
   cameraStore.currentFilterName.value = 'NORMAL';
   cameraStore.capturedMedia.value = const [];
   cameraStore.lastThumbnailPath.value = null;
+  cameraStore.manualPanelOpen.value = false;
+  cameraStore.focusDistance.value = -1;
+  cameraStore.manualIso.value = -1;
+  cameraStore.manualShutterNs.value = -1;
 }
 
 /// Standard phone-sized test surface (390×844 logical), so the full quick

@@ -118,48 +118,9 @@ class ProControlsBody extends StatelessWidget {
           );
         }),
 
-        // Manual focus distance (0 = far, 1 = near; AUTO restores auto-focus).
-        Watch((_) {
-          final fd = s.focusDistance.value;
-          return _SliderRow(
-            label: 'FOCUS',
-            value: fd < 0 ? 0.0 : fd,
-            min: 0,
-            max: 1,
-            display: fd < 0 ? 'AUTO' : fd.toStringAsFixed(2),
-            onChanged: s.setFocusDistance,
-            trailing: _MiniBtn('AUTO', () => s.setFocusDistance(-1)),
-          );
-        }),
-
-        // Manual ISO
-        Watch((_) {
-          final iso = s.manualIso.value;
-          return _SliderRow(
-            label: 'ISO',
-            value: iso < 0 ? 100 : iso.clamp(50, 3200),
-            min: 50,
-            max: 3200,
-            display: iso < 0 ? 'AUTO' : iso.round().toString(),
-            onChanged: s.setManualIso,
-            trailing: _MiniBtn('AUTO', s.setAutoExposure),
-          );
-        }),
-
-        // Manual shutter (1/x s). Slider is the denominator 4..8000.
-        Watch((_) {
-          final ns = s.manualShutterNs.value;
-          final denom = ns <= 0 ? 60.0 : (1e9 / ns);
-          return _SliderRow(
-            label: 'SHUTTER',
-            value: denom.clamp(4, 8000),
-            min: 4,
-            max: 8000,
-            display: ns <= 0 ? 'AUTO' : '1/${denom.round()}s',
-            onChanged: (d) => s.setManualShutter(1e9 / d),
-            trailing: _MiniBtn('AUTO', s.setAutoExposure),
-          );
-        }),
+        // Manual focus + shutter + ISO now live in the interactive on-preview
+        // MANUAL layer (rack-focus rail + stop wheels) — see
+        // ManualControlsLayer — instead of raw sliders here.
 
         // White balance
         Watch((_) {

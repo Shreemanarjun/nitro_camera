@@ -24,6 +24,8 @@ CameraDeviceFormat testFormat({
 
 CameraDeviceInfo testDevice({
   String id = 'cam0',
+  CameraPosition position = CameraPosition.back,
+  CameraLensType lensType = CameraLensType.wideAngle,
   double minZoom = 1.0,
   double maxZoom = 8.0,
   int sensorOrientation = 270,
@@ -33,8 +35,8 @@ CameraDeviceInfo testDevice({
 }) => CameraDeviceInfo(
   id: id,
   name: 'Test Camera',
-  position: CameraPosition.back,
-  lensType: CameraLensType.wideAngle,
+  position: position,
+  lensType: lensType,
   sensorOrientation: sensorOrientation,
   minZoom: minZoom,
   maxZoom: maxZoom,

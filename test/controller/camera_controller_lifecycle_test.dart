@@ -625,6 +625,91 @@ void main() {
       );
     });
 
+    test('resolveConcurrentSets maps ID combos to typed device sets', () {
+      final devices = [
+        testDevice(id: '0', position: CameraPosition.back),
+        testDevice(id: '1', position: CameraPosition.front),
+        testDevice(id: '2', position: CameraPosition.back),
+      ];
+      final sets = CameraController.resolveConcurrentSets(
+        [
+          ['0', '1'],
+          ['0', '2'],
+        ],
+        devices,
+      );
+      expect(sets, hasLength(2));
+      expect(sets.first.devices.map((d) => d.id), ['0', '1']);
+      expect(sets.first.isBackFront, isTrue); // back(0) + front(1)
+      expect(sets.first.back!.id, '0');
+      expect(sets.first.front!.id, '1');
+      expect(sets[1].isBackFront, isFalse); // back(0) + back(2)
+    });
+
+    test('resolveConcurrentSets drops a combo with an unknown ID', () {
+      final devices = [testDevice(id: '0'), testDevice(id: '1')];
+      final sets = CameraController.resolveConcurrentSets(
+        [
+          ['0', '1'],
+          ['0', '9'], // 9 is not enumerated → dropped
+        ],
+        devices,
+      );
+      expect(sets, hasLength(1));
+      expect(sets.single.devices.map((d) => d.id), ['0', '1']);
+    });
+
+    test('pickConcurrentSet finds a back+front combination', () {
+      final devices = [
+        testDevice(id: '0', position: CameraPosition.back),
+        testDevice(id: '1', position: CameraPosition.back),
+        testDevice(id: '2', position: CameraPosition.front),
+      ];
+      final sets = CameraController.resolveConcurrentSets(
+        [
+          ['0', '1'], // back + back
+          ['0', '2'], // back + front
+        ],
+        devices,
+      );
+      final pair = CameraController.pickConcurrentSet(
+        sets,
+        a: CameraPosition.back,
+        b: CameraPosition.front,
+      );
+      expect(pair, isNotNull);
+      expect(pair!.back!.id, '0');
+      expect(pair.front!.id, '2');
+
+      // No telephoto-facing combo exists → null.
+      expect(
+        CameraController.pickConcurrentSet(
+          sets,
+          a: CameraPosition.external,
+        ),
+        isNull,
+      );
+    });
+
+    test('getConcurrentCameraSets combines native combos + device list',
+        () async {
+      fake.concurrentCameraIdsJson = '[["back","front"]]';
+      fake.availableCameraDevicesJson = '''
+[{"id":"back","name":"Back","position":1,"lensType":1,"sensorOrientation":90,
+  "minZoom":1.0,"maxZoom":10.0,"neutralZoom":1.0,"hasFlash":true,"hasTorch":true,
+  "maxPhotoWidth":4032,"maxPhotoHeight":3024,"hardwareLevel":"full","formats":[]},
+ {"id":"front","name":"Front","position":0,"lensType":1,"sensorOrientation":270,
+  "minZoom":1.0,"maxZoom":4.0,"neutralZoom":1.0,"hasFlash":false,"hasTorch":false,
+  "maxPhotoWidth":3264,"maxPhotoHeight":2448,"hardwareLevel":"limited","formats":[]}]''';
+
+      final sets = await CameraController.getConcurrentCameraSets(native: fake);
+
+      expect(sets, hasLength(1));
+      expect(sets.single.isBackFront, isTrue);
+      expect(sets.single.back!.id, 'back');
+      expect(sets.single.front!.id, 'front');
+    });
+
   });
 
   group('the default bridge', () {

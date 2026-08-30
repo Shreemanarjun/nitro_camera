@@ -71,6 +71,12 @@ class VideoOutput(
     var isUsingPersistentSurface = false
         private set
 
+    // Serialises every persistent-surface lifecycle section. The post-record
+    // rearm runs on the camera thread while close() releases on an IO thread —
+    // without this lock release() can free the native PersistentSurface exactly
+    // as a concurrent rearm calls setInputSurface on it (uncatchable SIGSEGV).
+    private val persistentLock = Any()
+
     /** The pre-wired surface, or null when the persistent path is unavailable. */
     val persistentRecorderSurfaceOrNull: Surface?
         get() = persistentSurface?.takeIf { it.isValid }
@@ -81,17 +87,19 @@ class VideoOutput(
      * rejects it — callers must then fall back to the GL recording pipeline.
      */
     fun acquirePersistentRecorderSurface(): Surface? {
-        return try {
-            val surface = persistentSurface?.takeIf { it.isValid }
-                ?: MediaCodec.createPersistentInputSurface().also { persistentSurface = it }
-            if (dormantRecorder == null && !(isRecording && isUsingPersistentSurface)) {
-                dormantRecorder = createDormantRecorder(surface)
+        synchronized(persistentLock) {
+            return try {
+                val surface = persistentSurface?.takeIf { it.isValid }
+                    ?: MediaCodec.createPersistentInputSurface().also { persistentSurface = it }
+                if (dormantRecorder == null && !(isRecording && isUsingPersistentSurface)) {
+                    dormantRecorder = createDormantRecorder(surface)
+                }
+                surface
+            } catch (e: Exception) {
+                Log.w("NitroCamera", "Persistent recorder surface unavailable: ${e.message}")
+                releasePersistentSurface()
+                null
             }
-            surface
-        } catch (e: Exception) {
-            Log.w("NitroCamera", "Persistent recorder surface unavailable: ${e.message}")
-            releasePersistentSurface()
-            null
         }
     }
 
@@ -121,20 +129,38 @@ class VideoOutput(
 
     /** Re-arms the dormant warm-up recorder after a persistent-surface recording ends. */
     fun rearmPersistentSurface() {
-        val surface = persistentSurface?.takeIf { it.isValid } ?: return
-        if (isRecording || dormantRecorder != null) return
-        try {
-            dormantRecorder = createDormantRecorder(surface)
-        } catch (e: Exception) {
-            Log.w("NitroCamera", "rearmPersistentSurface failed: ${e.message}")
+        synchronized(persistentLock) {
+            val surface = persistentSurface?.takeIf { it.isValid } ?: return
+            if (isRecording || dormantRecorder != null) return
+            try {
+                dormantRecorder = createDormantRecorder(surface)
+            } catch (e: Exception) {
+                Log.w("NitroCamera", "rearmPersistentSurface failed: ${e.message}")
+            }
         }
     }
 
     private fun releasePersistentSurface() {
-        try { dormantRecorder?.release() } catch (_: Exception) {}
-        dormantRecorder = null
-        try { persistentSurface?.release() } catch (_: Exception) {}
-        persistentSurface = null
+        synchronized(persistentLock) {
+            try { dormantRecorder?.release() } catch (_: Exception) {}
+            dormantRecorder = null
+            try { persistentSurface?.release() } catch (_: Exception) {}
+            persistentSurface = null
+        }
+    }
+
+    /**
+     * Discards the persistent recorder surface + dormant recorder so the next
+     * [acquirePersistentRecorderSurface] creates a FRESH pair. Required after a
+     * high-speed session swap: the persistent surface is attached/detached from
+     * capture sessions during the swap, which can leave its native
+     * PersistentSurface handle dangling — reusing it later crashes natively in
+     * `MediaRecorder.setInputSurface` (uncatchable SIGSEGV). No-op while a
+     * persistent-surface recording is live.
+     */
+    fun resetPersistentSurface() {
+        if (isRecording && isUsingPersistentSurface) return
+        releasePersistentSurface()
     }
 
     private fun newRecorder(): MediaRecorder =
@@ -224,10 +250,13 @@ class VideoOutput(
         portrait: Boolean = false, // GL path: size the surface tall for upright portrait content
     ): Surface {
         // A persistent-surface recording takes the surface over from the dormant
-        // warm-up recorder.
+        // warm-up recorder (under the lock, so a concurrent rearm/release can't
+        // free the surface mid-handover).
         if (inputSurface != null && inputSurface === persistentSurface) {
-            try { dormantRecorder?.release() } catch (_: Exception) {}
-            dormantRecorder = null
+            synchronized(persistentLock) {
+                try { dormantRecorder?.release() } catch (_: Exception) {}
+                dormantRecorder = null
+            }
         }
 
         val recorder = newRecorder()

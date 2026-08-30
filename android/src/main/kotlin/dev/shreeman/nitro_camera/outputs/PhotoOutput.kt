@@ -378,7 +378,10 @@ class PhotoOutput(private val session: CameraSession) {
         session.captureSession = null
 
         try {
-            rawSession = suspendCancellableCoroutine<CameraCaptureSession> { cont ->
+            // Bound the session config too (the StateCallback normally always
+            // fires, but a wedged HAL could otherwise hang here forever).
+            rawSession = withTimeout(4_000) {
+              suspendCancellableCoroutine<CameraCaptureSession> { cont ->
                 try {
                     session.cameraDevice.createCaptureSession(
                         listOf(pSurface, rawReader.surface),
@@ -397,6 +400,7 @@ class PhotoOutput(private val session: CameraSession) {
                 } catch (e: Exception) {
                     if (cont.isActive) cont.resumeWith(Result.failure(e))
                 }
+              }
             }
 
             val imageDeferred = CompletableDeferred<android.media.Image>()
@@ -438,9 +442,13 @@ class PhotoOutput(private val session: CameraSession) {
                 }
             }, session.cameraHandler)
 
-            val image = withTimeout(10_000) { imageDeferred.await() }
+            // Fail FAST (4s, not 10s): a working HAL delivers a RAW frame in well
+            // under a second, so a longer wait only means the device is gating
+            // RAW (ColorOS) — a 20s freeze + black preview is bad UX. Bail quickly
+            // and let the finally block restore the live preview.
+            val image = withTimeout(4_000) { imageDeferred.await() }
             val totalResult = try {
-                withTimeout(10_000) { resultDeferred.await() }
+                withTimeout(4_000) { resultDeferred.await() }
             } catch (e: Exception) {
                 image.close()
                 throw e
@@ -497,6 +505,11 @@ class PhotoOutput(private val session: CameraSession) {
             try { rawSession?.close() } catch (_: Exception) {}
             try { rawReader.close() } catch (_: Exception) {}
             // Restore the normal preview session via the existing config path.
+            // NOTE: on a HAL that gated the RAW frame (ColorOS), the camera
+            // SERVICE blocks the next session config on its own ~10s
+            // waitUntilDrained — unavoidable from app code. The example limits
+            // the blast radius by disabling RAW after the first failure so this
+            // one-time freeze never repeats.
             if (!session.isClosed) session.startPreview()
         }
     }

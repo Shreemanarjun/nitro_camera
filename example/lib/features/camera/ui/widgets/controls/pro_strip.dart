@@ -153,6 +153,7 @@ class _ProStripState extends State<ProStrip> {
   // ── Pill sets per mode ──────────────────────────────────────────────────
 
   List<Widget> _photoPills() => [
+    _manualPill(),
     Watch((context) {
       final q = cameraStore.photoQuality.value;
       return _ProPill(
@@ -214,6 +215,7 @@ class _ProStripState extends State<ProStrip> {
   ];
 
   List<Widget> _videoPills() => [
+    _manualPill(),
     Watch((context) {
       final v = cameraStore.videoStabilization.value;
       return _ProPill(
@@ -280,6 +282,22 @@ class _ProStripState extends State<ProStrip> {
   ];
 
   // Shared pills (PHOTO + VIDEO).
+
+  /// Opens the on-preview interactive manual focus + exposure layer. Active
+  /// while the layer is up or any manual value is engaged.
+  Widget _manualPill() => Watch((context) {
+    final open = cameraStore.manualPanelOpen.value;
+    final engaged = cameraStore.focusDistance.value >= 0 ||
+        cameraStore.manualIso.value > 0 ||
+        cameraStore.manualShutterNs.value > 0;
+    return _ProPill(
+      icon: Icons.tune_rounded,
+      label: 'MANUAL',
+      tooltip: 'Manual focus & exposure',
+      active: open || engaged,
+      onTap: () => cameraStore.manualPanelOpen.value = !open,
+    );
+  });
 
   Widget _hdrPill() => Watch((context) {
     final on = cameraStore.hdrEnabled.value;

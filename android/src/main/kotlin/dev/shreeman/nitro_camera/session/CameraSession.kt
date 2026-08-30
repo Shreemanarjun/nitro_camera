@@ -1386,8 +1386,13 @@ class CameraSession(
      *  the same open device. Safe to call from any thread. */
     private fun restoreNormalSessionAfterHighSpeed() {
         renderer.inputSurfaceTexture?.setDefaultBufferSize(resolvedSize.width, resolvedSize.height)
+        // The persistent recorder surface was churned through the session swap;
+        // drop it so startPreview() pre-wires a fresh one (a stale native handle
+        // crashes a later rearm in MediaRecorder.setInputSurface).
+        videoOutput.resetPersistentSurface()
         captureSession = null
         currentRequestBuilder = null
+        persistentSurfaceInSession = false
         if (!isClosed) startPreview()
     }
 
