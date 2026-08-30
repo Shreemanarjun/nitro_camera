@@ -58,7 +58,6 @@ dependencies:
   exif: ^3.3.0
   path: ^1.9.1
   get_thumbnail_video: ^0.7.3
-
 dev_dependencies:
   flutter_test:
     sdk: flutter

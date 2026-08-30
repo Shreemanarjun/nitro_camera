@@ -235,6 +235,16 @@ class _ProStripState extends State<ProStrip> {
       );
     }),
     Watch((context) {
+      final on = cameraStore.micEnabled.value;
+      return _ProPill(
+        icon: on ? Icons.mic_none_rounded : Icons.mic_off_rounded,
+        label: on ? 'MIC' : 'MIC OFF',
+        tooltip: 'Record audio with video',
+        active: on,
+        onTap: () => cameraStore.micEnabled.value = !on,
+      );
+    }),
+    Watch((context) {
       final on = cameraStore.showFpsGraph.value;
       return _ProPill(
         icon: Icons.show_chart_rounded,

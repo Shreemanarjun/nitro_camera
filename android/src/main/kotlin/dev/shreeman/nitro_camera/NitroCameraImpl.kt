@@ -661,6 +661,14 @@ class NitroCameraImpl(
     private var orientationListener: android.view.OrientationEventListener? = null
     private var lastOrientationBucket = -1
 
+    override fun setKeepScreenOn(enabled: Long) {
+        val act = activity ?: return
+        act.runOnUiThread {
+            val flag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            if (enabled != 0L) act.window.addFlags(flag) else act.window.clearFlags(flag)
+        }
+    }
+
     override fun enableOrientationEvents(enabled: Long) {
         if (enabled != 0L) {
             if (orientationListener != null) return

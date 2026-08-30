@@ -554,6 +554,12 @@ abstract class NitroCamera extends HybridObject {
   /// [enabled]: 1 = on, 0 = off.
   void enableDeviceAvailabilityEvents(int enabled);
 
+  /// Keeps the screen awake while the camera UI is up — Android sets
+  /// `FLAG_KEEP_SCREEN_ON` on the activity window, iOS sets
+  /// `isIdleTimerDisabled`. [enabled]: 1 = on, 0 = off. (An FFI spec method,
+  /// so no extra plugin / method channel is needed.)
+  void setKeepScreenOn(int enabled);
+
   /// Runs a NATIVE ML detector on the session's frames, emitting
   /// [CameraEventType.detection] events with a JSON payload per hit.
   /// [detector]: "barcode" | "face" | "" (off). Requires the host app to add

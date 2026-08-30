@@ -40,9 +40,10 @@ class BottomControls extends StatelessWidget {
             children: [
               const SizedBox(height: 8),
 
-              // MODE SWIPER
-              SizedBox(
-                height: 46,
+              // MODE SWIPER — hidden while recording (can't switch mode mid-clip).
+              if (!isRecording)
+                SizedBox(
+                  height: 46,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   shrinkWrap: true,
@@ -91,30 +92,8 @@ class BottomControls extends StatelessWidget {
                   }).toList(),
                 ),
               ),
-              // RECORDING TIMER
-              if (isRecording)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.danger,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Watch((context) {
-                    final duration = cameraStore.recordingDuration.value;
-                    return Text(
-                      _formatDuration(duration),
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                    );
-                  }),
-                ),
+              // The recording timer lives in the top-center REC pill
+              // (VideoRecordingHUD) — a single source, no duplicate here.
               const SizedBox(height: 12),
 
               // MAIN CONTROLS
@@ -233,11 +212,6 @@ class BottomControls extends StatelessWidget {
     });
   }
 
-  String _formatDuration(int seconds) {
-    final m = (seconds ~/ 60).toString().padLeft(2, '0');
-    final s = (seconds % 60).toString().padLeft(2, '0');
-    return "$m:$s";
-  }
 }
 
 /// Camera-flip control: each tap spins the glyph a half turn in sync with the

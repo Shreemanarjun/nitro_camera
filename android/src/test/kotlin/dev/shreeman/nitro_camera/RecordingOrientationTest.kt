@@ -64,6 +64,36 @@ class RecordingOrientationTest {
         assertEquals(1920 to 1080, RecordingOrientation.orientSize(1080, 1920, portrait = false))
     }
 
+    // --- bestEncoderSize (the aspect / squish fix) ------------------------
+
+    // A OnePlus-like MediaRecorder size list (landscape, long-edge = width).
+    private val sizes = listOf(
+        1920 to 1080, // 16:9
+        1920 to 1440, // 4:3 — larger AREA, the old picker chose this
+        1280 to 720,  // 16:9
+        640 to 480,   // 4:3
+    )
+
+    @Test fun `16-9 session picks the 16-9 size, not the larger 4-3 one`() {
+        val best = RecordingOrientation.bestEncoderSize(sizes, 16f / 9f, 1920)
+        assertEquals(1920 to 1080, best) // NOT 1920x1440
+    }
+
+    @Test fun `4-3 session picks the 4-3 size`() {
+        val best = RecordingOrientation.bestEncoderSize(sizes, 4f / 3f, 1920)
+        assertEquals(1920 to 1440, best)
+    }
+
+    @Test fun `respects the max-dimension cap`() {
+        val withUhd = sizes + (3840 to 2160)
+        val best = RecordingOrientation.bestEncoderSize(withUhd, 16f / 9f, 1920)
+        assertEquals(1920 to 1080, best) // 4K excluded by maxDim
+    }
+
+    @Test fun `empty list returns null`() {
+        assertEquals(null, RecordingOrientation.bestEncoderSize(emptyList(), 16f / 9f, 1920))
+    }
+
     @Test fun `odd dimensions are clamped even (H_264)`() {
         val (w, h) = RecordingOrientation.orientSize(1921, 1081, portrait = false)
         assertEquals(0, w % 2)

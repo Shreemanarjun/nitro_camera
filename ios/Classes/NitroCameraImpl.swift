@@ -478,6 +478,12 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     // MARK: - Global observers (see OrientationManager / CameraDevicesObserver)
 
+    public func setKeepScreenOn(enabled: Int64) {
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = enabled != 0
+        }
+    }
+
     public func enableOrientationEvents(enabled: Int64) {
         orientationManager.setEnabled(enabled != 0)
     }

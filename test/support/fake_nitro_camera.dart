@@ -390,6 +390,9 @@ class FakeNitroCamera extends NitroCamera {
       _rec('enableOrientationEvents', [enabled], null);
 
   @override
+  void setKeepScreenOn(int enabled) => _rec('setKeepScreenOn', [enabled], null);
+
+  @override
   void enableDeviceAvailabilityEvents(int enabled) =>
       _rec('enableDeviceAvailabilityEvents', [enabled], null);
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
 import '../../theme/app_theme.dart';
@@ -46,35 +47,11 @@ class _FlashOverlayState extends State<FlashOverlay>
   }
 }
 
-/// REC pill with a pulsing dot + elapsed time.
-class VideoRecordingHUD extends StatefulWidget {
+/// REC pill with a pulsing dot + elapsed time. The single recording timer —
+/// reads the store's [recordingDuration] (synced with the native start) rather
+/// than an independent widget-local clock, so it never drifts.
+class VideoRecordingHUD extends StatelessWidget {
   const VideoRecordingHUD({super.key});
-  @override
-  State<VideoRecordingHUD> createState() => _VideoRecordingHUDState();
-}
-
-class _VideoRecordingHUDState extends State<VideoRecordingHUD> {
-  late DateTime _startTime;
-  late Timer _timer;
-  String _timeStr = "00:00";
-
-  @override
-  void initState() {
-    super.initState();
-    _startTime = DateTime.now();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      final diff = DateTime.now().difference(_startTime);
-      final m = diff.inMinutes.toString().padLeft(2, '0');
-      final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
-      if (mounted) setState(() => _timeStr = "$m:$s");
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -94,15 +71,20 @@ class _VideoRecordingHUDState extends State<VideoRecordingHUD> {
             children: [
               const _PulseDot(),
               const SizedBox(width: 10),
-              Text(
-                _timeStr,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
-                  fontSize: 16,
-                ),
-              ),
+              Watch((context) {
+                final s = cameraStore.recordingDuration.value;
+                final str =
+                    '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+                return Text(
+                  str,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'monospace',
+                    fontSize: 16,
+                  ),
+                );
+              }),
             ],
           ),
         ),

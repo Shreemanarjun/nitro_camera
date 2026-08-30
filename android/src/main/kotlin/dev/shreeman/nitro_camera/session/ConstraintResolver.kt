@@ -110,19 +110,17 @@ object ConstraintResolver {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val supported = map?.getOutputSizes(MediaRecorder::class.java)
         val maxRecordDim = 1920
-        val target = supported
-            ?.filter { Math.max(it.width, it.height) <= maxRecordDim }
-            ?.maxByOrNull { it.width.toLong() * it.height } // largest ≤1080p
-            ?: supported?.minByOrNull {
-                Math.abs(it.width.toLong() * it.height - width.toLong() * height)
-            }
-            ?: Size(width, height)
+        // Pick the encoder size matching the SESSION aspect ratio (16:9 for a
+        // 1920×1080 request), not the largest by area — that grabbed a 4:3 size
+        // for a 16:9 session and stretched the recording (the squish bug).
+        val targetAspect = Math.max(width, height).toFloat() / Math.max(1, Math.min(width, height))
+        val pairs = supported?.map { it.width to it.height } ?: emptyList()
+        val best = RecordingOrientation.bestEncoderSize(pairs, targetAspect, maxRecordDim)
+            ?: (width to height)
         // Encoder output sizes are reported LANDSCAPE (long edge = width). The GL
         // pipeline draws already-upright content, so a portrait recording needs a
-        // TALL surface — otherwise the upright portrait frame is squished into a
-        // 16:9 landscape surface (the "video is squished/sideways" bug). The
-        // persistent/raw-sensor path keeps landscape (portrait=false) + a hint.
-        val (w, h) = RecordingOrientation.orientSize(target.width, target.height, portrait)
+        // TALL surface; the persistent/raw-sensor path keeps landscape + a hint.
+        val (w, h) = RecordingOrientation.orientSize(best.first, best.second, portrait)
         return Size(w, h)
     }
 }

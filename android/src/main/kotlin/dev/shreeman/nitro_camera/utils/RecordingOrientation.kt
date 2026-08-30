@@ -33,4 +33,26 @@ object RecordingOrientation {
         val h = if (portrait) long else short
         return (if (w % 2 == 0) w else w - 1) to (if (h % 2 == 0) h else h - 1)
     }
+
+    /**
+     * Picks the encoder size (landscape long-edge form) whose aspect ratio best
+     * matches [targetAspect] (>=1, long/short), among [sizes] with long edge
+     * <= [maxDim]; ties broken by the largest area. This is the squish fix:
+     * choosing purely by area grabbed a 4:3 size for a 16:9 session, stretching
+     * the frame. [sizes] are (width, height) pairs. Returns null if empty.
+     */
+    fun bestEncoderSize(
+        sizes: List<Pair<Int, Int>>,
+        targetAspect: Float,
+        maxDim: Int,
+    ): Pair<Int, Int>? {
+        val eligible = sizes.filter { maxOf(it.first, it.second) <= maxDim }
+        val pool = eligible.ifEmpty { sizes }
+        return pool.minWithOrNull(
+            compareBy<Pair<Int, Int>> { s ->
+                val a = maxOf(s.first, s.second).toFloat() / minOf(s.first, s.second).coerceAtLeast(1)
+                Math.round(Math.abs(a - targetAspect) * 100) // 0.01 aspect buckets
+            }.thenByDescending { s -> s.first.toLong() * s.second }
+        )
+    }
 }

@@ -69,6 +69,9 @@ class CameraStore {
   // ── Quick-wins (vision-camera parity) ───────────────────────────────────────
   final videoCodec = signal(VideoCodec.h264);
   final geotagEnabled = signal(false);
+  /// Record audio with video (mic). Toggling reopens the session (audio is
+  /// an open-time field).
+  final micEnabled = signal(true);
   // RAW (DNG) photo capture — only offered when the device supports it.
   final rawPhoto = signal(false);
   // ── User-pluggable frame processor ──────────────────────────────────────────

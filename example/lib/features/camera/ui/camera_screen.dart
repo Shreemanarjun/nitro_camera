@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 import 'package:nitro_camera/debug.dart';
+import 'package:nitro_camera/native.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../gallery/ui/media_viewer_screen.dart';
@@ -37,11 +38,14 @@ class _CameraScreenState extends State<CameraScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Keep the screen awake on the camera screen (FFI spec method — no plugin).
+    NitroCamera.instance.setKeepScreenOn(1);
     cameraStore.init();
   }
 
   @override
   void dispose() {
+    NitroCamera.instance.setKeepScreenOn(0);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -174,6 +178,9 @@ class _CameraScreenState extends State<CameraScreen>
                     width: cameraStore.width.value,
                     height: cameraStore.height.value,
                     fps: cameraStore.fps.value,
+                    // Mic on/off toggle (UI). Audio is an open-time field, so
+                    // flipping it reopens the session. Default on.
+                    audio: cameraStore.micEnabled.value,
                     // Switches Texture ↔ platform view live (previewMode isn't a
                     // lifecycle field — no camera reopen).
                     previewMode: cameraStore.previewMode.value,
@@ -244,13 +251,14 @@ class _CameraScreenState extends State<CameraScreen>
               return FocusIndicator(key: ValueKey(offset), offset: offset);
             }),
 
-            // 3. Top controls (icon strip + config caption + quick panel; the
-            // SETTINGS entry lives inside the quick panel now).
-            const TopBar(),
-
-            // 4. Tray layer: sensor tray (front/back categories + lenses) and
-            // the collapsible filter tray — mutually exclusive, never overlap.
-            const Positioned.fill(child: TrayLayer()),
+            // 3. Top controls + 4. tray layer (sensor tray + pro-strip chips
+            // + filter tray). Hidden while recording — you can't change mode,
+            // lens or settings mid-clip, and leaving them up overlapped the
+            // recording timer.
+            const _HideWhileRecording(child: TopBar()),
+            const Positioned.fill(
+              child: _HideWhileRecording(child: TrayLayer()),
+            ),
 
             // 5. Scanner overlay (QR / 1D / 2D / ALL).
             Watch((context) {
@@ -330,5 +338,31 @@ class _CameraScreenState extends State<CameraScreen>
         );
       }),
     );
+  }
+}
+
+
+/// Fades a control out (and disables its hit-testing) while a recording is in
+/// progress, so the sparse recording view has no overlapping chrome.
+class _HideWhileRecording extends StatelessWidget {
+  final Widget child;
+  const _HideWhileRecording({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    // Watch tracks isRecording here (reading it in a plain build outside a
+    // Watch would never rebuild on change).
+    return Watch((context) {
+      final recording = cameraStore.isRecording.value;
+      return IgnorePointer(
+        ignoring: recording,
+        child: AnimatedOpacity(
+          opacity: recording ? 0 : 1,
+          duration: AppMotion.normal,
+          curve: AppMotion.curve,
+          child: child,
+        ),
+      );
+    });
   }
 }
