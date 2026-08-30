@@ -297,6 +297,7 @@ Future<void> _readmeScanner(CameraController controller) async {
     mode: ScanMode.continuous,
     confirmationFrames: 2,
     cooldown: const Duration(milliseconds: 1500),
+    windowFraction: 0.6,
   );
 
   await scanner.start(controller.frameStream);
@@ -347,6 +348,10 @@ Future<void> _readmeFrameProcessing(CameraController controller) async {
 
   // Documented FrameData fields.
   int probe(FrameData f) => f.width + f.height + f.format + f.bytesPerRow + f.effectiveBytesPerRow + (f.isMirrored ? 1 : 0) + f.bytes.length;
+
+  // Frame resizer (README frame-processing section).
+  FrameData shrink(FrameData f) => f.resizedToMaxEdge(320);
+  FrameData exact(FrameData f) => f.resized(320, 240);
 }
 
 // ---------------------------------------------------------------------------

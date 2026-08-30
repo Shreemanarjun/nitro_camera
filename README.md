@@ -320,6 +320,9 @@ final scanner = CodeScanner(
   mode: ScanMode.continuous,      // continuous | oneShot
   confirmationFrames: 2,          // same payload on N frames before confirming
   cooldown: const Duration(milliseconds: 1500),
+  windowFraction: 0.6,            // region of interest: centered square as a
+                                  // fraction of the short side (smaller = faster,
+                                  // rejects codes outside the box). Default 0.72.
 );
 
 await scanner.start(controller.frameStream);
@@ -363,6 +366,19 @@ processor.results.listen((luma) => print('brightness $luma'));
 `FrameData` exposes `bytes` (a copy owned by the worker), `width`, `height`,
 `format` (0 = YUV luma plane, 1 = BGRA), `bytesPerRow` (walk rows by
 `effectiveBytesPerRow`, not by `width`), and `isMirrored`.
+
+Downscale a frame before a heavier pass (e.g. an ML model) with the built-in
+resizer — a nearest-neighbour CPU resample that never touches the camera:
+
+```dart
+int meanLumaSmall(FrameData frame) {
+  final small = frame.resizedToMaxEdge(320); // cap long edge, keep aspect
+  // ...or frame.resized(320, 240) for an exact size.
+  var sum = 0;
+  for (var i = 0; i < small.bytes.length; i++) sum += small.bytes[i];
+  return sum ~/ small.bytes.length;
+}
+```
 
 ### Native ML detectors (ML Kit)
 
