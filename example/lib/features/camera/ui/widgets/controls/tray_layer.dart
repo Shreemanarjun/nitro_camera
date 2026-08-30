@@ -40,23 +40,27 @@ class TrayLayer extends StatelessWidget {
         return const SizedBox.shrink();
       }
       final showFilters = cameraStore.showFilters.value;
+      // The sensor tray (lens/zoom + FRONT/BACK) occupies the same band the
+      // manual exposure wheels use, so hide it while the manual panel is open —
+      // the manual layer owns that band then. (Same slide-away recipe as the
+      // filter tray, so nothing invisible keeps swallowing touches.)
+      final hideSensorTray = showFilters || cameraStore.manualPanelOpen.value;
       return Stack(
         children: [
           // Sensor tray — slides fully below the screen edge while the filter
-          // tray is open (a real layout offset, not just a paint transform,
-          // so nothing invisible keeps swallowing touches).
+          // tray OR the manual panel is open.
           AnimatedPositioned(
             duration: _kAnim,
             curve: _kCurve,
-            bottom: showFilters ? -180 : kTrayBottom + kProStripSlot,
+            bottom: hideSensorTray ? -180 : kTrayBottom + kProStripSlot,
             left: 0,
             right: 0,
             child: AnimatedOpacity(
               duration: _kAnim,
               curve: _kCurve,
-              opacity: showFilters ? 0.0 : 1.0,
+              opacity: hideSensorTray ? 0.0 : 1.0,
               child: IgnorePointer(
-                ignoring: showFilters,
+                ignoring: hideSensorTray,
                 child: const SensorTray(),
               ),
             ),

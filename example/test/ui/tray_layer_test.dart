@@ -121,6 +121,38 @@ void main() {
       },
     );
 
+    testWidgets(
+      'opening the manual panel hides the sensor tray (wheels own that band)',
+      (tester) async {
+        usePhoneSurface(tester);
+        await tester.pumpWidget(harness(const TrayLayer()));
+        await tester.pumpAndSettle();
+
+        final sensorRectClosed = tester.getRect(find.byType(SensorTray));
+        final screenHeight =
+            tester.view.physicalSize.height / tester.view.devicePixelRatio;
+
+        // Manual panel open → sensor tray (lens/zoom + FRONT/BACK) slides fully
+        // off-screen and stops hit-testing, so the manual exposure wheels that
+        // occupy the same band can't overlap it.
+        cameraStore.manualPanelOpen.value = true;
+        await tester.pumpAndSettle();
+        expect(opacityOf(tester, find.byType(SensorTray)).opacity, 0.0);
+        expect(ignoreOf(tester, find.byType(SensorTray)).ignoring, isTrue);
+        expect(
+          tester.getRect(find.byType(SensorTray)).top,
+          greaterThanOrEqualTo(screenHeight),
+        );
+
+        // Closing restores it exactly.
+        cameraStore.manualPanelOpen.value = false;
+        await tester.pumpAndSettle();
+        expect(opacityOf(tester, find.byType(SensorTray)).opacity, 1.0);
+        expect(ignoreOf(tester, find.byType(SensorTray)).ignoring, isFalse);
+        expect(tester.getRect(find.byType(SensorTray)), sensorRectClosed);
+      },
+    );
+
     testWidgets('FRONT tab switches the lens chips to the selfie camera', (
       tester,
     ) async {
