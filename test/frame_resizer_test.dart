@@ -75,4 +75,56 @@ void main() {
     // Already within bounds -> unchanged.
     expect(identical(f.resizedToMaxEdge(4000), f), isTrue);
   });
+
+  test('cropped extracts a sub-rectangle, tightly packed', () {
+    // 3×3 luma: value = y*10 + x.
+    final b = Uint8List(9);
+    for (var y = 0; y < 3; y++) {
+      for (var x = 0; x < 3; x++) {
+        b[y * 3 + x] = y * 10 + x;
+      }
+    }
+    final f = FrameData(bytes: b, width: 3, height: 3, format: 0, bytesPerRow: 3);
+    final c = f.cropped(1, 1, 2, 2); // bottom-right 2×2
+    expect(c.width, 2);
+    expect(c.height, 2);
+    expect(c.bytesPerRow, 2);
+    expect(c.bytes, [11, 12, 21, 22]);
+    // Out-of-bounds crop is clamped.
+    final c2 = f.cropped(2, 2, 5, 5);
+    expect(c2.width, 1);
+    expect(c2.height, 1);
+    expect(c2.bytes, [22]);
+  });
+
+  test('rotated 90/180/270 moves pixels and swaps dims for quarter turns', () {
+    // 2×3 luma (w=2, h=3): rows [1,2],[3,4],[5,6].
+    final f = FrameData(
+      bytes: Uint8List.fromList([1, 2, 3, 4, 5, 6]),
+      width: 2,
+      height: 3,
+      format: 0,
+      bytesPerRow: 2,
+    );
+    // 90° CW -> 3×2: top row is the old left column bottom-up [5,3,1], etc.
+    final r90 = f.rotated(1);
+    expect(r90.width, 3);
+    expect(r90.height, 2);
+    expect(r90.bytes, [5, 3, 1, 6, 4, 2]);
+    // 180° -> 2×3 reversed.
+    final r180 = f.rotated(2);
+    expect(r180.width, 2);
+    expect(r180.height, 3);
+    expect(r180.bytes, [6, 5, 4, 3, 2, 1]);
+    // 270° CW == inverse of 90.
+    final r270 = f.rotated(3);
+    expect(r270.width, 3);
+    expect(r270.height, 2);
+    expect(r270.bytes, [2, 4, 6, 1, 3, 5]);
+    // 0 / multiples of 4 are no-ops.
+    expect(identical(f.rotated(0), f), isTrue);
+    expect(identical(f.rotated(4), f), isTrue);
+  });
+
 }
+
