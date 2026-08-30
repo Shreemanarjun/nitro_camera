@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:signals/signals_flutter.dart';
 
@@ -241,7 +239,11 @@ class _Wheel extends StatelessWidget {
   }
 }
 
-/// Small frosted capsule used across the manual layer.
+/// Small solid capsule used across the manual layer. A flat translucent scrim
+/// (NOT a per-chip BackdropFilter): the layer shows ~19 of these at once, and
+/// stacking that many backdrop blurs is the main cause of switching jank — on a
+/// chip this small a blur is invisible anyway. The fill is a touch more opaque
+/// than the old frosted look to stay legible over the live preview.
 class _Bubble extends StatelessWidget {
   final String label;
   final bool active;
@@ -249,29 +251,23 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: active
-                ? AppColors.accent.withValues(alpha: 0.22)
-                : Colors.black.withValues(alpha: 0.35),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: active ? AppColors.accent : Colors.white24,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: active ? AppColors.accent : Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: active
+            ? AppColors.accent.withValues(alpha: 0.24)
+            : Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: active ? AppColors.accent : Colors.white24,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: active ? AppColors.accent : Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

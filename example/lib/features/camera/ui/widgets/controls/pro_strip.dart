@@ -465,43 +465,41 @@ class _ProPill extends StatelessWidget {
           onTap();
         },
         onLongPress: onLongPress,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              height: ProStrip.kPillHeight,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: active
-                    ? AppColors.accent
-                    : Colors.black.withValues(alpha: 0.40),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: active
-                      ? AppColors.accent
-                      : Colors.white.withValues(alpha: 0.10),
+        // Solid animated capsule — NOT a per-pill BackdropFilter. A row of these
+        // (5–6 pills) each blurring the backdrop, and re-blurring every frame of
+        // the 200ms active animation, was a major source of switching jank; a
+        // flat scrim is indistinguishable at this size.
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          height: ProStrip.kPillHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.accent
+                : Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: active
+                  ? AppColors.accent
+                  : Colors.white.withValues(alpha: 0.10),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.1,
                 ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 14, color: fg),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: fg,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            ],
           ),
         ),
       ),
