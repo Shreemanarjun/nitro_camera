@@ -227,7 +227,8 @@ to rebuild when state (zoom, flash, recording…) changes.
 
 ```dart
 controller.setZoom(2.0);                 // clamped to device.min/maxZoom
-controller.focus(0.5, 0.5);              // tap-to-focus, normalized 0..1
+controller.focus(0.5, 0.5);
+controller.setFocusDistance(0.8);  // manual: 0=far, 1=near; <0 restores AF              // tap-to-focus, normalized 0..1
 controller.setAutoFocus(AutoFocusMode.continuous); // off | continuous | locked
 controller.setExposure(0.0);             // device.min/maxExposure
 controller.setFlash(FlashMode.auto);     // off | on | auto

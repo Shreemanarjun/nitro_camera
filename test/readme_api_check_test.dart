@@ -187,6 +187,7 @@ Future<void> _readmeLifecycle(CameraDeviceInfo device) async {
 void _readmeLiveControls(CameraController controller) {
   controller.setZoom(2.0);
   controller.focus(0.5, 0.5);
+  controller.setFocusDistance(0.8);
   controller.setAutoFocus(AutoFocusMode.continuous);
   controller.setExposure(0.0);
   controller.setFlash(FlashMode.auto);

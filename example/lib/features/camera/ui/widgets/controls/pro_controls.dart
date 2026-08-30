@@ -118,6 +118,20 @@ class ProControlsBody extends StatelessWidget {
           );
         }),
 
+        // Manual focus distance (0 = far, 1 = near; AUTO restores auto-focus).
+        Watch((_) {
+          final fd = s.focusDistance.value;
+          return _SliderRow(
+            label: 'FOCUS',
+            value: fd < 0 ? 0.0 : fd,
+            min: 0,
+            max: 1,
+            display: fd < 0 ? 'AUTO' : fd.toStringAsFixed(2),
+            onChanged: s.setFocusDistance,
+            trailing: _MiniBtn('AUTO', () => s.setFocusDistance(-1)),
+          );
+        }),
+
         // White balance
         Watch((_) {
           final k = s.whiteBalanceKelvin.value;

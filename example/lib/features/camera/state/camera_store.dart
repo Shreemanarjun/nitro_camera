@@ -183,6 +183,8 @@ class CameraStore {
   final flashMode = signal(FlashMode.off);
   final currentZoom = signal(1.0);
   final exposure = signal(0.0);
+  /// Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
+  final focusDistance = signal(-1.0);
   final whiteBalanceKelvin = signal(0); // 0 = auto
   final hdrEnabled = signal(false);
   final lowLightBoost = signal(false);
@@ -529,6 +531,12 @@ class CameraStore {
   void setExposure(double v) {
     exposure.value = v;
     activeController.value?.setExposure(v);
+  }
+
+  /// Manual focus: -1 restores auto-focus, else 0.0 (far) .. 1.0 (near).
+  void setFocusDistance(double v) {
+    focusDistance.value = v;
+    activeController.value?.setFocusDistance(v);
   }
 
   void setWhiteBalance(int kelvin) {

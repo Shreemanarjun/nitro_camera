@@ -278,6 +278,10 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         try? session(for: textureId)?.setFocusPoint(x: x, y: y)
     }
 
+    public func setFocusDistance(textureId: Int64, distance: Double) {
+        try? session(for: textureId)?.setFocusDistance(distance)
+    }
+
     public func setAutoFocus(textureId: Int64, mode: Int64) {
         try? session(for: textureId)?.setAutoFocus(mode: mode)
     }

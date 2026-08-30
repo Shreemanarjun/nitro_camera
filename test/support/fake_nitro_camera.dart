@@ -253,6 +253,10 @@ class FakeNitroCamera extends NitroCamera {
       _rec('setAutoFocus', [textureId, mode], null);
 
   @override
+  void setFocusDistance(int textureId, double distance) =>
+      _rec('setFocusDistance', [textureId, distance], null);
+
+  @override
   void setExposure(int textureId, double value) =>
       _rec('setExposure', [textureId, value], null);
 

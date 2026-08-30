@@ -164,6 +164,8 @@ class CameraSession(
     private var aeLocked: Boolean = false
     private var awbLocked: Boolean = false
     private var afLocked: Boolean = false
+    // Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
+    private var manualFocusDistance: Double = -1.0
     private var targetOrientationDeg: Int = -1
     private var whiteBalanceKelvin: Long = 0L
     private var hdrEnabled: Boolean = false
@@ -658,13 +660,23 @@ class CameraSession(
             }
         }
 
+        // Manual focus (fixed lens position) needs AF OFF + LENS_FOCUS_DISTANCE;
+        // only meaningful on a lens that advertises a focus range.
+        val minFocusDiopters =
+            characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        val manualFocus = manualFocusDistance >= 0.0 && minFocusDiopters > 0f
         val af = when {
+            manualFocus   -> CaptureRequest.CONTROL_AF_MODE_OFF
             afLocked      -> CaptureRequest.CONTROL_AF_MODE_OFF
             afMode == 0L  -> CaptureRequest.CONTROL_AF_MODE_OFF
             afMode == 2L  -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
             else          -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
         }
         builder.set(CaptureRequest.CONTROL_AF_MODE, af)
+        if (manualFocus) {
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE,
+                dev.shreeman.nitro_camera.utils.FocusMath.diopters(manualFocusDistance, minFocusDiopters))
+        }
 
         // White balance (temperature → nearest supported preset) + 3A locks.
         val awbModes = characteristics.get(
@@ -864,6 +876,8 @@ class CameraSession(
     fun setTorch(enabled: Boolean) { torchEnabled = enabled; triggerUpdate() }
     fun setExposure(value: Double) { exposureValue = value; triggerUpdate() }
     fun setAutoFocus(mode: Long) { afMode = mode; triggerUpdate() }
+    /** Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near). */
+    fun setFocusDistance(distance: Double) { manualFocusDistance = distance; triggerUpdate() }
 
     internal fun triggerUpdate() {
         if (isClosed) return

@@ -414,6 +414,15 @@ class CameraController extends ChangeNotifier {
     _patchConfig((c) => c.copyWith(autoFocus: mode));
   }
 
+  /// Manually fixes the focus distance: [distance] 0.0 (far / infinity) to
+  /// 1.0 (nearest). Pass a negative value to restore continuous auto-focus.
+  /// Fixed-focus lenses (and iOS devices without custom-lens-position support)
+  /// ignore it. See [CameraDeviceInfo.minFocusDistanceCm] for the near limit.
+  void setFocusDistance(double distance) {
+    _requireInitialized();
+    _native.setFocusDistance(_textureId!, distance);
+  }
+
   /// Exposure bias in the range [device.minExposure] .. [device.maxExposure].
   void setExposure(double value) {
     _requireInitialized();

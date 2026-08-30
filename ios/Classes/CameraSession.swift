@@ -356,6 +356,23 @@ public class CameraSession: NSObject {
         device.unlockForConfiguration()
     }
 
+    /// Manual focus distance: [distance] 0.0 (far) .. 1.0 (near); negative
+    /// restores continuous auto-focus. Ignored where custom lens position is
+    /// unsupported. Clamped to avoid an uncatchable NSException.
+    func setFocusDistance(_ distance: Double) throws {
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        if distance < 0 {
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            return
+        }
+        guard device.isLockingFocusWithCustomLensPositionSupported else { return }
+        let pos = Float(min(1.0, max(0.0, distance)))
+        device.setFocusModeLocked(lensPosition: pos, completionHandler: nil)
+    }
+
     func setExposure(value: Double) throws {
         // Exposure *bias* in EV — clamp into the device's supported range.
         try device.lockForConfiguration()

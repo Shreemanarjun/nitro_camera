@@ -420,6 +420,11 @@ abstract class NitroCamera extends HybridObject {
   /// Sets the auto-focus mode. Pass an [AutoFocusMode] value.
   void setAutoFocus(int textureId, int mode);
 
+  /// Manual focus distance: [distance] 0.0 (far / infinity) → 1.0 (nearest),
+  /// or a negative value to restore continuous auto-focus. Fixed-focus lenses
+  /// and devices without custom-lens-position support ignore it.
+  void setFocusDistance(int textureId, double distance);
+
   /// Sets exposure compensation. [value] is -1.0 (darkest) to 1.0 (brightest).
   void setExposure(int textureId, double value);
 

@@ -573,6 +573,7 @@ class NitroCameraImpl(
     override fun setZoom(textureId: Long, zoom: Double)                { session(textureId)?.setZoom(zoom) }
     override fun setFocusPoint(textureId: Long, x: Double, y: Double)  { session(textureId)?.setFocusPoint(x, y) }
     override fun setAutoFocus(textureId: Long, mode: Long)              { session(textureId)?.setAutoFocus(mode) }
+    override fun setFocusDistance(textureId: Long, distance: Double)    { session(textureId)?.setFocusDistance(distance) }
     override fun setExposure(textureId: Long, value: Double)            { session(textureId)?.setExposure(value) }
     override fun setFlash(textureId: Long, mode: Long)                  { session(textureId)?.setFlash(mode) }
     override fun setTorch(textureId: Long, enabled: Long)               { session(textureId)?.setTorch(enabled != 0L) }
