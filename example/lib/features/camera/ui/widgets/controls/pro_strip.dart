@@ -245,6 +245,27 @@ class _ProStripState extends State<ProStrip> {
       );
     }),
     Watch((context) {
+      final on = cameraStore.slowMoEnabled.value;
+      final fps = cameraStore.slowMoFps.value;
+      return _ProPill(
+        icon: Icons.slow_motion_video_rounded,
+        label: on ? 'SLO-MO $fps' : 'SLO-MO',
+        tooltip: 'Slow-motion recording — tap cycles 240 / 120 / off',
+        active: on,
+        onTap: () {
+          // off → 240 → 120 → off
+          if (!on) {
+            cameraStore.slowMoFps.value = 240;
+            cameraStore.slowMoEnabled.value = true;
+          } else if (fps == 240) {
+            cameraStore.slowMoFps.value = 120;
+          } else {
+            cameraStore.slowMoEnabled.value = false;
+          }
+        },
+      );
+    }),
+    Watch((context) {
       final on = cameraStore.showFpsGraph.value;
       return _ProPill(
         icon: Icons.show_chart_rounded,

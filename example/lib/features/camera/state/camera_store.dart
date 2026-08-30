@@ -72,6 +72,12 @@ class CameraStore {
   /// Record audio with video (mic). Toggling reopens the session (audio is
   /// an open-time field).
   final micEnabled = signal(true);
+  // Slow-motion (high-speed) capture. When on, the record button drives a
+  // dedicated high-speed session at [slowMoFps] instead of the normal recorder.
+  final slowMoEnabled = signal(false);
+  final slowMoFps = signal(240);
+  // Manual focus + exposure control layer (on-preview rail + stop wheels).
+  final manualPanelOpen = signal(false);
   // RAW (DNG) photo capture — only offered when the device supports it.
   final rawPhoto = signal(false);
   // ── User-pluggable frame processor ──────────────────────────────────────────
@@ -693,6 +699,9 @@ class CameraStore {
   }
 
   bool _recordingBusy = false;
+  // True while the current recording is a high-speed (slow-mo) session, so
+  // stop routes to stopHighSpeedRecording.
+  bool _slowMoActive = false;
   Future<void> toggleRecording() async {
     // Re-entrancy guard: a double-tap while stop() is still awaiting would fire a
     // second stopVideoRecording (isRecording hasn't flipped yet).
@@ -710,7 +719,10 @@ class CameraStore {
     if (ctrl == null) return;
     if (isRecording.value) {
       try {
-        final result = await ctrl.stopRecording();
+        final result = _slowMoActive
+            ? await ctrl.stopHighSpeedRecording()
+            : await ctrl.stopRecording();
+        _slowMoActive = false;
         final path = result.path;
         final ok =
             path.isNotEmpty && File(path).existsSync() && result.fileSize > 0;
@@ -737,22 +749,36 @@ class CameraStore {
     } else {
       try {
         final dir = await getTemporaryDirectory();
-        final ext = videoCodec.value == VideoCodec.hevc ? 'mov' : 'mp4';
-        final path =
-            '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
-        await ctrl.startRecording(
-          path,
-          options: RecordingOptions(
-            codec: videoCodec.value.nativeValue,
-            fileType: videoCodec.value == VideoCodec.hevc
-                ? VideoFileType.mov.nativeValue
-                : VideoFileType.mp4.nativeValue,
-            latitude: geotagEnabled.value ? _demoLocation.latitude : 0,
-            longitude: geotagEnabled.value ? _demoLocation.longitude : 0,
-            altitude: geotagEnabled.value ? _demoLocation.altitude : 0,
-            hasLocation: geotagEnabled.value ? 1 : 0,
-          ),
-        );
+        final stamp = DateTime.now().millisecondsSinceEpoch;
+        if (slowMoEnabled.value) {
+          final path = '${dir.path}/slowmo_$stamp.mp4';
+          final started = await ctrl.startHighSpeedRecording(
+            path,
+            fps: slowMoFps.value,
+          );
+          if (!started) {
+            errorMessage.value =
+                'Slow-mo unavailable at ${slowMoFps.value}fps on this camera.';
+            return;
+          }
+          _slowMoActive = true;
+        } else {
+          final ext = videoCodec.value == VideoCodec.hevc ? 'mov' : 'mp4';
+          final path = '${dir.path}/video_$stamp.$ext';
+          await ctrl.startRecording(
+            path,
+            options: RecordingOptions(
+              codec: videoCodec.value.nativeValue,
+              fileType: videoCodec.value == VideoCodec.hevc
+                  ? VideoFileType.mov.nativeValue
+                  : VideoFileType.mp4.nativeValue,
+              latitude: geotagEnabled.value ? _demoLocation.latitude : 0,
+              longitude: geotagEnabled.value ? _demoLocation.longitude : 0,
+              altitude: geotagEnabled.value ? _demoLocation.altitude : 0,
+              hasLocation: geotagEnabled.value ? 1 : 0,
+            ),
+          );
+        }
         isRecording.value = true;
         recordingDuration.value = 0;
         _recordingTimer = Timer.periodic(

@@ -1,0 +1,269 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:signals/signals_flutter.dart';
+
+import '../../../state/camera_store.dart';
+import '../../theme/app_theme.dart';
+
+/// On-preview interactive manual controls — the easy-to-use replacement for the
+/// raw FOCUS/SHUTTER/ISO sliders that used to be buried in the advanced sheet.
+///
+///  * a vertical **rack-focus rail** on the right edge (drag between macro and
+///    ∞, live), and
+///  * tappable **shutter / ISO stop wheels** along the bottom.
+///
+/// Shown only while [CameraStore.manualPanelOpen] is on (toggled by the MANUAL
+/// pill). Everything drives the same [CameraController] setters the sliders did.
+class ManualControlsLayer extends StatelessWidget {
+  const ManualControlsLayer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Watch((context) {
+      if (!cameraStore.manualPanelOpen.value) return const SizedBox.shrink();
+      return const Positioned.fill(
+        child: Stack(
+          children: [
+            // Rack-focus rail — centred on the right edge, clear of the tray.
+            Positioned(right: 12, top: 0, bottom: 0, child: Center(child: _FocusRail())),
+            // Exposure wheels sit just above the bottom capture controls.
+            Positioned(left: 0, right: 0, bottom: 170, child: _ExposureWheels()),
+          ],
+        ),
+      );
+    });
+  }
+}
+
+/// A vertical drag rail: top = far (∞, distance 0), bottom = near (🌷, 1).
+class _FocusRail extends StatelessWidget {
+  const _FocusRail();
+  static const double _h = 240;
+
+  void _setFromDy(double dy) =>
+      cameraStore.setFocusDistance((dy / _h).clamp(0.0, 1.0));
+
+  @override
+  Widget build(BuildContext context) {
+    return Watch((context) {
+      final fd = cameraStore.focusDistance.value;
+      final manual = fd >= 0;
+      final frac = manual ? fd : 0.0;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // AF reset — bright when auto, dim when manual is engaged.
+          GestureDetector(
+            onTap: () => cameraStore.setFocusDistance(-1),
+            behavior: HitTestBehavior.opaque,
+            child: _Bubble(
+              label: 'AF',
+              active: !manual,
+            ),
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragUpdate: (d) => _setFromDy(d.localPosition.dy),
+            onTapDown: (d) => _setFromDy(d.localPosition.dy),
+            child: SizedBox(
+              width: 44,
+              height: _h,
+              child: Stack(
+                alignment: Alignment.topCenter,
+                children: [
+                  // Track.
+                  Center(
+                    child: Container(
+                      width: 3,
+                      height: _h,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const Positioned(
+                    top: 2,
+                    child: Icon(Icons.landscape_rounded, size: 16, color: Colors.white54),
+                  ),
+                  const Positioned(
+                    bottom: 2,
+                    child: Icon(Icons.local_florist_rounded, size: 16, color: Colors.white54),
+                  ),
+                  // Thumb.
+                  Positioned(
+                    top: (frac * _h).clamp(0.0, _h) - 9,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: manual ? AppColors.accent : Colors.white70,
+                        shape: BoxShape.circle,
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black45, blurRadius: 4),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _Bubble(
+            label: manual ? fd.toStringAsFixed(2) : 'AUTO',
+            active: manual,
+          ),
+        ],
+      );
+    });
+  }
+}
+
+/// Two horizontal stop-wheels (SHUTTER, ISO) — one tap per stop, far easier
+/// than dragging a 4..8000 denominator slider.
+class _ExposureWheels extends StatelessWidget {
+  const _ExposureWheels();
+
+  // Shutter denominators (AUTO = 0).
+  static const _shutter = <int>[0, 30, 60, 125, 250, 500, 1000, 2000, 4000];
+  static const _iso = <int>[0, 50, 100, 200, 400, 800, 1600, 3200];
+
+  @override
+  Widget build(BuildContext context) {
+    return Watch((context) {
+      final ns = cameraStore.manualShutterNs.value;
+      final curDenom = ns <= 0 ? 0 : (1e9 / ns).round();
+      final iso = cameraStore.manualIso.value;
+      final curIso = iso <= 0 ? 0 : iso.round();
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Wheel(
+            title: 'SHUTTER',
+            stops: _shutter,
+            selected: curDenom,
+            label: (d) => d == 0 ? 'AUTO' : '1/$d',
+            isSelected: (d) => d == 0 ? ns <= 0 : (curDenom == d),
+            onTap: (d) => d == 0
+                ? cameraStore.setAutoExposure()
+                : cameraStore.setManualShutter(1e9 / d),
+          ),
+          const SizedBox(height: 8),
+          _Wheel(
+            title: 'ISO',
+            stops: _iso,
+            selected: curIso,
+            label: (v) => v == 0 ? 'AUTO' : '$v',
+            isSelected: (v) => v == 0 ? iso <= 0 : (curIso == v),
+            onTap: (v) => v == 0
+                ? cameraStore.setAutoExposure()
+                : cameraStore.setManualIso(v.toDouble()),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+class _Wheel extends StatelessWidget {
+  final String title;
+  final List<int> stops;
+  final int selected;
+  final String Function(int) label;
+  final bool Function(int) isSelected;
+  final ValueChanged<int> onTap;
+  const _Wheel({
+    required this.title,
+    required this.stops,
+    required this.selected,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 68,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(right: 16),
+              children: [
+                for (final s in stops)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () => onTap(s),
+                      behavior: HitTestBehavior.opaque,
+                      child: _Bubble(
+                        label: label(s),
+                        active: isSelected(s),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Small frosted capsule used across the manual layer.
+class _Bubble extends StatelessWidget {
+  final String label;
+  final bool active;
+  const _Bubble({required this.label, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: active
+                ? AppColors.accent.withValues(alpha: 0.22)
+                : Colors.black.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: active ? AppColors.accent : Colors.white24,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active ? AppColors.accent : Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

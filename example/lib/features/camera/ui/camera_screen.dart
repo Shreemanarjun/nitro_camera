@@ -9,6 +9,7 @@ import '../../gallery/ui/media_viewer_screen.dart';
 import '../state/camera_store.dart';
 import 'widgets/common/pill_button.dart';
 import 'widgets/controls/bottom_controls.dart';
+import 'widgets/controls/manual_controls_layer.dart';
 import 'widgets/controls/top_bar.dart';
 import 'widgets/controls/tray_layer.dart';
 import 'widgets/overlays/camera_status_widgets.dart';
@@ -286,6 +287,10 @@ class _CameraScreenState extends State<CameraScreen>
               }
               return const ProcessorBadge();
             }),
+
+            // 5c. Interactive manual focus + exposure layer (rack-focus rail +
+            // shutter/ISO stop wheels). Hidden while recording like the tray.
+            const _HideWhileRecording(child: ManualControlsLayer()),
 
             // 6. Bottom main controls.
             const BottomControls(),

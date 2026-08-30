@@ -497,6 +497,51 @@ void main() {
   );
 
   testWidgets(
+    '9b. high-speed (slow-mo) recording: records or cleanly declines, session survives',
+    semanticsEnabled: false,
+    (tester) async {
+      await bootApp(tester);
+      final c = ctrl();
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/api_slowmo_${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+      // Start at 240fps. On a device with no high-speed config this returns
+      // false and leaves the normal preview session untouched; on a capable
+      // device it records and finalises a real file.
+      final started = await c.startHighSpeedRecording(path, fps: 240);
+      if (started) {
+        expect(c.isRecording, isTrue);
+        await pumpFor(tester, const Duration(seconds: 1));
+        final rec = await c.stopHighSpeedRecording();
+        expect(c.isRecording, isFalse);
+        expect(rec.path, isNotEmpty);
+        final f = File(rec.path);
+        expect(f.existsSync(), isTrue);
+        expect(rec.fileSize, greaterThan(0));
+        expect(rec.reason, RecordingFinishedReason.stopped);
+        f.deleteSync();
+      } else {
+        expect(c.isRecording, isFalse);
+      }
+
+      // Either way the normal session must be healthy afterward: a plain
+      // recording still starts and stops. (Guards the high-speed → normal
+      // session swap-back from wedging the camera.)
+      final normalPath =
+          '${dir.path}/api_after_slowmo_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      await c.startRecording(normalPath);
+      expect(c.isRecording, isTrue);
+      await pumpFor(tester, const Duration(milliseconds: 800));
+      final after = await c.stopRecording();
+      expect(after.path, isNotEmpty);
+      final af = File(after.path);
+      if (af.existsSync()) af.deleteSync();
+      expect(cameraStore.errorMessage.value, isNull);
+    },
+  );
+
+  testWidgets(
     '10. photo option variants: geotag, silent+speed, DNG',
     semanticsEnabled: false,
     (tester) async {

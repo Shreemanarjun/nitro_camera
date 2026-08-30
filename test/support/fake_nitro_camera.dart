@@ -341,6 +341,17 @@ class FakeNitroCamera extends NitroCamera {
   Future<RecordingResult> stopVideoRecording(int textureId) async =>
       _rec('stopVideoRecording', [textureId], recordingResult);
 
+  /// 1 = high-speed started, 0 = device advertised no config for the fps.
+  int highSpeedStartResult = 1;
+
+  @override
+  Future<int> startHighSpeedRecording(int textureId, String path, int fps) async =>
+      _rec('startHighSpeedRecording', [textureId, path, fps], highSpeedStartResult);
+
+  @override
+  Future<RecordingResult> stopHighSpeedRecording(int textureId) async =>
+      _rec('stopHighSpeedRecording', [textureId], recordingResult);
+
   @override
   void pauseRecording(int textureId) =>
       _rec('pauseRecording', [textureId], null);

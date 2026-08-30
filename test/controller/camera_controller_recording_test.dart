@@ -275,4 +275,45 @@ void main() {
       );
     });
   });
+
+  group('high-speed (slow-mo) recording', () {
+    test('start forwards fps and flips isRecording when supported', () async {
+      fake.highSpeedStartResult = 1;
+      final ok = await c.startHighSpeedRecording('/tmp/slowmo.mp4', fps: 240);
+
+      expect(ok, isTrue);
+      expect(fake.argsOf('startHighSpeedRecording'), [7, '/tmp/slowmo.mp4', 240]);
+      expect(c.isRecording, isTrue);
+    });
+
+    test('start returns false and does NOT record when unsupported', () async {
+      fake.highSpeedStartResult = 0;
+      final ok = await c.startHighSpeedRecording('/tmp/slowmo.mp4', fps: 240);
+
+      expect(ok, isFalse);
+      expect(c.isRecording, isFalse);
+    });
+
+    test('stop returns the result and clears isRecording', () async {
+      await c.startHighSpeedRecording('/tmp/slowmo.mp4', fps: 120);
+      final rec = await c.stopHighSpeedRecording();
+
+      expect(fake.argsOf('stopHighSpeedRecording'), [7]);
+      expect(rec.path, '/tmp/fake.mp4');
+      expect(c.isRecording, isFalse);
+    });
+
+    test('stop maps a failed finalize to RecorderException', () async {
+      await c.startHighSpeedRecording('/tmp/slowmo.mp4', fps: 240);
+      fake.recordingResult = const RecordingResult(
+        path: '', durationMs: 0, fileSize: 0, width: 0, height: 0,
+        codec: 0, fileType: 0, finishedReason: 3, // failed
+      );
+      await expectLater(
+        c.stopHighSpeedRecording(),
+        recorderException('recorder/finalize-failed'),
+      );
+      expect(c.isRecording, isFalse);
+    });
+  });
 }
