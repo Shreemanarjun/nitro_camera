@@ -34,6 +34,7 @@
 // the std headers and the class stay behind __cplusplus (C callers only need
 // the exported <lib>_nitro_post/bind/ack declared in the bridge header).
 #ifdef __cplusplus
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -44,6 +45,64 @@
 
 class NitroCompletionBatch {
  public:
+  // Single-in-flight completion spin (issue #57; workaround for dart-lang/sdk#53156).
+  // A lone @nitroNativeAsync completion otherwise pays a full isolate wake (~15-20µs
+  // to reschedule the awaiting isolate). When armed (single in flight, spin enabled)
+  // Dart busy-polls the slot instead of parking; a completion inside the window is
+  // taken with no port post. A `flag` CAS arbitrates the boundary race so delivery
+  // is exactly-once. Opt-in (NitroConfig.nativeAsyncSpinUs > 0): spinning burns a core.
+  enum : int32_t { kPending = 0, kDone = 1, kParked = 2 };
+  enum : int32_t { kTagNull = 0, kTagInt = 1, kTagDouble = 2, kTagBool = 3 };
+
+  // Claim the one shared slot for [id]; false if another isolate already owns it
+  // (don't spin then — poll() would read the owner's result). The relaxed load
+  // skips the CAS when the slot is taken, so many concurrent callers (issue #58)
+  // don't fight over the cache line. Freed by poll() on a hit, post() on a park,
+  // or disarm() on throw.
+  bool arm(int64_t id) noexcept {
+    if (spinId_.load(std::memory_order_relaxed) != 0) return false;
+    int64_t expected = 0;
+    if (!spinId_.compare_exchange_strong(expected, id, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+      return false;
+    }
+    spin_.tag = kTagNull;
+    spin_.i = 0;
+    spin_.d = 0;
+    spin_.flag.store(kPending, std::memory_order_release);
+    return true;
+  }
+
+  // Release a claim whose native call threw before dispatching a worker (no
+  // post() will ever free it). CAS so a slot already delivered (spinId_ reset
+  // to 0 by the worker) or reclaimed by another isolate is left untouched.
+  void disarm(int64_t id) noexcept {
+    int64_t expected = id;
+    spinId_.compare_exchange_strong(expected, 0, std::memory_order_acq_rel, std::memory_order_relaxed);
+  }
+
+  // One poll of the slot. With [giveUp], first flip the flag to kParked so a late
+  // result goes to the port instead. Returns kPending / kDone (payload at out:
+  // tag@0, int64@8, double@16) / kParked. On a hit the reader frees the slot
+  // after copying (not the worker), so the next isolate can't overwrite it
+  // mid-copy.
+  int32_t poll([[maybe_unused]] int64_t id, uint8_t* out, int32_t giveUp) noexcept {
+    if (giveUp) {
+      int32_t expected = kPending;
+      spin_.flag.compare_exchange_strong(expected, kParked, std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+    const int32_t f = spin_.flag.load(std::memory_order_acquire);
+    if (f == kPending) return kPending;
+    if (f == kDone) {
+      memcpy(out + 0, &spin_.tag, sizeof(spin_.tag));
+      memcpy(out + 8, &spin_.i, sizeof(spin_.i));
+      memcpy(out + 16, &spin_.d, sizeof(spin_.d));
+      // Release the claim only now the payload is copied; the next isolate's
+      // acquire-CAS in arm() is thereby ordered after this read.
+      spinId_.store(0, std::memory_order_release);
+      return kDone;
+    }
+    return kParked;
+  }
   // A deep copy of a Dart_CObject that owns its storage.
   struct Owned {
     Dart_CObject obj{};
@@ -140,6 +199,39 @@ class NitroCompletionBatch {
 
   // Native side: every post. Unbound ports post directly.
   bool post(int64_t idOrPort, Dart_CObject* obj) {
+    // Spin fast path: if Dart armed this id and is busy-polling, hand the
+    // result to the slot (no port, no OS wake). The flag CAS arbitrates the
+    // boundary race against Dart's giveUp in poll() — whoever wins decides the
+    // channel, so the result is delivered exactly once.
+    if (spinId_.load(std::memory_order_relaxed) == idOrPort) {
+      int32_t tag = kTagNull;
+      int64_t i = 0;
+      double d = 0;
+      if (extractScalar(obj, &tag, &i, &d)) {
+        spin_.tag = tag;
+        spin_.i = i;
+        spin_.d = d;
+        int32_t expected = kPending;
+        if (spin_.flag.compare_exchange_strong(expected, kDone, std::memory_order_release, std::memory_order_acquire)) {
+          // Slot delivery: the READER (poll) releases spinId_ after copying the
+          // payload — NOT here. Freeing the claim now would let the next isolate
+          // reclaim and overwrite the shared slot while Dart's poll is still
+          // reading it. The flag release above publishes the payload to poll.
+          std::lock_guard<std::mutex> lk(mu_);
+          bound_.erase(idOrPort);
+          return true;
+        }
+        // expected == kParked: Dart gave up the spin; deliver via the port.
+      } else {
+        // Non-scalar result (never happens for @nitroNativeAsync, which posts a
+        // scalar or an int64 heap address): stop Dart spinning, then post.
+        int32_t expected = kPending;
+        spin_.flag.compare_exchange_strong(expected, kParked, std::memory_order_acq_rel, std::memory_order_acquire);
+      }
+      // Release: see the slot-win path above — hands the slot off to the next
+      // claiming isolate with a happens-before from this call's slot writes.
+      spinId_.store(0, std::memory_order_release);
+    }
     int64_t batchPort;
     bool stream = false;
     {
@@ -202,6 +294,28 @@ class NitroCompletionBatch {
     std::vector<std::pair<int64_t, std::unique_ptr<Owned>>> pending;
   };
 
+  // One reusable slot (single-in-flight): the worker writes tag/i/d, then
+  // release-stores flag; poll() acquire-loads flag before reading them.
+  struct SpinSlot {
+    std::atomic<int32_t> flag{kParked};
+    int32_t tag = kTagNull;
+    int64_t i = 0;
+    double d = 0;
+  };
+
+  // Extract a @nitroNativeAsync completion (always a scalar or an int64 heap
+  // address) into the slot's plain fields. Returns false for any other shape.
+  static bool extractScalar(const Dart_CObject* o, int32_t* tag, int64_t* i, double* d) noexcept {
+    switch (o->type) {
+      case Dart_CObject_kNull: *tag = kTagNull; return true;
+      case Dart_CObject_kInt32: *tag = kTagInt; *i = o->value.as_int32; return true;
+      case Dart_CObject_kInt64: *tag = kTagInt; *i = o->value.as_int64; return true;
+      case Dart_CObject_kDouble: *tag = kTagDouble; *d = o->value.as_double; return true;
+      case Dart_CObject_kBool: *tag = kTagBool; *i = o->value.as_bool ? 1 : 0; return true;
+      default: return false;
+    }
+  }
+
   static bool copyable(const Dart_CObject* obj) {
     switch (obj->type) {
       case Dart_CObject_kNull: case Dart_CObject_kBool: case Dart_CObject_kInt32: case Dart_CObject_kInt64:
@@ -256,6 +370,8 @@ class NitroCompletionBatch {
   std::unordered_map<int64_t, int64_t> bound_;  // id → batch port
   std::unordered_map<int64_t, FreeItem> coalesced_;  // stream port → item free (own batch target)
   std::unordered_map<int64_t, State> ports_;    // batch port → in-flight state
+  SpinSlot spin_;                               // single-in-flight completion spin
+  std::atomic<int64_t> spinId_{0};              // armed id, or 0
 };
 
 #endif  // __cplusplus
