@@ -20,8 +20,12 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "dev.shreeman.nitro_camera_example"
+        // Overridable so a second entrypoint (lib/main_qr_bench.dart) installs
+        // side by side as its own app instead of replacing this one:
+        //   ORG_GRADLE_PROJECT_appId=dev.shreeman.nitro_qr_bench \
+        //   ORG_GRADLE_PROJECT_appLabel="QR Bench" flutter build apk -t lib/main_qr_bench.dart
+        applicationId = (project.findProperty("appId") as String?) ?: "dev.shreeman.nitro_camera_example"
+        manifestPlaceholders["appLabel"] = (project.findProperty("appLabel") as String?) ?: "nitro_camera_example"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
