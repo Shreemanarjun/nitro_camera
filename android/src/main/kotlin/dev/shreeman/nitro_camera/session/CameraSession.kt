@@ -61,6 +61,10 @@ class CameraSession(
     internal val height: Int,
     private val requestedFps: Int,
     enableAudio: Boolean,
+    // Frame-processor stream size, independent of the preview (vision-camera's
+    // frame-output targetResolution) — a sharp preview over small analysis frames.
+    frameWidth: Int = width,
+    frameHeight: Int = height,
 ) {
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
@@ -334,7 +338,7 @@ class CameraSession(
         private set
 
     // ── Outputs (vision-camera's hybrids/outputs/*) ─────────────────────────────
-    internal val frameOutput = FrameOutput(characteristics, textureId, width, height)
+    internal val frameOutput = FrameOutput(characteristics, textureId, frameWidth, frameHeight)
     internal val videoOutput = VideoOutput(
         context, characteristics, cameraHandler, width, height, enableAudio)
     internal val photoOutput = PhotoOutput(this)

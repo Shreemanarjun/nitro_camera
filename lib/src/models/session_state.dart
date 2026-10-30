@@ -27,13 +27,22 @@ class SessionState {
   final int fps;
   final PixelFormat pixelFormat;
 
+  /// Frame-processor stream size — differs from the preview [width]×[height]
+  /// when the session was opened with a separate frame size (Android). Equals
+  /// the preview size when the platform doesn't report it.
+  final int frameWidth;
+  final int frameHeight;
+
   const SessionState({
     required this.running,
     required this.width,
     required this.height,
     required this.fps,
     required this.pixelFormat,
-  });
+    int? frameWidth,
+    int? frameHeight,
+  }) : frameWidth = frameWidth ?? width,
+       frameHeight = frameHeight ?? height;
 
   /// The session's aspect ratio, or 0 when the height is unknown.
   double get aspectRatio => height == 0 ? 0 : width / height;
@@ -47,6 +56,8 @@ class SessionState {
         height: (m['height'] as num?)?.toInt() ?? 0,
         fps: (m['fps'] as num?)?.toInt() ?? 0,
         pixelFormat: PixelFormat.fromNative((m['pixelFormat'] as num?)?.toInt() ?? 1),
+        frameWidth: (m['frameWidth'] as num?)?.toInt(),
+        frameHeight: (m['frameHeight'] as num?)?.toInt(),
       );
     } catch (_) {
       return const SessionState(

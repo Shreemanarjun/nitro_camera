@@ -231,14 +231,58 @@ _RawHit? _decodePass(
   return null;
 }
 
+/// Side cap (full-res px) of the upscaled-centre ladder rung, so its cost is
+/// bounded (~2 ms) whatever the camera resolution.
+const _kUpscaleSide = 360;
+
+/// Ladder rung C: the centre of [win] (at most [_kUpscaleSide] px) upscaled
+/// 2× (bilinear). zxing's finder-pattern detector misses modules under ~3 px
+/// even at full resolution; doubling them recovers small codes (2.5–3
+/// px/module: 0–48 % → 100 % on test/scanner/small_qr_ladder_test.dart).
+/// Upright only; points come back in full-res window pixels.
+_RawHit? _decodeUpscaledCentre(FrameData f, _Window win, Set<CodeFormat> formats) {
+  final side = win.side < _kUpscaleSide ? win.side : _kUpscaleSide;
+  final inset = (win.side - side) ~/ 2;
+  final cl = win.left + inset, ct = win.top + inset;
+  final stride = f.effectiveBytesPerRow, src = f.bytes;
+  final n = side * 2;
+  final up = Uint8List(n * n);
+  // Even output pixels copy the source; odd ones average their neighbours.
+  for (var y = 0; y < side; y++) {
+    final r0 = (ct + y) * stride + cl;
+    final r1 = (ct + (y + 1 < side ? y + 1 : y)) * stride + cl;
+    final o0 = 2 * y * n, o1 = o0 + n;
+    for (var x = 0; x < side; x++) {
+      final x1 = x + 1 < side ? x + 1 : x;
+      final a = src[r0 + x], b = src[r0 + x1], c = src[r1 + x], d = src[r1 + x1];
+      up[o0 + 2 * x] = a;
+      up[o0 + 2 * x + 1] = (a + b + 1) >> 1;
+      up[o1 + 2 * x] = (a + c + 1) >> 1;
+      up[o1 + 2 * x + 1] = (a + b + c + d + 2) >> 2;
+    }
+  }
+  final raw = _decodeWindow(up, n, 0, 0, n, n, formats);
+  if (raw == null) return null;
+  final pts = raw.points;
+  return _RawHit(
+    RawDecode(raw.text, raw.format, isGs1: raw.isGs1, points: pts == null ? null : [for (final v in pts) inset + v / 2]),
+    false,
+    win.side,
+    win.side,
+    1,
+  );
+}
+
 // ── Adaptive streaming scan (worker-isolate state) ──────────────────────────
 //
 // These globals live in the scanner's WORKER isolate, so they persist across
 // frames: a last-hit cache (replay the exact level/orientation/format that
 // just worked — steady-state hits cost one cheap decode) and an escalation
-// ladder (cheap small pass every frame; bigger pass only every 3rd miss).
+// ladder (cheap small pass every frame; on misses, alternate a full-res pass
+// and an upscaled-centre pass).
 CodeFormat? _lastFormat;
 bool _lastRotated = false;
+bool _lastUpscaled = false;
 int _lastFactor = 1;
 int _lastMisses = 0;
 int _frameIdx = 0;
@@ -259,7 +303,9 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   // success.
   final lastFormat = _lastFormat;
   if (lastFormat != null && kind.formats.contains(lastFormat)) {
-    final hit = _decodePass(f, win, _lastFactor, {lastFormat}, tryUpright: !_lastRotated, tryRotated: _lastRotated);
+    final hit = _lastUpscaled
+        ? _decodeUpscaledCentre(f, win, {lastFormat})
+        : _decodePass(f, win, _lastFactor, {lastFormat}, tryUpright: !_lastRotated, tryRotated: _lastRotated);
     if (hit != null) {
       _lastMisses = 0;
       return _toResult(hit, f);
@@ -273,13 +319,23 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   // 2. Thorough level, every 2nd miss, BOTH orientations — small 1D codes
   // that level A can't resolve are often only readable rotated (portrait
   // phone), so B must retry rotation too.
-  if (hit == null && fB < fA && _frameIdx % 2 == 0) {
+  final runB = fB < fA && _frameIdx % 2 == 0;
+  if (hit == null && runB) {
     hit = _decodePass(f, win, fB, kind.formats, tryUpright: true, tryRotated: true);
+  }
+
+  // 3. Upscaled centre on the misses B doesn't take — codes too small for
+  // zxing even at full resolution.
+  var upscaled = false;
+  if (hit == null && !runB) {
+    hit = _decodeUpscaledCentre(f, win, kind.formats);
+    upscaled = hit != null;
   }
 
   if (hit != null) {
     _lastFormat = hit.raw.format;
     _lastRotated = hit.rotated;
+    _lastUpscaled = upscaled;
     _lastFactor = hit.factor;
     _lastMisses = 0;
   }

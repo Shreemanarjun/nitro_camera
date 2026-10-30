@@ -44,11 +44,39 @@ void main() {
       expect(c.configuration!.fps, 30);
       expect(c.configuration!.enableAudio, isFalse);
       expect(c.configuration!.isActive, isTrue);
-      expect(
-        c.resolvedConfig,
-        isNull,
-        reason: 'nothing to resolve without a format',
+      // No format: resolved from the session read-back (fake default
+      // 1920×1080 @ 30), so callers still see what was negotiated.
+      final r = c.resolvedConfig!;
+      expect(r.format, isNull);
+      expect((r.videoWidth, r.videoHeight, r.selectedFps), (1920, 1080, 30));
+      expect(r.pixelFormat, PixelFormat.fromNative(0));
+    });
+
+    test('with no format the read-back fps and pixel format win', () async {
+      fake.sessionStateJson = sessionStateJson(
+        width: 640,
+        height: 480,
+        fps: 30,
+        pixelFormat: 1,
       );
+      final c = controllerFor();
+
+      await c.initialize(width: 640, height: 480, fps: 60);
+
+      final r = c.resolvedConfig!;
+      expect(c.configuration!.fps, 60, reason: 'the request is kept');
+      expect(r.selectedFps, 30, reason: 'the negotiated rate is reported');
+      expect((r.videoWidth, r.videoHeight), (640, 480));
+      expect(r.pixelFormat, PixelFormat.fromNative(1));
+    });
+
+    test('with no format and no usable read-back nothing is resolved', () async {
+      fake.sessionStateJson = sessionStateJson(running: false, width: 0, height: 0);
+      final c = controllerFor();
+
+      await c.initialize();
+
+      expect(c.resolvedConfig, isNull);
     });
 
     test('explicit width/height/fps override the format', () async {

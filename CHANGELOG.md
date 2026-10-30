@@ -45,7 +45,12 @@
 
 ### Changed
 
-* Upgraded to nitro 0.7.5.
+* Upgraded to nitro 0.8.3.
+* `resolvedConfig` / `onConfigResolved` are now populated when the camera is
+  opened from a plain `width`/`height`/`fps` request (no format): the values
+  come from the native session read-back, so a requested 60 fps that the
+  hardware caps at 30 is reported as 30. `ResolvedCameraConfig.format` is now
+  nullable (null in that case).
 
 ## 0.0.1 - 2026-07-12
 

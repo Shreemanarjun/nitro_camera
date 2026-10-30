@@ -123,10 +123,24 @@ class CameraController extends ChangeNotifier {
 
   /// Builds a [ResolvedCameraConfig]. When a native [ResolvedConfig] read-back
   /// is supplied (from `NitroCamera.configure`), its actual width/height/fps/
-  /// pixelFormat/HDR/AF-system win over the Dart-side guesses.
-  ResolvedCameraConfig? _resolvedFrom(CameraConfiguration c, {ResolvedConfig? native}) {
+  /// pixelFormat/HDR/AF-system win over the Dart-side guesses. Without a
+  /// format, a live [session] read-back is the only source of truth.
+  ResolvedCameraConfig? _resolvedFrom(CameraConfiguration c, {ResolvedConfig? native, SessionState? session}) {
     final f = c.format;
-    if (f == null) return null;
+    if (f == null) {
+      if (session == null || session.width <= 0) return null;
+      return ResolvedCameraConfig(
+        format: null,
+        selectedFps: session.fps > 0 ? session.fps : c.fps,
+        videoWidth: session.width,
+        videoHeight: session.height,
+        photoWidth: 0,
+        photoHeight: 0,
+        videoHdrEnabled: false,
+        pixelFormat: session.pixelFormat,
+        autoFocusSystem: AutoFocusSystem.none,
+      );
+    }
     return ResolvedCameraConfig(
       format: f,
       selectedFps: native?.fps ?? c.fps,
@@ -218,8 +232,9 @@ class CameraController extends ChangeNotifier {
     // preview's aspect ratio is correct (not stretched). Defensive: never let a
     // read-back hiccup abort opening.
     int aw = w, ah = h;
+    SessionState? st;
     try {
-      final st = getSessionState();
+      st = getSessionState();
       if (st.width > 0 && st.height > 0) {
         aw = st.width;
         ah = st.height;
@@ -237,7 +252,7 @@ class CameraController extends ChangeNotifier {
       enableAudio: audio,
       isActive: true,
     );
-    _resolvedConfig = _resolvedFrom(_configuration!);
+    _resolvedConfig = _resolvedFrom(_configuration!, session: st);
     notifyListeners();
   }
 

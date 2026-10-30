@@ -391,6 +391,10 @@ abstract class NitroCamera extends HybridObject {
   /// [width] / [height] — requested preview resolution.
   /// [fps] — target frame rate (e.g. 30 or 60).
   /// [enableAudio] — 1 to capture audio for video recording, 0 otherwise.
+  /// [frameWidth] / [frameHeight] — requested frame-processor stream size,
+  /// independent of the preview (vision-camera's frame-output
+  /// `targetResolution`); 0 = same as the preview. Android only — iOS/macOS
+  /// deliver frames at the session format's size.
   @nitroNativeAsync
   Future<int> openCamera(
     String deviceId,
@@ -398,6 +402,8 @@ abstract class NitroCamera extends HybridObject {
     int height,
     int fps,
     int enableAudio,
+    int frameWidth,
+    int frameHeight,
   );
 
   @nitroNativeAsync

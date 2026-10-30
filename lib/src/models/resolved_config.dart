@@ -7,8 +7,10 @@ import 'session_state.dart';
 /// JS via `onSessionConfigSelected` — it lets the UI display / react to what the
 /// camera really chose (which may differ from what was requested).
 class ResolvedCameraConfig {
-  /// The format that was selected by the [FormatResolver].
-  final CameraDeviceFormat format;
+  /// The format that was selected by the [FormatResolver]; null when the
+  /// session was opened from a plain width/height/fps request (the other
+  /// fields then come from the native session read-back).
+  final CameraDeviceFormat? format;
 
   /// The frame rate actually used, clamped into the format's supported range.
   final int selectedFps;

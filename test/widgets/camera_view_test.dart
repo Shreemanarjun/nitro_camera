@@ -154,7 +154,7 @@ void main() {
       expect(find.text('hud'), findsOneWidget);
     });
 
-    testWidgets('without a format no resolved config is reported', (tester) async {
+    testWidgets('without a format the session read-back is reported', (tester) async {
       ResolvedCameraConfig? resolved;
 
       await tester.pumpWidget(
@@ -163,7 +163,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CameraPreview), findsOneWidget);
-      expect(resolved, isNull);
+      expect(resolved!.format, isNull);
+      expect((resolved!.videoWidth, resolved!.videoHeight, resolved!.selectedFps), (1920, 1080, 30));
     });
   });
 

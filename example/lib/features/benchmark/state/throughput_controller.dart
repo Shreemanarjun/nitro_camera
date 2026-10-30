@@ -21,6 +21,18 @@ enum ThroughputState {
   bool get active => this == preparing || this == running;
 }
 
+/// The decoder a run reports from — the RN app's ZXing / ML Kit toggle.
+enum ThroughputEngine {
+  /// nitro_camera's Dart [CodeScanner] (zxing) on the frame-processor isolate.
+  zxing('ZXing'),
+
+  /// The native ML Kit barcode detector ([NativeDetector.barcode]).
+  mlkit('ML Kit');
+
+  final String label;
+  const ThroughputEngine(this.label);
+}
+
 /// The 1000-QR throughput run — the Flutter counterpart of
 /// react-native-nitro-zxing PR #4 (and NativePHP PR #3) against the same
 /// qr-server ([QrServerClient]). Same conventions: a fresh HTTP client per
@@ -38,38 +50,32 @@ class ThroughputController {
   // qr-server. Use the host's LAN origin instead when the phone shares its Wi-Fi.
   static const defaultServer = 'http://127.0.0.1:3000';
 
-  final device = signal<CameraDeviceInfo?>(
-    null,
-  ); // non-null only while a run has the camera mounted
+  final engine = signal(ThroughputEngine.zxing);
+  // Non-null only while a run has the camera mounted.
+  final device = signal<CameraDeviceInfo?>(null);
   final state = signal(ThroughputState.idle);
   final count = signal(0);
   final elapsedMs = signal(0); // frozen when the run ends
   final error = signal<String?>(null);
   final config = signal('');
-  final fps = signal(0.0);
 
   CodeScanner? _scanner;
   final _subs = <StreamSubscription<Object?>>[];
   QrServerClient? _client;
   Future<void> _reports = Future<void>.value(); // serial report worker
-  Timer? _fpsTicker;
   final _clock = Stopwatch(); // monotonic; started by the first accepted scan
   String? _lastSubmitted;
-  int _framesInWindow = 0;
-  // Where the per-QR time goes (accepted scans only): HTTP round trip, time a
-  // detection waited behind the previous report, frames the decoder saw.
-  // Plain fields: only read once the run has ended.
+  // Where the per-QR time goes (accepted scans only): HTTP round trip and the
+  // time a detection waited behind the previous report; plus frames the
+  // decoder saw (zxing) / detector callbacks (ML Kit). Logged, not shown.
   final _rttMs = <double>[];
   final _queueMs = <double>[];
   int _frames = 0;
 
   void init() => NitroCamera.instance.setKeepScreenOn(1);
 
-  String get diagnostics {
-    final rtt = Stats.of(_rttMs), queue = Stats.of(_queueMs);
-    return 'http rtt median ${rtt.medianMs.toStringAsFixed(1)} · p95 ${rtt.p95Ms.toStringAsFixed(1)} ms · '
-        'queue median ${queue.medianMs.toStringAsFixed(1)} · p95 ${queue.p95Ms.toStringAsFixed(1)} ms · '
-        '$_frames frames analyzed';
+  void selectEngine(ThroughputEngine e) {
+    if (!state.value.active) engine.value = e;
   }
 
   Future<void> start(String origin) async {
@@ -98,10 +104,6 @@ class ThroughputController {
         state.value = ThroughputState.running;
         device.value = cam; // mounts the CameraView → onCamera
       });
-      _fpsTicker = Timer.periodic(const Duration(milliseconds: 500), (_) {
-        fps.value = _framesInWindow * 2.0;
-        _framesInWindow = 0;
-      });
     } catch (e) {
       if (state.value != ThroughputState.preparing) return;
       error.value = '$e';
@@ -111,13 +113,26 @@ class ThroughputController {
 
   Future<void> onCamera(CameraController c) async {
     c.setPixelFormat(PixelFormat.yuv420);
-    c.enableFrameProcessing();
-    // Native read-back of the live session — resolvedConfig is null here
-    // because CameraView was given a size, not a CameraDeviceFormat.
+    // Live read-back AFTER setPixelFormat — resolvedConfig was captured at
+    // open time and still carries the default pixel format.
     final s = c.getSessionState();
     config.value =
-        'Requested 640×480 @ 60 fps YUV; got ${s.width}×${s.height} @ ${s.fps} fps, ${s.pixelFormat.name}';
+        'Requested 640×480 @ 60 FPS; selected ${s.fps} FPS, ${s.pixelFormat.name}\n'
+        'Android: default AE/AF/AWB; FPS and resolution negotiated by nitro_camera; output ${s.width}×${s.height}';
     await stopScanner();
+    if (engine.value == ThroughputEngine.mlkit) {
+      c.startDetector(NativeDetector.barcode);
+      _subs.add(
+        c.detections.listen((r) {
+          _frames++;
+          for (final b in r.barcodes) {
+            if (b.text.isNotEmpty) _submit(b.text);
+          }
+        }),
+      );
+      return;
+    }
+    c.enableFrameProcessing();
     final scanner = CodeScanner(kind: CodeScanKind.qr, windowFraction: 1.0);
     await scanner.start(NitroCamera.instance.frameStream);
     if (state.value != ThroughputState.running) {
@@ -126,15 +141,9 @@ class ThroughputController {
     }
     _scanner = scanner;
     _subs
-      ..add(
-        scanner.stats.listen((_) {
-          _framesInWindow++;
-          _frames++;
-        }),
-      )
-      ..add(
-        scanner.detections.listen((r) => _submit(r.text)),
-      ); // every raw hit, no confirmer
+      ..add(scanner.stats.listen((_) => _frames++))
+      // Every raw hit, no confirmer.
+      ..add(scanner.detections.listen((r) => _submit(r.text)));
   }
 
   void stop() {
@@ -184,7 +193,7 @@ class ThroughputController {
         if (count.value == target) {
           _clock.stop();
           debugPrint(
-            '[throughput-json] ${jsonEncode({'engine': 'nitro_camera-zxing', 'target': target, 'elapsedMs': elapsedMs.value, 'intervals': target - 1, 'config': config.value, 'framesAnalyzed': _frames, 'httpRttMs': Stats.of(_rttMs).toJson(), 'queueDelayMs': Stats.of(_queueMs).toJson()})}',
+            '[throughput-json] ${jsonEncode({'engine': 'nitro_camera-${engine.value.name}', 'target': target, 'elapsedMs': elapsedMs.value, 'intervals': target - 1, 'config': config.value, 'framesAnalyzed': _frames, 'httpRttMs': Stats.of(_rttMs).toJson(), 'queueDelayMs': Stats.of(_queueMs).toJson()})}',
           );
           _finish(ThroughputState.completed);
         }
@@ -203,8 +212,6 @@ class ThroughputController {
   void _finish(ThroughputState end) {
     _client?.close();
     _client = null;
-    _fpsTicker?.cancel();
-    _fpsTicker = null;
     unawaited(stopScanner());
     batch(() {
       state.value = end;

@@ -5,8 +5,11 @@ import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
 import '../state/throughput_controller.dart';
-import 'widgets/throughput_panel.dart';
+import 'widgets/throughput_bottom_panel.dart';
+import 'widgets/throughput_top_bar.dart';
 
+/// Same layout as the RN example's ThroughputScreen: full-bleed camera,
+/// server + engine picker at the top, the counter panel at the bottom.
 class ThroughputScreen extends StatefulWidget {
   const ThroughputScreen({super.key});
 
@@ -37,6 +40,7 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -53,7 +57,18 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
               onClosing: () => unawaited(_tp.stopScanner()),
             );
           }),
-          ThroughputPanel(tp: _tp, server: _server),
+          Positioned(
+            top: 60,
+            left: 16,
+            right: 16,
+            child: ThroughputTopBar(tp: _tp, server: _server),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ThroughputBottomPanel(tp: _tp, server: _server),
+          ),
         ],
       ),
     );
