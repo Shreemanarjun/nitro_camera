@@ -36,6 +36,13 @@ class CameraController extends ChangeNotifier {
   /// Whether to capture audio during video recording.
   final bool audio;
 
+  /// Whether the session carries the still (JPEG) output. `false` leaves it
+  /// out (vision-camera without a photo output) — one stream less for the
+  /// ISP when only preview + frames are needed, e.g. scanning; [takePhoto],
+  /// [takePhotoWithOptions] and [takeSnapshot] then throw a
+  /// [CaptureException]. Android only; iOS/macOS always attach it.
+  final bool photo;
+
   /// Whether the preview/camera session is active.
   ///
   /// Setting this to `false` pauses streaming (equivalent to [NitroCamera.stopPreview]).
@@ -67,6 +74,7 @@ class CameraController extends ChangeNotifier {
     required this.device,
     this.format,
     this.audio = false,
+    this.photo = true,
     NitroCamera? native,
   }) : _native = native ?? NitroCamera.instance;
 
@@ -113,6 +121,10 @@ class CameraController extends ChangeNotifier {
 
   CameraConfiguration? _configuration;
   ResolvedCameraConfig? _resolvedConfig;
+
+  // Requested frame-processor stream size (0 = preview size); kept so a
+  // reopening [configure] preserves it.
+  int _frameWidth = 0, _frameHeight = 0;
 
   /// The last-applied declarative configuration (null until [initialize]).
   CameraConfiguration? get configuration => _configuration;
@@ -201,7 +213,12 @@ class CameraController extends ChangeNotifier {
   /// [width] / [height] / [fps] override the values derived from [format] when
   /// supplied (e.g. to open at a screen-matched resolution). The camera then
   /// negotiates the closest hardware-supported size natively.
-  Future<void> initialize({int? width, int? height, int? fps}) async {
+  ///
+  /// [frameWidth] / [frameHeight] size the frame-processor stream separately
+  /// from the preview (vision-camera's frame-output `targetResolution`) — a
+  /// sharp preview over small, cheap analysis frames. Omitted = frames at the
+  /// preview size. Android only; iOS/macOS deliver frames at the preview size.
+  Future<void> initialize({int? width, int? height, int? fps, int? frameWidth, int? frameHeight}) async {
     // Without an explicit format/size, target 1080p and let the native
     // resolver negotiate the closest supported size. Falling back to
     // `device.formats.first` here used to inherit the platform's enumeration
@@ -213,12 +230,17 @@ class CameraController extends ChangeNotifier {
     final h = height ?? fmt?.videoHeight ?? 1080;
     final targetFps = fps ?? fmt?.maxFps.toInt() ?? 30;
 
+    _frameWidth = frameWidth ?? 0;
+    _frameHeight = frameHeight ?? 0;
     final tid = await _native.openCamera(
       device.id,
       w,
       h,
       targetFps,
       audio ? 1 : 0,
+      _frameWidth,
+      _frameHeight,
+      photo ? 1 : 0,
     );
     // The native side returns 0 when the open failed (unknown device, HAL
     // rejection, ...). Treating 0 as a live session would publish a broken
@@ -278,6 +300,9 @@ class CameraController extends ChangeNotifier {
         h,
         next.fps,
         next.enableAudio ? 1 : 0,
+        _frameWidth,
+        _frameHeight,
+        photo ? 1 : 0,
       );
       if (tid == 0) {
         _textureId = null;
@@ -684,20 +709,20 @@ class CameraController extends ChangeNotifier {
 
   /// Captures a photo. Returns the file path and metadata.
   Future<PhotoResult> takePhoto() async {
-    _requireInitialized();
+    _requirePhoto();
     return await _native.takePhoto(_textureId!);
   }
 
   /// Captures a photo with explicit [options] (flash, quality, shutter sound…).
   Future<PhotoResult> takePhotoWithOptions(PhotoCaptureOptions options) async {
-    _requireInitialized();
+    _requirePhoto();
     return await _native.takePhotoWithOptions(_textureId!, options.toNative());
   }
 
   /// Captures the current preview frame as a fast JPEG snapshot (no full
   /// still-capture round-trip).
   Future<PhotoResult> takeSnapshot() async {
-    _requireInitialized();
+    _requirePhoto();
     return await _native.takeSnapshot(_textureId!);
   }
 
@@ -918,6 +943,13 @@ class CameraController extends ChangeNotifier {
   void _requireInitialized() {
     if (!isInitialized || _isDisposed) {
       throw SessionException.notInitialized();
+    }
+  }
+
+  void _requirePhoto() {
+    _requireInitialized();
+    if (!photo) {
+      throw const CaptureException('capture/photo-disabled', 'Photo output is disabled for this session (photo: false).');
     }
   }
 }

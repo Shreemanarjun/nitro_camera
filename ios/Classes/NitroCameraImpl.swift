@@ -176,9 +176,10 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     // MARK: - Camera lifecycle
 
-    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64) async throws -> Int64 {
+    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64) async throws -> Int64 {
         // frameWidth/frameHeight: Android-only split. AVCaptureVideoDataOutput
         // delivers at the active format's size, so frames match the preview here.
+        // enablePhoto: Android-only too; the photo output stays attached here.
         // Each guard logs its reason: the bridge collapses thrown errors into a
         // 0 texture id, so without these lines an open failure is unattributable.
         guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {

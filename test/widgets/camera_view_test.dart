@@ -38,13 +38,13 @@ class GatedFake extends FakeNitroCamera {
   Completer<void>? openGate;
 
   @override
-  Future<int> openCamera(String deviceId, int width, int height, int fps, int enableAudio) async {
+  Future<int> openCamera(String deviceId, int width, int height, int fps, int enableAudio, int frameWidth, int frameHeight, int enablePhoto) async {
     final gate = openGate;
     if (gate != null) {
       openGate = null;
       await gate.future;
     }
-    return super.openCamera(deviceId, width, height, fps, enableAudio);
+    return super.openCamera(deviceId, width, height, fps, enableAudio, frameWidth, frameHeight, enablePhoto);
   }
 }
 
@@ -104,7 +104,7 @@ void main() {
       expect(initialised.single.textureId, 7);
       expect(resolved, isNotNull);
       expect(resolved!.videoWidth, 1920);
-      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 30, 0]);
+      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 30, 0, 0, 0, 1]);
     });
 
     testWidgets('a custom loading widget replaces the default spinner', (tester) async {
@@ -140,7 +140,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(fake.argsOf('openCamera'), ['back', 1280, 720, 60, 1]);
+      expect(fake.argsOf('openCamera'), ['back', 1280, 720, 60, 1, 0, 0, 1]);
     });
 
     testWidgets('the child overlay renders on top of the preview', (tester) async {
@@ -353,7 +353,7 @@ void main() {
 
       await tester.pumpWidget(view(width: 1280, settleDelay: settle, onClosing: () => closings++));
       await tester.pumpAndSettle();
-      expect(fake.argsOf('openCamera'), ['back', 1280, 720, 30, 0]);
+      expect(fake.argsOf('openCamera'), ['back', 1280, 720, 30, 0, 0, 0, 1]);
       fake.clear();
 
       await tester.pumpWidget(view(width: 1920, settleDelay: settle, onClosing: () => closings++));
@@ -367,7 +367,7 @@ void main() {
       await tester.pump(settle);
       await tester.pumpAndSettle();
 
-      expect(fake.argsOf('openCamera'), ['back', 1920, 720, 30, 0]);
+      expect(fake.argsOf('openCamera'), ['back', 1920, 720, 30, 0, 0, 0, 1]);
       expect(find.byType(CameraPreview), findsOneWidget);
     });
 
@@ -380,7 +380,7 @@ void main() {
       await drainRestart(tester);
       await tester.pumpAndSettle();
 
-      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 60, 0]);
+      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 60, 0, 0, 0, 1]);
       expect(fake.countOf('closeCamera'), 1);
     });
 
@@ -393,7 +393,7 @@ void main() {
       await drainRestart(tester);
       await tester.pumpAndSettle();
 
-      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 30, 1]);
+      expect(fake.argsOf('openCamera'), ['back', 1920, 1080, 30, 1, 0, 0, 1]);
     });
 
     testWidgets('toggling isActive only starts/stops the preview, never reopens', (tester) async {

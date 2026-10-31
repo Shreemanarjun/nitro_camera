@@ -63,7 +63,7 @@ class PhotoOutput(private val session: CameraSession) {
     }
 
     // Photo capture (JPEG)
-    val photoReader: ImageReader by lazy {
+    private val photoReaderLazy = lazy {
         val characteristics = session.characteristics
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val sizes = map?.getOutputSizes(ImageFormat.JPEG)?.sortedByDescending { it.width * it.height }
@@ -71,6 +71,7 @@ class PhotoOutput(private val session: CameraSession) {
         Log.d("NitroCamera", "PhotoOutput: PhotoReader initialized with ${size.width}x${size.height}")
         ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
     }
+    val photoReader: ImageReader by photoReaderLazy
 
     // Shutter sound — loaded once, released in release().
     private var shutterSound: MediaActionSound? = null
@@ -687,6 +688,6 @@ class PhotoOutput(private val session: CameraSession) {
     fun release() {
         try { shutterSound?.release() } catch (_: Exception) {}
         shutterSound = null
-        photoReader.close()
+        if (photoReaderLazy.isInitialized()) photoReader.close()
     }
 }

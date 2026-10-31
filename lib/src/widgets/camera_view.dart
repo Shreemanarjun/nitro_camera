@@ -31,9 +31,12 @@ class CameraView extends StatefulWidget {
     required this.device,
     this.width,
     this.height,
+    this.frameWidth,
+    this.frameHeight,
     this.fps = 30,
     this.format,
     this.audio = false,
+    this.photo = true,
     this.isActive = true,
     this.previewMode = PreviewMode.texture,
     this.resizeMode = PreviewResizeMode.cover,
@@ -56,6 +59,13 @@ class CameraView extends StatefulWidget {
   final int? width;
   final int? height;
 
+  /// Frame-processor stream size, independent of the preview — e.g. a sharp
+  /// 1640×1232 preview over 640×480 analysis frames (vision-camera's frame
+  /// output `targetResolution`). Omitted = frames at the preview size.
+  /// Android only. Changing it reopens the session.
+  final int? frameWidth;
+  final int? frameHeight;
+
   /// Target frame rate.
   final int fps;
 
@@ -64,6 +74,10 @@ class CameraView extends StatefulWidget {
 
   /// Capture audio for video recording. Changing this reopens the session.
   final bool audio;
+
+  /// Attach the still (JPEG) output — see [CameraController.photo]. `false`
+  /// for preview + frames only (scanning). Changing this reopens the session.
+  final bool photo;
 
   /// Whether the preview/session is running. Toggling only starts/stops it.
   final bool isActive;
@@ -143,7 +157,7 @@ class _CameraViewState extends State<CameraView> {
   static const Duration _initialRetryDelay = Duration(milliseconds: 250);
   static const Duration _maxRetryDelay = Duration(seconds: 4);
 
-  bool _lifecycleChanged(CameraView old) => old.device.id != widget.device.id || old.width != widget.width || old.height != widget.height || old.fps != widget.fps || old.audio != widget.audio;
+  bool _lifecycleChanged(CameraView old) => old.device.id != widget.device.id || old.width != widget.width || old.height != widget.height || old.frameWidth != widget.frameWidth || old.frameHeight != widget.frameHeight || old.fps != widget.fps || old.audio != widget.audio || old.photo != widget.photo;
 
   @override
   void initState() {
@@ -205,12 +219,15 @@ class _CameraViewState extends State<CameraView> {
       device: widget.device,
       format: widget.format,
       audio: widget.audio,
+      photo: widget.photo,
       native: widget.native,
     );
     await controller.initialize(
       width: widget.width,
       height: widget.height,
       fps: widget.fps,
+      frameWidth: widget.frameWidth,
+      frameHeight: widget.frameHeight,
     );
     if (!mounted) {
       await controller.dispose();

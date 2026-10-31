@@ -65,6 +65,9 @@ class CameraSession(
     // frame-output targetResolution) — a sharp preview over small analysis frames.
     frameWidth: Int = width,
     frameHeight: Int = height,
+    // false = no still (JPEG) stream in the session (vision-camera without a
+    // photo output): one stream less for the ISP; photo capture then throws.
+    private val enablePhoto: Boolean = true,
 ) {
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
@@ -485,7 +488,8 @@ class CameraSession(
         // Sync buffer size
         renderer.inputSurfaceTexture?.setDefaultBufferSize(resolvedSize.width, resolvedSize.height)
 
-        val surfaces = mutableListOf(pSurface, photoOutput.photoReader.surface, frameOutput.surface)
+        val surfaces = mutableListOf(pSurface, frameOutput.surface)
+        if (enablePhoto) surfaces.add(photoOutput.photoReader.surface)
         // Pre-wire the persistent recorder surface into the session so recordings
         // start instantly (no session reconfiguration at record time). It is NOT
         // added as a repeating-request target until a recording actually starts —
@@ -506,7 +510,7 @@ class CameraSession(
 
         Log.i("NitroCamera", "createCaptureSession($deviceId): " +
             "preview(PRIV)=${resolvedSize.width}x${resolvedSize.height} " +
-            "photo(JPEG) frame(YUV)=${frameOutput.size.width}x${frameOutput.size.height} " +
+            "photo(JPEG)=${if (enablePhoto) "on" else "off"} frame(YUV)=${frameOutput.size.width}x${frameOutput.size.height} " +
             "recorder(PRIV)=${if (includesRecorder) "pre-wired" else "off (GL record fallback)"} " +
             "fpsRange=${bestFpsRange()}")
 
@@ -1113,8 +1117,10 @@ class CameraSession(
 
     // ── Still capture (delegated to PhotoOutput) ────────────────────────────────
 
-    suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult =
-        photoOutput.takePhoto(options)
+    suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult {
+        check(enablePhoto) { "Photo output disabled for this session (enablePhoto = 0)" }
+        return photoOutput.takePhoto(options)
+    }
 
     suspend fun takeDngPhoto(options: PhotoOptions): PhotoResult =
         photoOutput.takeDngPhoto(options)

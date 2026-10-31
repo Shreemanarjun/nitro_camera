@@ -50,8 +50,13 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
             if (device == null) return const SizedBox.shrink();
             return CameraView(
               device: device,
-              width: 640,
-              height: 480,
+              // Same streams as the RN app: CameraX's 1640×1232 preview
+              // (measured via dumpsys) over 640×480 analysis frames.
+              width: 1640,
+              height: 1232,
+              frameWidth: 640,
+              frameHeight: 480,
+              photo: false, // no still stream, like the RN session
               fps: 60,
               onInitialized: _tp.onCamera,
               onClosing: () => unawaited(_tp.stopScanner()),

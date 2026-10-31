@@ -13,7 +13,7 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func getAvailableCameraDevices() -> [CameraDevice] { fatalError("TODO: implement NitroCameraModuleImpl.getAvailableCameraDevices") }
     public func getDeviceCount() -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.getDeviceCount") }
     public func getDevice(index: Int64) -> CameraDevice { fatalError("TODO: implement NitroCameraModuleImpl.getDevice") }
-    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64) async throws -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.openCamera") }
+    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64) async throws -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.openCamera") }
     public func closeCamera(textureId: Int64) async throws -> Void { fatalError("TODO: implement NitroCameraModuleImpl.closeCamera") }
     public func startPreview(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.startPreview") }
     public func stopPreview(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.stopPreview") }

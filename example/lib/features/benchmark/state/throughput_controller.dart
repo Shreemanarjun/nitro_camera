@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:nitro_camera/native.dart';
@@ -9,6 +10,7 @@ import 'package:signals_flutter/signals_flutter.dart';
 import '../logic/back_camera.dart';
 import '../logic/bench_stats.dart';
 import '../logic/qr_server_client.dart';
+import '../logic/throughput_worker.dart';
 
 enum ThroughputState {
   idle,
@@ -23,8 +25,12 @@ enum ThroughputState {
 
 /// The decoder a run reports from — the RN app's ZXing / ML Kit toggle.
 enum ThroughputEngine {
-  /// nitro_camera's Dart [CodeScanner] (zxing) on the frame-processor isolate.
-  zxing('ZXing'),
+  /// zxing-cpp via nitro_zxing (FFI) on the frame-processor isolate — the
+  /// same decoder as the RN app's ZXing engine.
+  zxingCpp('ZXing C++'),
+
+  /// nitro_camera's Dart [CodeScanner] (zxing port) on the frame-processor isolate.
+  zxing('ZXing Dart'),
 
   /// The native ML Kit barcode detector ([NativeDetector.barcode]).
   mlkit('ML Kit');
@@ -50,7 +56,7 @@ class ThroughputController {
   // qr-server. Use the host's LAN origin instead when the phone shares its Wi-Fi.
   static const defaultServer = 'http://127.0.0.1:3000';
 
-  final engine = signal(ThroughputEngine.zxing);
+  final engine = signal(ThroughputEngine.zxingCpp);
   // Non-null only while a run has the camera mounted.
   final device = signal<CameraDeviceInfo?>(null);
   final state = signal(ThroughputState.idle);
@@ -59,8 +65,13 @@ class ThroughputController {
   final error = signal<String?>(null);
   final config = signal('');
 
-  CodeScanner? _scanner;
+  // ZXing: decode + report on the frame worker (see throughput_worker.dart);
+  // this isolate only receives progress events.
+  CameraFrameProcessor<bool>? _proc;
+  ReceivePort? _events;
+  String _origin = '';
   final _subs = <StreamSubscription<Object?>>[];
+  // ML Kit: native detector events arrive here, so its reports go from here.
   QrServerClient? _client;
   Future<void> _reports = Future<void>.value(); // serial report worker
   final _clock = Stopwatch(); // monotonic; started by the first accepted scan
@@ -92,7 +103,8 @@ class ThroughputController {
     _rttMs.clear();
     _queueMs.clear();
     _frames = 0;
-    final client = QrServerClient(Uri.parse(origin.trim()));
+    _origin = origin.trim();
+    final client = QrServerClient(Uri.parse(_origin));
     _client = client;
     try {
       if (!await client.reset()) throw StateError('Server reset failed');
@@ -118,7 +130,7 @@ class ThroughputController {
     final s = c.getSessionState();
     config.value =
         'Requested 640×480 @ 60 FPS; selected ${s.fps} FPS, ${s.pixelFormat.name}\n'
-        'Android: default AE/AF/AWB; FPS and resolution negotiated by nitro_camera; output ${s.width}×${s.height}';
+        'Android: default AE/AF/AWB; FPS and resolution negotiated by nitro_camera; output ${s.frameWidth}×${s.frameHeight}, preview ${s.width}×${s.height}';
     await stopScanner();
     if (engine.value == ThroughputEngine.mlkit) {
       c.startDetector(NativeDetector.barcode);
@@ -133,22 +145,61 @@ class ThroughputController {
       return;
     }
     c.enableFrameProcessing();
-    final scanner = CodeScanner(kind: CodeScanKind.qr, windowFraction: 1.0);
-    await scanner.start(NitroCamera.instance.frameStream);
+    final events = ReceivePort();
+    final proc = CameraFrameProcessor<bool>(
+      throughputFrameHandler,
+      workerInit: throughputWorkerInit,
+      workerInitArg: (_origin, target, events.sendPort, engine.value == ThroughputEngine.zxingCpp),
+    );
+    await proc.start();
     if (state.value != ThroughputState.running) {
-      await scanner.dispose();
+      events.close();
+      await proc.dispose();
       return;
     }
-    _scanner = scanner;
-    _subs
-      ..add(scanner.stats.listen((_) => _frames++))
-      // Every raw hit, no confirmer.
-      ..add(scanner.detections.listen((r) => _submit(r.text)));
+    _proc = proc;
+    _events = events;
+    events.listen(_onWorkerEvent);
+    _subs.add(proc.stats.listen((_) => _frames++));
+    // Native → worker directly: no UI-isolate hop per frame.
+    proc.attachDirect();
   }
+
+  void _onWorkerEvent(Object? e) {
+    if (state.value != ThroughputState.running) return;
+    switch (e) {
+      case ThroughputAccepted(:final count, :final elapsedMs):
+        batch(() {
+          this.count.value = count;
+          this.elapsedMs.value = elapsedMs;
+        });
+      case ThroughputDone(:final elapsedMs, :final rttMs, :final queueMs):
+        batch(() {
+          count.value = target;
+          this.elapsedMs.value = elapsedMs;
+        });
+        _rttMs.addAll(rttMs);
+        _queueMs.addAll(queueMs);
+        _logResult();
+        _finish(ThroughputState.completed);
+      case ThroughputFailed(:final error, :final elapsedMs):
+        batch(() {
+          this.error.value = error;
+          this.elapsedMs.value = elapsedMs;
+        });
+        _finish(ThroughputState.failed);
+    }
+  }
+
+  void _logResult() => debugPrint(
+    '[throughput-json] ${jsonEncode({'engine': 'nitro_camera-${engine.value.name}', 'target': target, 'elapsedMs': elapsedMs.value, 'intervals': target - 1, 'config': config.value, 'framesAnalyzed': _frames, 'httpRttMs': Stats.of(_rttMs).toJson(), 'queueDelayMs': Stats.of(_queueMs).toJson()})}',
+  );
 
   void stop() {
     if (!state.value.active) return;
-    elapsedMs.value = _clock.elapsedMilliseconds;
+    // ZXing runs keep their clock on the worker; elapsedMs already holds its
+    // last progress value.
+    if (_clock.isRunning) elapsedMs.value = _clock.elapsedMilliseconds;
     _clock.stop();
     _finish(ThroughputState.stopped);
   }
@@ -158,8 +209,10 @@ class ThroughputController {
       await s.cancel();
     }
     _subs.clear();
-    await _scanner?.dispose();
-    _scanner = null;
+    _events?.close();
+    _events = null;
+    await _proc?.dispose();
+    _proc = null;
   }
 
   void dispose() {
@@ -192,9 +245,7 @@ class ThroughputController {
         _queueMs.add(queued);
         if (count.value == target) {
           _clock.stop();
-          debugPrint(
-            '[throughput-json] ${jsonEncode({'engine': 'nitro_camera-${engine.value.name}', 'target': target, 'elapsedMs': elapsedMs.value, 'intervals': target - 1, 'config': config.value, 'framesAnalyzed': _frames, 'httpRttMs': Stats.of(_rttMs).toJson(), 'queueDelayMs': Stats.of(_queueMs).toJson()})}',
-          );
+          _logResult();
           _finish(ThroughputState.completed);
         }
       } catch (e) {

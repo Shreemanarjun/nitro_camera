@@ -220,12 +220,18 @@ class FakeNitroCamera extends NitroCamera {
     int height,
     int fps,
     int enableAudio,
+    int frameWidth,
+    int frameHeight,
+    int enablePhoto,
   ) async => _rec('openCamera', [
     deviceId,
     width,
     height,
     fps,
     enableAudio,
+    frameWidth,
+    frameHeight,
+    enablePhoto,
   ], openCameraResult);
 
   @override

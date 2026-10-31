@@ -395,6 +395,9 @@ abstract class NitroCamera extends HybridObject {
   /// independent of the preview (vision-camera's frame-output
   /// `targetResolution`); 0 = same as the preview. Android only — iOS/macOS
   /// deliver frames at the session format's size.
+  /// [enablePhoto] — 0 leaves the still (JPEG) stream out of the session, as
+  /// vision-camera does without a photo output; photo capture then fails.
+  /// Android only — iOS/macOS always attach the photo output.
   @nitroNativeAsync
   Future<int> openCamera(
     String deviceId,
@@ -404,6 +407,7 @@ abstract class NitroCamera extends HybridObject {
     int enableAudio,
     int frameWidth,
     int frameHeight,
+    int enablePhoto,
   );
 
   @nitroNativeAsync

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../nitro_camera.native.dart' show CameraFrame;
+import '../nitro_camera.native.dart' show CameraFrame, NitroCamera;
 
 /// A camera frame handed to a [CameraFrameProcessor] handler. The [bytes] are a
 /// **copy** owned by the worker isolate (the native zero-copy view cannot cross
@@ -59,6 +59,24 @@ class _Init<R> {
   final WorkerInitializer? workerInit;
   final Object? workerInitArg;
   const _Init(this.reply, this.handler, [this.workerInit, this.workerInitArg]);
+}
+
+/// Where a worker attached with [CameraFrameProcessor.attachDirect] reads
+/// frames from. Runs on the worker isolate, so it must be top-level/static.
+typedef FrameSource = Stream<CameraFrame> Function();
+
+/// The default [FrameSource]: the native frame stream, opened by the worker's
+/// own `NitroCamera` handle (same native object as the UI isolate's).
+Stream<CameraFrame> nativeFrameSource() => NitroCamera.instance.frameStream;
+
+class _AttachDirect {
+  final FrameSource source;
+  const _AttachDirect(this.source);
+}
+
+class _Detach {
+  final SendPort done;
+  const _Detach(this.done);
 }
 
 /// Per-frame processing statistics, emitted for EVERY processed frame
@@ -220,6 +238,20 @@ class CameraFrameProcessor<R> {
     });
   }
 
+  /// Has the WORKER subscribe to the frame stream itself — frames go native →
+  /// worker with no UI-isolate hop (vision-camera's frame processor running on
+  /// the camera thread, as close as Dart isolates get). Each wake-up processes
+  /// only the newest frame of a delivered batch, so a slow handler never works
+  /// through a backlog. Use instead of [attach]; frame delivery must still be
+  /// enabled on the controller. [results] and [stats] work as before.
+  void attachDirect([FrameSource source = nativeFrameSource]) {
+    if (_disposed || !_ready.isCompleted) return;
+    _direct = true;
+    _toWorker!.send(_AttachDirect(source));
+  }
+
+  bool _direct = false;
+
   void _enqueue(_FrameWire wire) {
     if (_busy) {
       _pending = wire; // drop-latest: keep only the newest
@@ -237,6 +269,14 @@ class CameraFrameProcessor<R> {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    if (_direct) {
+      // Cancel the worker's native subscription before the kill, so the native
+      // side releases the port instead of posting to a dead one.
+      final done = ReceivePort();
+      _toWorker?.send(_Detach(done.sendPort));
+      await done.first.timeout(const Duration(milliseconds: 500), onTimeout: () => null);
+      done.close();
+    }
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _pending = null;
@@ -249,15 +289,31 @@ class CameraFrameProcessor<R> {
     final sw = Stopwatch();
     init.workerInit?.call(init.workerInitArg);
     init.reply.send(rp.sendPort);
-    rp.listen((msg) {
+
+    void run(FrameData frame) {
+      sw
+        ..reset()
+        ..start();
+      final result = init.handler(frame);
+      sw.stop();
+      init.reply.send(_Reply<R>(result, sw.elapsedMicroseconds, frame.timestamp));
+    }
+
+    // Direct mode: newest frame wins; processed after the current delivery
+    // (a coalesced batch arrives as one message), so stale frames are skipped.
+    StreamSubscription<CameraFrame>? direct;
+    FrameData? latest;
+    void runLatest() {
+      final f = latest;
+      latest = null;
+      if (f != null) run(f);
+    }
+
+    rp.listen((msg) async {
       if (msg is _FrameWire) {
-        final bytes = msg.bytes.materialize().asUint8List();
-        sw
-          ..reset()
-          ..start();
-        final result = init.handler(
+        run(
           FrameData(
-            bytes: bytes,
+            bytes: msg.bytes.materialize().asUint8List(),
             width: msg.width,
             height: msg.height,
             format: msg.format,
@@ -267,8 +323,27 @@ class CameraFrameProcessor<R> {
             isMirrored: msg.isMirrored,
           ),
         );
-        sw.stop();
-        init.reply.send(_Reply<R>(result, sw.elapsedMicroseconds, msg.timestamp));
+      } else if (msg is _AttachDirect) {
+        await direct?.cancel();
+        direct = msg.source().listen((f) {
+          final first = latest == null;
+          // Copy now: the native view is only valid during this callback.
+          latest = FrameData(
+            bytes: Uint8List.fromList(f.pixels),
+            width: f.width,
+            height: f.height,
+            format: f.pixelFormat,
+            timestamp: f.timestamp,
+            orientation: f.orientation,
+            bytesPerRow: f.bytesPerRow,
+            isMirrored: f.isMirrored != 0,
+          );
+          if (first) scheduleMicrotask(runLatest);
+        });
+      } else if (msg is _Detach) {
+        await direct?.cancel();
+        direct = null;
+        msg.done.send(null);
       }
     });
   }

@@ -12,9 +12,21 @@
 * **Frame helpers** — `FrameData.resized / cropped / rotated`.
 * **Scanner ROI** — `CodeScanner(windowFraction: …)`.
 * **Multi-cam discovery** — typed `ConcurrentCameraSet` + `getConcurrentCameraSets`.
+* **Separate frame-processor size** (Android) — `frameWidth` / `frameHeight` on
+  `CameraView` and `initialize()`: a sharp preview over small analysis frames
+  (vision-camera's frame-output `targetResolution`).
+* **Photo output opt-out** (Android) — `photo: false` leaves the JPEG stream out
+  of the session for preview + frames only; photo/snapshot calls then throw
+  `CaptureException('capture/photo-disabled')`.
+* **Direct frame delivery** — `CameraFrameProcessor.attachDirect()`: the worker
+  isolate subscribes to the native frame stream itself (no UI-isolate hop) and
+  processes only the newest frame of each batch. ~7 % faster end-to-end in the
+  1000-QR throughput benchmark.
 
 ### Fixed
 
+* Scanner: small QR codes (2.5–4 px modules) now decode — a 2× upscaled
+  centre pass joins the adaptive ladder.
 * Android: recorded video no longer squished — encoder size matches session aspect.
 * Android: fixed a persistent-surface teardown race that could crash the camera.
 * iOS: back↔front switch with manual white balance no longer crashes.

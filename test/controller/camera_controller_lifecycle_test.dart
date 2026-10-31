@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nitro_camera/native.dart'
-    show CameraConfig, NitroCamera, ResolvedConfig;
+import 'package:nitro_camera/native.dart' show CameraConfig, NitroCamera, ResolvedConfig;
 import 'package:nitro_camera/nitro_camera.dart';
 
 import '../support/fake_nitro_camera.dart';
@@ -33,7 +32,7 @@ void main() {
 
       await c.initialize();
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1920, 1080, 30, 0]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1920, 1080, 30, 0, 0, 0, 1]);
       expect(c.textureId, 7);
       expect(c.isInitialized, isTrue);
       expect(c.isActive, isTrue);
@@ -84,7 +83,7 @@ void main() {
 
       await c.initialize(width: 640, height: 480, fps: 15);
 
-      expect(fake.argsOf('openCamera'), ['cam0', 640, 480, 15, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 640, 480, 15, 1, 0, 0, 1]);
       expect(c.configuration!.fps, 15);
     });
 
@@ -95,7 +94,7 @@ void main() {
 
       await c.initialize();
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 60, 0]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 60, 0, 0, 0, 1]);
       expect(c.configuration!.fps, 60);
       expect(c.resolvedConfig!.selectedFps, 60);
       expect(c.resolvedConfig!.videoWidth, 1280);
@@ -114,9 +113,7 @@ void main() {
       await expectLater(
         c.initialize(),
         throwsA(
-          isA<DeviceException>()
-              .having((e) => e.code, 'code', 'device/open-failed')
-              .having((e) => e.message, 'message', contains('cam0')),
+          isA<DeviceException>().having((e) => e.code, 'code', 'device/open-failed').having((e) => e.message, 'message', contains('cam0')),
         ),
       );
       expect(c.isInitialized, isFalse);
@@ -190,8 +187,7 @@ void main() {
       expect(notifications, 1);
     });
 
-    test('isActive false is applied live and mirrored on the controller',
-        () async {
+    test('isActive false is applied live and mirrored on the controller', () async {
       final c = controllerFor();
       await c.initialize();
       fake.clear();
@@ -213,7 +209,7 @@ void main() {
 
       expect(fake.callNames, ['closeCamera', 'openCamera', 'configure']);
       expect(fake.argsOf('closeCamera'), [7]);
-      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 24, 0]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 24, 0, 0, 0, 1]);
       expect(c.textureId, 11);
       expect(c.width, 1280);
       expect(c.height, 720);
@@ -230,9 +226,49 @@ void main() {
 
       await c.configure(const CameraConfiguration(fps: 48));
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1440, 1080, 48, 0]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1440, 1080, 48, 0, 0, 0, 1]);
       expect(c.width, 1440);
       expect(c.height, 1080);
+    });
+
+    test('a separate frame size is forwarded, read back and kept on reopen', () async {
+      fake.sessionStateJson =
+          '{"running":true,"width":1640,"height":1232,"frameWidth":640,'
+          '"frameHeight":480,"fps":30,"pixelFormat":0}';
+      final c = controllerFor();
+      await c.initialize(width: 1640, height: 1232, frameWidth: 640, frameHeight: 480);
+
+      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 30, 0, 640, 480, 1]);
+      final s = c.getSessionState();
+      expect((s.width, s.height), (1640, 1232), reason: 'preview');
+      expect((s.frameWidth, s.frameHeight), (640, 480), reason: 'frames');
+
+      fake.clear();
+      await c.configure(const CameraConfiguration(fps: 24));
+      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 24, 0, 640, 480, 1]);
+    });
+
+    test('photo: false drops the still output, survives a reopen and blocks capture', () async {
+      final c = CameraController(device: testDevice(), photo: false, native: fake);
+      await c.initialize();
+      expect(fake.argsOf('openCamera')!.last, 0);
+
+      fake.clear();
+      await c.configure(const CameraConfiguration(fps: 24));
+      expect(fake.argsOf('openCamera')!.last, 0);
+
+      for (final capture in [c.takePhoto, c.takeSnapshot]) {
+        await expectLater(
+          capture(),
+          throwsA(isA<CaptureException>().having((e) => e.code, 'code', 'capture/photo-disabled')),
+        );
+      }
+      expect(fake.called('takePhoto') || fake.called('takeSnapshot'), isFalse);
+    });
+
+    test('a session state without frame fields reports the preview size', () {
+      final s = SessionState.fromJson(sessionStateJson(width: 1280, height: 720));
+      expect((s.frameWidth, s.frameHeight), (1280, 720));
     });
 
     test('a device change reopens against the new id with audio', () async {
@@ -248,8 +284,7 @@ void main() {
       expect(fake.argsOf('openCamera')![4], 1);
     });
 
-    test('a failed reopen throws and leaves the controller uninitialised',
-        () async {
+    test('a failed reopen throws and leaves the controller uninitialised', () async {
       final c = controllerFor();
       await c.initialize();
       fake.clear();
@@ -258,9 +293,7 @@ void main() {
       await expectLater(
         c.configure(const CameraConfiguration(deviceId: 'cam9', fps: 30)),
         throwsA(
-          isA<DeviceException>()
-              .having((e) => e.code, 'code', 'device/open-failed')
-              .having((e) => e.message, 'message', contains('cam9')),
+          isA<DeviceException>().having((e) => e.code, 'code', 'device/open-failed').having((e) => e.message, 'message', contains('cam9')),
         ),
       );
       expect(c.textureId, isNull);
@@ -498,8 +531,7 @@ void main() {
       expect(fake.calls, isEmpty);
     });
 
-    test('every control throws session/not-initialized after dispose',
-        () async {
+    test('every control throws session/not-initialized after dispose', () async {
       final c = controllerFor();
       await c.initialize();
       await c.dispose();
@@ -630,8 +662,7 @@ void main() {
       expect(CameraController.getConcurrentCameraIds(native: fake), isEmpty);
     });
 
-    test('junk concurrent-id payloads throw instead of looking unsupported',
-        () {
+    test('junk concurrent-id payloads throw instead of looking unsupported', () {
       fake.concurrentCameraIdsJson = 'not-json';
       expect(
         () => CameraController.getConcurrentCameraIds(native: fake),
@@ -719,8 +750,7 @@ void main() {
       );
     });
 
-    test('getConcurrentCameraSets combines native combos + device list',
-        () async {
+    test('getConcurrentCameraSets combines native combos + device list', () async {
       fake.concurrentCameraIdsJson = '[["back","front"]]';
       fake.availableCameraDevicesJson = '''
 [{"id":"back","name":"Back","position":1,"lensType":1,"sensorOrientation":90,
@@ -737,7 +767,6 @@ void main() {
       expect(sets.single.back!.id, 'back');
       expect(sets.single.front!.id, 'front');
     });
-
   });
 
   group('the default bridge', () {

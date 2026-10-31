@@ -44,6 +44,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   path_provider: ^2.1.5
   zxing_lib: ^1.1.4
+  # zxing-cpp over FFI (react-native-nitro-zxing counterpart), sibling checkout.
+  nitro_zxing:
+    path: ../../nitro_zxing
   signals: ^6.3.0
   nitro: ^0.8.3
   signals_flutter: ^6.3.0

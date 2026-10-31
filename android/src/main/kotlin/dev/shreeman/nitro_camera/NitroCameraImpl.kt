@@ -339,7 +339,7 @@ class NitroCameraImpl(
 
     override suspend fun openCamera(
         deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long,
-        frameWidth: Long, frameHeight: Long,
+        frameWidth: Long, frameHeight: Long, enablePhoto: Long,
     ): Long {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) throw SecurityException("Camera permission not granted")
@@ -486,6 +486,7 @@ class NitroCameraImpl(
                     // 0 = frames at the preview size (the pre-split behaviour).
                     frameWidth   = (if (frameWidth > 0) frameWidth else width).toInt(),
                     frameHeight  = (if (frameHeight > 0) frameHeight else height).toInt(),
+                    enablePhoto  = enablePhoto != 0L,
                 )
                 session.onFrame = { frame ->
                     val delivered = _frameFlow.tryEmit(frame)
