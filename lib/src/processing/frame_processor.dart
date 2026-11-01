@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:nitro/nitro.dart' show NitroBuffer;
+
 import '../nitro_camera.native.dart' show CameraFrame, NitroCamera;
 
 /// A camera frame handed to a [CameraFrameProcessor] handler. The [bytes] are a
@@ -178,8 +180,10 @@ class CameraFrameProcessor<R> {
       }
       // Otherwise it's a handler reply (result + timing).
       _busy = false;
-      final reply = msg as _Reply<R>;
-      if (!_out.isClosed) _out.add(reply.result);
+      final reply = msg as _Reply<Object?>;
+      // Not an R only when the handler threw (null for a non-nullable R).
+      final result = reply.result;
+      if (result is R && !_out.isClosed) _out.add(result);
       if (!_stats.isClosed) {
         _stats.add(
           FrameProcessStats(
@@ -244,6 +248,10 @@ class CameraFrameProcessor<R> {
   /// only the newest frame of a delivered batch, so a slow handler never works
   /// through a backlog. Use instead of [attach]; frame delivery must still be
   /// enabled on the controller. [results] and [stats] work as before.
+  ///
+  /// Here [FrameData.bytes] is **borrowed**: a view of one reused native buffer,
+  /// valid only during the handler call (copy it to keep it). In exchange a
+  /// `@zeroCopy` native call (e.g. a decoder) gets it by pointer, uncopied.
   void attachDirect([FrameSource source = nativeFrameSource]) {
     if (_disposed || !_ready.isCompleted) return;
     _direct = true;
@@ -290,18 +298,31 @@ class CameraFrameProcessor<R> {
     init.workerInit?.call(init.workerInitArg);
     init.reply.send(rp.sendPort);
 
+    // An uncaught throw would kill this isolate silently (no frames, no log),
+    // so a throwing handler counts as a miss and its first error is printed.
+    var reported = false;
     void run(FrameData frame) {
       sw
         ..reset()
         ..start();
-      final result = init.handler(frame);
+      R? result;
+      try {
+        result = init.handler(frame);
+      } catch (e, st) {
+        if (!reported) {
+          reported = true;
+          // ignore: avoid_print
+          print('CameraFrameProcessor: handler threw (later errors not logged): $e\n$st');
+        }
+      }
       sw.stop();
-      init.reply.send(_Reply<R>(result, sw.elapsedMicroseconds, frame.timestamp));
+      init.reply.send(_Reply<R?>(result, sw.elapsedMicroseconds, frame.timestamp));
     }
 
     // Direct mode: newest frame wins; processed after the current delivery
     // (a coalesced batch arrives as one message), so stale frames are skipped.
     StreamSubscription<CameraFrame>? direct;
+    NitroBuffer? frameBuf;
     FrameData? latest;
     void runLatest() {
       final f = latest;
@@ -327,9 +348,14 @@ class CameraFrameProcessor<R> {
         await direct?.cancel();
         direct = msg.source().listen((f) {
           final first = latest == null;
-          // Copy now: the native view is only valid during this callback.
+          // Copy now (the native view is only valid during this callback) into
+          // one reused native buffer: a `@zeroCopy` param then takes it by
+          // pointer, with no second copy. The handler runs synchronously
+          // before the next frame lands, so reuse is safe within its call.
+          final px = f.pixels;
+          final buf = (frameBuf ??= NitroBuffer(px.length))..ensureCapacity(px.length);
           latest = FrameData(
-            bytes: Uint8List.fromList(f.pixels),
+            bytes: buf.view(px.length)..setAll(0, px),
             width: f.width,
             height: f.height,
             format: f.pixelFormat,
@@ -343,6 +369,9 @@ class CameraFrameProcessor<R> {
       } else if (msg is _Detach) {
         await direct?.cancel();
         direct = null;
+        latest = null;
+        frameBuf?.dispose();
+        frameBuf = null;
         msg.done.send(null);
       }
     });

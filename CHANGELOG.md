@@ -57,7 +57,11 @@
 
 ### Changed
 
-* Upgraded to nitro 0.8.3.
+* Upgraded to nitro 0.8.4.
+* `attachDirect` frames are copied into one reused `NitroBuffer`, so a
+  `@zeroCopy` native call (e.g. nitro_zxing's `decodeLuma`) takes them by
+  pointer with no second copy. `FrameData.bytes` is borrowed in this mode:
+  valid only during the handler call.
 * `resolvedConfig` / `onConfigResolved` are now populated when the camera is
   opened from a plain `width`/`height`/`fps` request (no format): the values
   come from the native session read-back, so a requested 60 fps that the

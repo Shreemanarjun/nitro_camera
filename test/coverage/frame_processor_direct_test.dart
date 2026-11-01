@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nitro/nitro.dart' show nitroZeroCopyPtr;
 import 'package:nitro_camera/nitro_camera.dart';
 
 // Top-level: handlers and frame sources run on the worker isolate.
@@ -46,6 +47,48 @@ void main() {
 
     expect(seen, [3, 4], reason: 'frames 1 and 2 were stale within the burst');
     await sub.cancel();
+    await proc.dispose();
+  });
+
+  directThrowTests();
+
+  test('direct-mode bytes are a native view a @zeroCopy param takes by pointer', () async {
+    final proc = CameraFrameProcessor<bool>(isNativeView);
+    await proc.start();
+    final seen = <bool>[];
+    final sub = proc.results.listen(seen.add);
+    proc.attachDirect(oneByOneSource);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(seen, isNotEmpty);
+    expect(seen, everyElement(isTrue));
+    await sub.cancel();
+    await proc.dispose();
+  });
+}
+
+bool isNativeView(FrameData f) => nitroZeroCopyPtr(f.bytes) != null && f.bytes.first == f.timestamp;
+
+int throwsOnOdd(FrameData f) => f.timestamp.isOdd ? throw StateError('odd') : f.timestamp;
+
+/// Frames 1–4, one per event.
+Stream<CameraFrame> oneByOneSource() => Stream.periodic(const Duration(milliseconds: 20), (i) => _frame(i + 1)).take(4);
+
+void directThrowTests() {
+  test('a throwing handler counts as a miss and the worker keeps going', () async {
+    final proc = CameraFrameProcessor<int>(throwsOnOdd);
+    await proc.start();
+    final seen = <int>[];
+    final stats = <bool>[];
+    final s1 = proc.results.listen(seen.add);
+    final s2 = proc.stats.listen((s) => stats.add(s.success));
+
+    proc.attachDirect(oneByOneSource);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+
+    expect(seen, [2, 4]);
+    expect(stats, [false, true, false, true]);
+    await s1.cancel();
+    await s2.cancel();
     await proc.dispose();
   });
 }
