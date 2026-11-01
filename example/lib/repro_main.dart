@@ -7,7 +7,6 @@
 // from Dart; the only manual/automated step is accepting the permission dialog.
 import 'dart:async';
 import 'dart:developer' as developer;
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -33,7 +32,7 @@ void main() {
     slowCallThresholdMs: 200,
     level: NitroLogLevel.verbose,
   );
-  NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
+  NitroRuntime.init();
   Future.delayed(Duration.zero, () => cameraStore.init());
   runApp(const _ReproApp());
 }

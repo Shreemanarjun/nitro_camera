@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,7 +18,7 @@ void main() {
     slowCallThresholdMs: 200,
     level: NitroLogLevel.verbose,
   );
-  NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
+  NitroRuntime.init();
 
   // Pre-warm camera initialization in background after first frame draw
   Future.delayed(Duration.zero, () => cameraStore.init());

@@ -10,7 +10,6 @@
 // flake filter.
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +31,7 @@ void ensureRuntime() {
     slowCallThresholdMs: 200,
     level: NitroLogLevel.verbose,
   );
-  NitroRuntime.init(isolatePoolSize: Platform.numberOfProcessors);
+  NitroRuntime.init();
 }
 
 /// Pumps real frames until [condition] holds, failing after [timeout].
