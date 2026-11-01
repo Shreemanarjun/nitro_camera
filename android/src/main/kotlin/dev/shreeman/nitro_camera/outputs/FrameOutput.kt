@@ -123,7 +123,7 @@ class FrameOutput(
             val isFront = characteristics.isFrontFacing
 
             cb(CameraFrame(buffer, size, image.width.toLong(), image.height.toLong(),
-                System.currentTimeMillis(), rotation.toLong(), textureId,
+                android.os.SystemClock.elapsedRealtimeNanos() /* TEMP stage probe: Kotlin receive ns (was currentTimeMillis) */, rotation.toLong(), textureId,
                 plane.rowStride.toLong(), 0L /* YUV luma */, if (isFront) 1L else 0L))
         } catch (_: Exception) { }
     }

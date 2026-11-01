@@ -34,8 +34,12 @@ class QrServerClient {
     final uri = base.resolve(path);
     final req = await _http.openUrl(method, uri);
     if (body != null) {
+      // A fixed length (not chunked) lets headers + body go out in one write,
+      // as OkHttp does; chunked adds a trailing terminator write per request.
+      final bytes = utf8.encode(body);
       req.headers.contentType = ContentType.json;
-      req.write(body);
+      req.contentLength = bytes.length;
+      req.add(bytes);
     }
     final res = await req.close().timeout(const Duration(seconds: 4));
     final text = await utf8.decoder.bind(res).join();

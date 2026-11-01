@@ -14,8 +14,10 @@ import androidx.core.content.ContextCompat
 import dev.shreeman.nitro_camera.core.CameraDeviceDetails
 import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
 import dev.shreeman.nitro_camera.session.CameraSession
+import dev.shreeman.nitro_camera.utils.DirectFlow
 import io.flutter.view.TextureRegistry
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.sync.Mutex
@@ -120,27 +122,18 @@ class NitroCameraImpl(
     private val openHandlerThread = android.os.HandlerThread("NitraOpenThread").also { it.start() }
     private val openHandler = Handler(openHandlerThread.looper)
 
-    private val _frameFlow = MutableSharedFlow<CameraFrame>(extraBufferCapacity = 10)
-    override val frameStream: SharedFlow<CameraFrame> = _frameFlow
+    // Frames reach each Dart port from the camera thread itself: the bridge's
+    // per-port collector runs inline (no Dispatchers.Default hop per frame).
+    private val _frameFlow = DirectFlow<CameraFrame>()
+    override val frameStream: Flow<CameraFrame> = _frameFlow
 
-    // Rate-limited frame-delivery diagnostics: one log line per ~120 frames
-    // (and per 30 drops) so the emit path is observable in logcat without
-    // per-frame log spam.
+    // Frame-delivery diagnostics: one log line per ~120 frames so the emit
+    // path is observable in logcat without per-frame log spam. Nothing buffers
+    // here any more, so nothing drops; the Dart side coalesces a busy port.
     private var _emitOk = 0L
-    private var _emitDropped = 0L
-    private fun frameEmitStats(textureId: Long, delivered: Boolean) {
-        if (delivered) _emitOk++ else _emitDropped++
-        if (!delivered && _emitDropped % 30 == 1L) {
-            // Rate-limited frameDropped event (vision-camera onFrameDropped
-            // parity; iOS emits from captureOutput didDrop). "outOfBuffers" is
-            // the closest Android analogue — the Dart consumer isn't keeping up
-            // with the drop-latest broadcast, so buffers are discarded.
-            emitEvent(CameraEventType.FRAMEDROPPED, textureId = textureId,
-                message = "outOfBuffers")
-        }
-        if ((delivered && _emitOk % 120 == 1L) || (!delivered && _emitDropped % 30 == 1L)) {
-            Log.d(TAG, "frameEmit[$textureId]: ok=$_emitOk dropped=$_emitDropped " +
-                "subscribers=${_frameFlow.subscriptionCount.value}")
+    private fun frameEmitStats(textureId: Long) {
+        if (_emitOk++ % 120 == 0L) {
+            Log.d(TAG, "frameEmit[$textureId]: ok=$_emitOk subscribers=${_frameFlow.subscriptionCount}")
         }
     }
 
@@ -489,8 +482,8 @@ class NitroCameraImpl(
                     enablePhoto  = enablePhoto != 0L,
                 )
                 session.onFrame = { frame ->
-                    val delivered = _frameFlow.tryEmit(frame)
-                    frameEmitStats(textureId, delivered)
+                    _frameFlow.emit(frame)
+                    frameEmitStats(textureId)
                 }
                 session.onEvent = { type, reason, message ->
                     _eventFlow.tryEmit(CameraEvent(type.nativeValue, textureId, reason.nativeValue, message))

@@ -58,6 +58,11 @@
 ### Changed
 
 * Upgraded to nitro 0.8.4.
+* **Android**: frames are posted to Dart from the camera thread (a direct hot
+  flow) instead of hopping through a `Dispatchers.Default` collector:
+  native → Dart handler p50 1.3 → 0.5 ms, p90 3.6 → 1.6 ms. With no buffer
+  left to overflow, Android no longer emits `frameDropped` for a slow Dart
+  consumer; the Dart side coalesces a busy port instead.
 * `attachDirect` frames are copied into one reused `NitroBuffer`, so a
   `@zeroCopy` native call (e.g. nitro_zxing's `decodeLuma`) takes them by
   pointer with no second copy. `FrameData.bytes` is borrowed in this mode:
