@@ -571,33 +571,33 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: "28a633f98f2892120d86795bf0c055c731f0e90a6be2752465fe634e37a5a521"
+      sha256: e3402c380fe8131670811b62e1229145cce8b93400d003b9037373a0ceffc238
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.4"
+    version: "0.8.5"
   nitro_annotations:
     dependency: transitive
     description:
       name: nitro_annotations
-      sha256: fae36cd3ea88d8dbf7dc14917d51317ab686dc9b0fa7ee2919dbb9c3de399352
+      sha256: "3393dced21358dc51bffa3d39de4a70f0a6d1ba2b6fc427d028a8a9cf54eec21"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.4"
+    version: "0.8.5"
   nitro_camera:
     dependency: "direct main"
     description:
       path: ".."
       relative: true
     source: path
-    version: "0.0.2"
+    version: "0.0.3"
   nitro_generator:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: aa1a3c730d5c003299190c19f10978baee72dc3dafb4812b2d569943cde954f1
+      sha256: aa3d897416c81908ac5f4d397c6f5fc0d9c03294ddf31acccbc9c1127247551a
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.4"
+    version: "0.8.5"
   nitro_http:
     dependency: "direct main"
     description:

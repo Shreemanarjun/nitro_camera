@@ -48,7 +48,7 @@ dependencies:
   nitro_zxing:
     path: ../../nitro_zxing
   signals: ^6.3.0
-  nitro: ^0.8.4
+  nitro: ^0.8.5
   signals_flutter: ^6.3.0
   # media_kit replaces video_player (video_player_avfoundation is CocoaPods-only
   # and is fragile under the SPM-based iOS build).
@@ -76,7 +76,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   build_runner: ^2.15.1
-  nitro_generator: ^0.8.4
+  nitro_generator: ^0.8.5
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
