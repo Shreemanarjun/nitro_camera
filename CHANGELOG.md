@@ -1,3 +1,45 @@
+## 0.0.3 - 2026-11-02
+
+### Added
+
+* **Separate frame-processor size** (Android) — `frameWidth` / `frameHeight` on
+  `CameraView` and `initialize()`: a sharp preview over small analysis frames
+  (vision-camera's frame-output `targetResolution`).
+* **Photo output opt-out** (Android) — `photo: false` leaves the JPEG stream out
+  of the session for preview + frames only; photo/snapshot calls then throw
+  `CaptureException('capture/photo-disabled')`.
+* **Direct frame delivery** — `CameraFrameProcessor.attachDirect()`: the worker
+  isolate subscribes to the native frame stream itself (no UI-isolate hop) and
+  processes only the newest frame of each batch. ~7 % faster end-to-end in the
+  1000-QR throughput benchmark, which now matches react-native-vision-camera on
+  the same phone (both at the 30 fps camera limit).
+
+### Fixed
+
+* Scanner: small QR codes (2.5–4 px modules) now decode — a 2× upscaled
+  centre pass joins the adaptive ladder.
+* `CameraFrameProcessor`: a handler that throws no longer silently kills the
+  worker isolate (no more frames, no log). The frame counts as a miss, the
+  first error is printed, and processing continues.
+
+### Changed
+
+* Upgraded to nitro 0.8.4.
+* **Android**: frames are posted to Dart from the camera thread (a direct hot
+  flow) instead of hopping through a `Dispatchers.Default` collector:
+  native → Dart handler p50 1.3 → 0.5 ms, p90 3.6 → 1.6 ms. With no buffer
+  left to overflow, Android no longer emits `frameDropped` for a slow Dart
+  consumer; the Dart side coalesces a busy port instead.
+* `attachDirect` frames are copied into one reused `NitroBuffer`, so a
+  `@zeroCopy` native call (e.g. nitro_zxing's `decodeLuma`) takes them by
+  pointer with no second copy. `FrameData.bytes` is borrowed in this mode:
+  valid only during the handler call.
+* `resolvedConfig` / `onConfigResolved` are now populated when the camera is
+  opened from a plain `width`/`height`/`fps` request (no format): the values
+  come from the native session read-back, so a requested 60 fps that the
+  hardware caps at 30 is reported as 30. **Breaking:**
+  `ResolvedCameraConfig.format` is now nullable (null in that case).
+
 ## 0.0.2
 
 ### Added
@@ -12,21 +54,9 @@
 * **Frame helpers** — `FrameData.resized / cropped / rotated`.
 * **Scanner ROI** — `CodeScanner(windowFraction: …)`.
 * **Multi-cam discovery** — typed `ConcurrentCameraSet` + `getConcurrentCameraSets`.
-* **Separate frame-processor size** (Android) — `frameWidth` / `frameHeight` on
-  `CameraView` and `initialize()`: a sharp preview over small analysis frames
-  (vision-camera's frame-output `targetResolution`).
-* **Photo output opt-out** (Android) — `photo: false` leaves the JPEG stream out
-  of the session for preview + frames only; photo/snapshot calls then throw
-  `CaptureException('capture/photo-disabled')`.
-* **Direct frame delivery** — `CameraFrameProcessor.attachDirect()`: the worker
-  isolate subscribes to the native frame stream itself (no UI-isolate hop) and
-  processes only the newest frame of each batch. ~7 % faster end-to-end in the
-  1000-QR throughput benchmark.
 
 ### Fixed
 
-* Scanner: small QR codes (2.5–4 px modules) now decode — a 2× upscaled
-  centre pass joins the adaptive ladder.
 * Android: recorded video no longer squished — encoder size matches session aspect.
 * Android: fixed a persistent-surface teardown race that could crash the camera.
 * iOS: back↔front switch with manual white balance no longer crashes.
@@ -57,21 +87,7 @@
 
 ### Changed
 
-* Upgraded to nitro 0.8.4.
-* **Android**: frames are posted to Dart from the camera thread (a direct hot
-  flow) instead of hopping through a `Dispatchers.Default` collector:
-  native → Dart handler p50 1.3 → 0.5 ms, p90 3.6 → 1.6 ms. With no buffer
-  left to overflow, Android no longer emits `frameDropped` for a slow Dart
-  consumer; the Dart side coalesces a busy port instead.
-* `attachDirect` frames are copied into one reused `NitroBuffer`, so a
-  `@zeroCopy` native call (e.g. nitro_zxing's `decodeLuma`) takes them by
-  pointer with no second copy. `FrameData.bytes` is borrowed in this mode:
-  valid only during the handler call.
-* `resolvedConfig` / `onConfigResolved` are now populated when the camera is
-  opened from a plain `width`/`height`/`fps` request (no format): the values
-  come from the native session read-back, so a requested 60 fps that the
-  hardware caps at 30 is reported as 30. `ResolvedCameraConfig.format` is now
-  nullable (null in that case).
+* Upgraded to nitro 0.7.5.
 
 ## 0.0.1 - 2026-07-12
 
