@@ -37,7 +37,8 @@ export 'src/nitro_camera.native.dart'
         CameraEvent,
         PhotoResult,
         RecordingResult,
-        RecordingOptions;
+        RecordingOptions,
+        PreviewTransform;
 
 // Data models.
 export 'src/models/models.dart';

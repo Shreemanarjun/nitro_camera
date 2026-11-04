@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "installations": {
+    "claude": {
+      "package:patrol": {
+        "skills": [
+          {
+            "name": "patrol-test-architecture",
+            "installedAt": "2026-11-03T18:39:53.737446Z",
+            "isInstalled": false,
+            "path": "skills/patrol-test-architecture"
+          },
+          {
+            "name": "patrol-write-test",
+            "installedAt": "2026-11-03T18:39:53.740531Z",
+            "contentHash": "9gRMe+Mr0tJP5n2Jfew55A==",
+            "path": "skills/patrol-write-test"
+          },
+          {
+            "name": "patrol-migrate-from-maestro",
+            "installedAt": "2026-11-03T18:39:53.740533Z",
+            "isInstalled": false,
+            "path": "skills/patrol-migrate-from-maestro"
+          },
+          {
+            "name": "patrol-setup",
+            "installedAt": "2026-11-03T18:39:53.744136Z",
+            "contentHash": "PyNiveNN5eFIsa4paH/MGw==",
+            "path": "skills/patrol-setup"
+          }
+        ]
+      }
+    }
+  }
+}

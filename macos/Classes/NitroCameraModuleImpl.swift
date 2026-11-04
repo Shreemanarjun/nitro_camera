@@ -13,7 +13,7 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func getAvailableCameraDevices() -> [CameraDevice] { fatalError("TODO: implement NitroCameraModuleImpl.getAvailableCameraDevices") }
     public func getDeviceCount() -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.getDeviceCount") }
     public func getDevice(index: Int64) -> CameraDevice { fatalError("TODO: implement NitroCameraModuleImpl.getDevice") }
-    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64) async throws -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.openCamera") }
+    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64, directPreview: Int64) async throws -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.openCamera") }
     public func closeCamera(textureId: Int64) async throws -> Void { fatalError("TODO: implement NitroCameraModuleImpl.closeCamera") }
     public func startPreview(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.startPreview") }
     public func stopPreview(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.stopPreview") }
@@ -41,6 +41,7 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func setFilterShader(textureId: Int64, shaderSource: String) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setFilterShader") }
     public func updateOverlay(textureId: Int64, overlayData: Data) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.updateOverlay") }
     public func configure(textureId: Int64, config: CameraConfig) async throws -> ResolvedConfig { fatalError("TODO: implement NitroCameraModuleImpl.configure") }
+    public func getPreviewTransform(textureId: Int64) -> PreviewTransform { fatalError("TODO: implement NitroCameraModuleImpl.getPreviewTransform") }
     public func getSessionStateJson(textureId: Int64) -> String { fatalError("TODO: implement NitroCameraModuleImpl.getSessionStateJson") }
     public func setVideoStabilization(textureId: Int64, mode: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setVideoStabilization") }
     public func setLowLightBoost(textureId: Int64, enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setLowLightBoost") }

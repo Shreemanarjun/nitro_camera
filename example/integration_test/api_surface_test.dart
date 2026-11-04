@@ -572,14 +572,28 @@ void main() {
       expect(File(fast.path).existsSync(), isTrue);
       File(fast.path).deleteSync();
 
-      // RAW/DNG only where the device reports support.
+      // RAW/DNG only where the device reports support. Some HALs advertise RAW
+      // but never deliver a frame (OnePlus CPH2447's logical multi-camera):
+      // that must surface as a typed error, fail fast the second time, and
+      // leave the preview session healthy (checked below and by test 11).
       if (c.device.supportsRawCapture) {
-        final raw = await c.takePhotoWithOptions(
-          const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng),
-        );
-        expect(File(raw.path).existsSync(), isTrue);
-        expect(raw.path.toLowerCase(), endsWith('.dng'));
-        File(raw.path).deleteSync();
+        try {
+          final raw = await c.takePhotoWithOptions(
+            const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng),
+          );
+          expect(File(raw.path).existsSync(), isTrue);
+          expect(raw.path.toLowerCase(), endsWith('.dng'));
+          File(raw.path).deleteSync();
+        } on CaptureException catch (e) {
+          expect(e.code, 'capture/raw-unavailable');
+          final sw = Stopwatch()..start();
+          await expectLater(
+            c.takePhotoWithOptions(const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng)),
+            throwsA(isA<CaptureException>().having((x) => x.code, 'code', 'capture/raw-unavailable')),
+          );
+          expect(sw.elapsedMilliseconds, lessThan(500), reason: 'second DNG request must fail fast');
+          await pumpFor(tester, const Duration(seconds: 2));
+        }
       }
 
       await pumpFor(tester, const Duration(milliseconds: 500));

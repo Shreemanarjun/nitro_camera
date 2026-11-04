@@ -68,11 +68,23 @@ class CameraSession(
     // false = no still (JPEG) stream in the session (vision-camera without a
     // photo output): one stream less for the ISP; photo capture then throws.
     private val enablePhoto: Boolean = true,
+    // The Dart side frames a direct preview itself (Texture mode only).
+    directRequested: Boolean = false,
 ) {
     private val cameraThread = HandlerThread("NitraSession-$textureId").also { it.start() }
     val cameraHandler = Handler(cameraThread.looper)
 
     private val glThread = HandlerThread("NitraGLThread").apply { start() }
+    // Direct preview: the camera writes straight into Flutter's SurfaceProducer —
+    // no OES texture, no GL redraw — and Dart rotates/mirrors/crops it from
+    // [previewTransform]. Only with an ImageReader-backed producer (it leaves
+    // crop + rotation to us) and while nothing needs the renderer: a shader,
+    // lens undistortion, a platform view or GL recording ([switchToGlPreview]).
+    @Volatile internal var directPreview: Boolean = directRequested &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        (surfaceProducer as? TextureRegistry.SurfaceProducer)?.handlesCropAndRotation() == false
+        private set
+    @Volatile private var lastPlatformSurface: Surface? = null
     private val glHandler = Handler(glThread.looper)
 
     // Preview stream size (see ConstraintResolver.resolvePreviewSize — best
@@ -91,7 +103,16 @@ class CameraSession(
         override fun onDisplayChanged(displayId: Int) {
             // A manual setTargetOrientation lock wins over display-following.
             if (targetOrientationDeg < 0) {
-                renderer.displayRotationDegrees = currentDisplayRotationDegrees()
+                val rot = currentDisplayRotationDegrees()
+                val changed = rot != renderer.displayRotationDegrees
+                renderer.displayRotationDegrees = rot
+                // Dart rotates a direct preview itself: tell it to re-read.
+                if (changed && directPreview) {
+                    val t = previewTransform()
+                    Log.i("NitroCamera", "preview[$textureId]: direct transform display=$rot " +
+                        "rotation=${t.rotationDegrees} mirrored=${t.mirrored} buffer=${t.bufferWidth}x${t.bufferHeight}")
+                    onEvent?.invoke(CameraEventType.PREVIEWTRANSFORMCHANGED, InterruptionReason.NONE, "")
+                }
             }
         }
         override fun onDisplayAdded(displayId: Int) {}
@@ -200,6 +221,12 @@ class CameraSession(
     val isPreviewRunning: Boolean get() = captureSession != null
 
     init {
+        // Configure lens undistortion (corrects the ultra-wide's barrel distortion).
+        // First: it decides whether a direct preview is possible.
+        configureDistortion()
+        if (directPreview && renderer.hasDistortion()) directPreview = false
+        Log.i("NitroCamera", "preview[$textureId]: ${if (directPreview) "direct (no GL)" else "GL renderer"}")
+
         val latch = java.util.concurrent.CountDownLatch(1)
         glHandler.post {
             try {
@@ -218,7 +245,7 @@ class CameraSession(
                 }
                 renderer.setSensorOrientation(characteristics.sensorOrientationDegrees(90))
                 renderer.setIsFrontCamera(characteristics.isFrontFacing)
-                renderer.setup(inputSurface)
+                if (!directPreview) renderer.setup(inputSurface)
             } catch (e: Exception) {
                 Log.e("NitroCamera", "GL Setup Error: ${e.message}")
             } finally {
@@ -231,8 +258,6 @@ class CameraSession(
         renderer.displayRotationDegrees = currentDisplayRotationDegrees()
         try { displayManager.registerDisplayListener(displayListener, cameraHandler) } catch (_: Exception) {}
 
-        // Configure lens undistortion (corrects the ultra-wide's barrel distortion).
-        configureDistortion()
 
         // Listen to SurfaceProducer lifecycle if available. Flutter recreates the
         // producer surface on rotation/layout — that must ONLY rebind the EGL
@@ -242,6 +267,12 @@ class CameraSession(
             val producer = surfaceProducer as io.flutter.view.TextureRegistry.SurfaceProducer
             producer.setCallback(object : io.flutter.view.TextureRegistry.SurfaceProducer.Callback {
                 override fun onSurfaceAvailable() {
+                    if (directPreview) {
+                        // A new producer surface (e.g. after backgrounding) is a new
+                        // camera output: rebuild the session on it.
+                        cameraHandler.post { captureSession = null; startPreview() }
+                        return
+                    }
                     glHandler.post {
                         renderer.setFlutterSurface(producer.getSurface())
                         // First-ever availability may precede startPreview; keep the
@@ -330,12 +361,7 @@ class CameraSession(
      * instead: the frameReader is never targeted while the recorder surface
      * is part of the session (see the mutual-exclusion block there).
      */
-    private val canPreWireRecorderSurface: Boolean = run {
-        val level = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
-        !characteristics.isFrontFacing &&
-            (level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL ||
-                level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3)
-    }
+    private val canPreWireRecorderSurface: Boolean = canPreWireRecorderSurface(characteristics)
 
     internal var lastRawShader: String = ""
         private set
@@ -378,8 +404,9 @@ class CameraSession(
      * UI why the preview froze (previously this was swallowed silently — a
      * black preview with no event).
      */
-    fun onDeviceDisconnected() {
+    fun onDeviceDisconnected(cam: AndroidCameraDevice? = null) {
         if (isClosed) return
+        if (cam != null && cam !== cameraDevice) return // a retired device (see reopenDevice)
         Log.w("NitroCamera", "Session $textureId: camera $deviceId disconnected mid-session")
         try {
             captureSession?.stopRepeating()
@@ -400,8 +427,12 @@ class CameraSession(
      * extensions/CameraError+message.kt). The framework has already
      * invalidated the device at this point, so only cleanup + surfacing remain.
      */
-    fun onDeviceError(code: Int) {
+    fun onDeviceError(code: Int, cam: AndroidCameraDevice? = null) {
         if (isClosed) return
+        if (cam != null && cam !== cameraDevice) {
+            Log.w("NitroCamera", "Session $textureId: ignoring ${cameraErrorMessage(code)} from a retired device")
+            return
+        }
         val message = cameraErrorMessage(code)
         Log.e("NitroCamera", "Session $textureId: device error — $message")
         try { captureSession?.close() } catch (_: Exception) {}
@@ -410,7 +441,19 @@ class CameraSession(
         onEvent?.invoke(CameraEventType.ERROR, InterruptionReason.NONE, message)
     }
 
-    suspend fun onAppResume(cameraManager: CameraManager) {
+    /// Replaces a device the HAL left unusable (e.g. after an undeliverable RAW
+    /// configuration) with a freshly opened one and restarts the preview —
+    /// no interruption events, and late callbacks from the old device are
+    /// ignored (identity check in onDeviceError/onDeviceDisconnected).
+    suspend fun reopenDevice(cameraManager: CameraManager) {
+        if (isClosed) return
+        try { captureSession?.close() } catch (_: Exception) {}
+        captureSession = null
+        try { cameraDevice.close() } catch (_: Exception) {}
+        onAppResume(cameraManager, notify = false)
+    }
+
+    suspend fun onAppResume(cameraManager: CameraManager, notify: Boolean = true) {
         if (isClosed) return
         if (captureSession != null) return // Already running
 
@@ -428,7 +471,7 @@ class CameraSession(
                                 cont.cancel()
                             } else {
                                 // Post-resume disconnect on the long-lived device.
-                                onDeviceDisconnected()
+                                onDeviceDisconnected(cam)
                             }
                         }
                         override fun onError(cam: AndroidCameraDevice, error: Int) {
@@ -438,7 +481,7 @@ class CameraSession(
                                     Exception("Camera resume failed: ${cameraErrorMessage(error)}")))
                             } else {
                                 // Post-resume fatal error on the long-lived device.
-                                onDeviceError(error)
+                                onDeviceError(error, cam)
                             }
                         }
                     }, cameraHandler)
@@ -448,7 +491,7 @@ class CameraSession(
             }
             this.cameraDevice = newDevice
             startPreview()
-            onEvent?.invoke(CameraEventType.INTERRUPTIONENDED, InterruptionReason.NONE, "")
+            if (notify) onEvent?.invoke(CameraEventType.INTERRUPTIONENDED, InterruptionReason.NONE, "")
         } catch (e: Exception) {
             Log.e("NitroCamera", "Failed to resume session $textureId: ${e.message}")
             onEvent?.invoke(
@@ -482,7 +525,11 @@ class CameraSession(
         }
 
         // Ensure renderer surface is ready
-        val pSurface = renderer.inputSurface ?: return
+        val pSurface = if (directPreview) {
+            val producer = surfaceProducer as io.flutter.view.TextureRegistry.SurfaceProducer
+            producer.setSize(resolvedSize.width, resolvedSize.height)
+            producer.getSurface()
+        } else renderer.inputSurface ?: return
         previewSurface = pSurface
 
         // Sync buffer size
@@ -593,9 +640,9 @@ class CameraSession(
             return
         }
 
-        val inputST = renderer.inputSurfaceTexture ?: return
-        inputST.setOnFrameAvailableListener(null)
-        inputST.setOnFrameAvailableListener({
+        val inputST = if (directPreview) null else renderer.inputSurfaceTexture ?: return
+        inputST?.setOnFrameAvailableListener(null)
+        inputST?.setOnFrameAvailableListener({
             glHandler.post {
                 if (!isClosed) {
                     try { renderer.drawFrame() } catch (e: Exception) { Log.e("NitroCamera", "Render error: ${e.message}") }
@@ -848,7 +895,8 @@ class CameraSession(
                 captureSession = null
                 try { cameraDevice.close() } catch (_: Exception) {}
                 try { frameOutput.close() } catch (_: Exception) {}
-                try { previewSurface?.let { if (it.isValid) it.release() } } catch (_: Exception) {}
+                // A direct preview's surface belongs to Flutter's producer.
+                if (!directPreview) try { previewSurface?.let { if (it.isValid) it.release() } } catch (_: Exception) {}
                 previewSurface = null
             }
             // (b) GL renderer/thread.
@@ -1098,16 +1146,67 @@ class CameraSession(
     fun setSamplingRate(rate: Long)     { frameOutput.samplingRate = rate }
     fun setFilterShader(shader: String) {
         lastRawShader = shader
+        if (shader.isNotEmpty()) switchToGlPreview()
         glHandler.post {
             renderer.updateShader(shader)
         }
     }
 
     fun attachPlatformSurface(surface: Surface?) {
+        lastPlatformSurface = surface
+        if (surface != null && directPreview) { switchToGlPreview(); return } // re-attached there
         glHandler.post {
             renderer.setPlatformSurface(surface)
         }
     }
+
+    /// Leaves direct preview for the GL renderer. The producer surface can only
+    /// take the renderer's EGL connection once the camera has let go of it, and
+    /// closing the session is NOT enough (the stream stays attached until the
+    /// next configure — EGL then fails with EGL_BAD_ALLOC, seen on OnePlus
+    /// CPH2447). So park the camera on its frame/photo streams first, then set
+    /// up GL and rebuild the real session. [then] runs on the GL thread after setup.
+    private fun switchToGlPreview(then: (() -> Unit)? = null) {
+        if (!directPreview) { then?.let { glHandler.post(it) }; return }
+        directPreview = false
+        Log.i("NitroCamera", "preview[$textureId]: direct -> GL renderer")
+        cameraHandler.post {
+            val toGl = {
+                glHandler.post {
+                    if (isClosed) return@post
+                    val producer = surfaceProducer as TextureRegistry.SurfaceProducer
+                    producer.setSize(width, height)
+                    renderer.setup(producer.getSurface())
+                    lastPlatformSurface?.let { renderer.setPlatformSurface(it) }
+                    then?.invoke()
+                    cameraHandler.post { startPreview() }
+                    onEvent?.invoke(CameraEventType.PREVIEWTRANSFORMCHANGED, InterruptionReason.NONE, "")
+                }
+            }
+            captureSession = null
+            val parking = mutableListOf(frameOutput.surface)
+            if (enablePhoto) parking.add(photoOutput.photoReader.surface)
+            try {
+                cameraDevice.createCaptureSession(parking, object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) { toGl() }
+                    override fun onConfigureFailed(session: CameraCaptureSession) { toGl() }
+                }, cameraHandler)
+            } catch (e: Exception) {
+                Log.w("NitroCamera", "preview[$textureId]: park before GL failed (${e.message})")
+                toGl()
+            }
+        }
+    }
+
+    /// How Dart must frame the Texture (see the spec's PreviewTransform).
+    fun previewTransform(): PreviewTransform =
+        if (directPreview) PreviewTransform(
+            direct = 1L,
+            rotationDegrees = renderer.effectiveContentOrientation().toLong(),
+            mirrored = if (characteristics.isFrontFacing) 1L else 0L,
+            bufferWidth = resolvedSize.width.toLong(),
+            bufferHeight = resolvedSize.height.toLong(),
+        ) else PreviewTransform(0L, 0L, 0L, width.toLong(), height.toLong())
 
     fun detachPlatformSurface() {
         glHandler.post {
@@ -1228,7 +1327,7 @@ class CameraSession(
                     // 2. Start the hardware recorder FIRST (important for some drivers)
                     videoOutput.startVideoRecorder()
                     // 3. Enable the surface on the GL thread ONLY after the recorder is active
-                    glHandler.post { renderer.setRecordingSurface(recSurface) }
+                    switchToGlPreview { renderer.setRecordingSurface(recSurface) }
                     Log.d("NitroCamera", "Video recording started on GPU pipeline")
                     if (cont.isActive) cont.resume(Unit)
                 } catch (e: Exception) {
@@ -1439,6 +1538,16 @@ class CameraSession(
             } catch (e: Exception) {
                 Log.w("NitroCamera", "cancelVideoRecording: delete failed: ${e.message}")
             }
+        }
+    }
+
+    companion object {
+        /** Whether the 4-stream (preview + photo + frames + recorder) combo is known-good. */
+        fun canPreWireRecorderSurface(characteristics: CameraCharacteristics): Boolean {
+            val level = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+            return !characteristics.isFrontFacing &&
+                (level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL ||
+                    level == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3)
         }
     }
 }

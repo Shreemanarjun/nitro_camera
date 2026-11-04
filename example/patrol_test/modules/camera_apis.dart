@@ -413,14 +413,24 @@ final class CameraApis extends Module {
         expect(raw.path.toLowerCase(), endsWith('.dng'));
         File(raw.path).deleteSync();
         dng = 'ok';
-      } catch (e) {
+      } on CaptureException catch (e) {
+        // Advertised-but-undeliverable RAW must be TYPED, fail fast the second
+        // time, and leave the session healthy (the native side reopens the
+        // device the HAL broke) — no error may surface, so none is cleared.
+        expect(e.code, 'capture/raw-unavailable');
         // ignore: avoid_print
-        print('DNG capture unavailable on this device (advertised RAW): $e');
+        print('DNG unavailable on this device (advertised RAW): ${e.message}');
         dng = 'unavailable';
-        // The DNG path restores the preview in its finally block; give it a
-        // beat and clear the surfaced native-error event.
-        await pumpFor(const Duration(seconds: 1));
-        cameraStore.errorMessage.value = null;
+        final sw = Stopwatch()..start();
+        Object? second;
+        try {
+          await c.takePhotoWithOptions(const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng));
+        } catch (e2) {
+          second = e2;
+        }
+        expect(second, isA<CaptureException>().having((x) => x.code, 'code', 'capture/raw-unavailable'));
+        expect(sw.elapsedMilliseconds, lessThan(500), reason: 'second DNG request must fail fast');
+        await pumpFor(const Duration(seconds: 2));
       }
     }
 

@@ -176,7 +176,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     // MARK: - Camera lifecycle
 
-    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64) async throws -> Int64 {
+    public func openCamera(deviceId: String, width: Int64, height: Int64, fps: Int64, enableAudio: Int64, frameWidth: Int64, frameHeight: Int64, enablePhoto: Int64, directPreview: Int64) async throws -> Int64 {
         // frameWidth/frameHeight: Android-only split. AVCaptureVideoDataOutput
         // delivers at the active format's size, so frames match the preview here.
         // enablePhoto: Android-only too; the photo output stays attached here.
@@ -481,6 +481,11 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             videoHdrEnabled: config.videoHdr,
             autoFocusSystem: afSystem,
             active: config.active)
+    }
+
+    /// iOS frames the raw buffer in Dart already; there is no GL copy to skip.
+    public func getPreviewTransform(textureId: Int64) -> PreviewTransform {
+        PreviewTransform(direct: 0, rotationDegrees: 0, mirrored: 0, bufferWidth: 0, bufferHeight: 0)
     }
 
     public func getSessionStateJson(textureId: Int64) -> String {

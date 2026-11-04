@@ -120,6 +120,7 @@ class CameraSessionEvent {
       case CameraEventType.photoCaptureBegan:
       case CameraEventType.photoCaptureShutter:
       case CameraEventType.photoThumbnail:
+      case CameraEventType.previewTransformChanged:
         return orElse();
     }
   }

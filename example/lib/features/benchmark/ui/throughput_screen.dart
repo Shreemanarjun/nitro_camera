@@ -58,6 +58,10 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
               frameHeight: 480,
               photo: false, // no still stream, like the RN session
               fps: 60,
+              // --dart-define=PREVIEW=platformView for the preview-cost A/B.
+              previewMode: PreviewMode.values.byName(
+                const String.fromEnvironment('PREVIEW', defaultValue: 'texture'),
+              ),
               onInitialized: _tp.onCamera,
               onClosing: () => unawaited(_tp.stopScanner()),
             );

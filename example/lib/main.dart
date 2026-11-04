@@ -1,4 +1,5 @@
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -14,9 +15,10 @@ void main() {
   // recording orientation), so the chrome never needs to reflow.
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   MediaKit.ensureInitialized();
+  // Verbose bridge tracing logs every call twice; keep it for debug builds.
   NitroConfig.instance.enable(
     slowCallThresholdMs: 200,
-    level: NitroLogLevel.verbose,
+    level: kReleaseMode ? NitroLogLevel.warning : NitroLogLevel.verbose,
   );
   NitroRuntime.init();
 

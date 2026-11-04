@@ -104,27 +104,79 @@ class VideoOutput(
     }
 
     /**
-     * A prepared-but-never-started video-only recorder that pins the persistent
-     * surface's buffer-queue configuration while no real recording is active.
+     * Takes a surface + dormant recorder built by [prewarm] (concurrently with the
+     * camera open), so [acquirePersistentRecorderSurface] doesn't pay the ~80 ms
+     * MediaRecorder.prepare on the session's critical path. Releases them if this
+     * output already has its own.
      */
-    private fun createDormantRecorder(surface: Surface): MediaRecorder {
-        val recorder = newRecorder()
-        recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        val size = ConstraintResolver.resolveRecordingSize(characteristics, width, height)
-        recorder.setVideoSize(size.width, size.height)
-        recorder.setVideoEncodingBitRate(6_000_000)
-        recorder.setVideoFrameRate(30)
-        recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-        recorder.setOutputFile(File(context.cacheDir, "nitra_recorder_warmup.mp4").absolutePath)
-        recorder.setInputSurface(surface)
-        try {
-            recorder.prepare()
-        } catch (e: Exception) {
-            recorder.release()
-            throw e
+    fun adoptPrewarmed(warm: Prewarmed) {
+        synchronized(persistentLock) {
+            if (persistentSurface == null && dormantRecorder == null) {
+                persistentSurface = warm.surface
+                dormantRecorder = warm.recorder
+            } else {
+                warm.release()
+            }
         }
-        return recorder
+    }
+
+    private fun createDormantRecorder(surface: Surface): MediaRecorder =
+        createDormantRecorder(context, characteristics, width, height, surface)
+
+    /** A persistent recorder surface with its dormant recorder, built ahead of the session. */
+    class Prewarmed(val surface: Surface, val recorder: MediaRecorder) {
+        fun release() {
+            runCatching { recorder.release() }
+            runCatching { surface.release() }
+        }
+    }
+
+    companion object {
+        /** Builds the pre-wired recorder surface off the session's critical path; null on failure. */
+        fun prewarm(context: Context, characteristics: CameraCharacteristics, width: Int, height: Int): Prewarmed? =
+            try {
+                val surface = MediaCodec.createPersistentInputSurface()
+                try {
+                    Prewarmed(surface, createDormantRecorder(context, characteristics, width, height, surface))
+                } catch (e: Exception) {
+                    surface.release()
+                    throw e
+                }
+            } catch (e: Exception) {
+                Log.w("NitroCamera", "Recorder prewarm failed: ${e.message}")
+                null
+            }
+
+        /**
+         * A prepared-but-never-started video-only recorder that pins the persistent
+         * surface's buffer-queue configuration while no real recording is active.
+         */
+        private fun createDormantRecorder(
+            context: Context, characteristics: CameraCharacteristics, width: Int, height: Int, surface: Surface,
+        ): MediaRecorder {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            val size = ConstraintResolver.resolveRecordingSize(characteristics, width, height)
+            recorder.setVideoSize(size.width, size.height)
+            recorder.setVideoEncodingBitRate(6_000_000)
+            recorder.setVideoFrameRate(30)
+            recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+            recorder.setOutputFile(File(context.cacheDir, "nitra_recorder_warmup.mp4").absolutePath)
+            recorder.setInputSurface(surface)
+            try {
+                recorder.prepare()
+            } catch (e: Exception) {
+                recorder.release()
+                throw e
+            }
+            return recorder
+        }
     }
 
     /** Re-arms the dormant warm-up recorder after a persistent-surface recording ends. */

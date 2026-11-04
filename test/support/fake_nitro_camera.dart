@@ -223,6 +223,7 @@ class FakeNitroCamera extends NitroCamera {
     int frameWidth,
     int frameHeight,
     int enablePhoto,
+    int directPreview,
   ) async => _rec('openCamera', [
     deviceId,
     width,
@@ -232,6 +233,7 @@ class FakeNitroCamera extends NitroCamera {
     frameWidth,
     frameHeight,
     enablePhoto,
+    directPreview,
   ], openCameraResult);
 
   @override
@@ -405,6 +407,18 @@ class FakeNitroCamera extends NitroCamera {
   @override
   String getSessionStateJson(int textureId) =>
       _rec('getSessionStateJson', [textureId], sessionStateJson);
+
+  PreviewTransform previewTransform = const PreviewTransform(direct: 0, rotationDegrees: 0, mirrored: 0, bufferWidth: 0, bufferHeight: 0);
+
+  /// Build-time read by [CameraPreview] (not a session command, so it is
+  /// counted here instead of in [calls]).
+  int previewTransformReads = 0;
+
+  @override
+  PreviewTransform getPreviewTransform(int textureId) {
+    previewTransformReads++;
+    return previewTransform;
+  }
 
   @override
   String getConcurrentCameraIdsJson() =>

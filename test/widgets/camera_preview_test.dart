@@ -263,6 +263,61 @@ void main() {
     });
   });
 
+  group('CameraPreview direct preview', () {
+    // The camera's raw 1640x1232 sensor-orientation buffer (OnePlus back camera).
+    const back90 = PreviewTransform(direct: 1, rotationDegrees: 90, mirrored: 0, bufferWidth: 1640, bufferHeight: 1232);
+
+    testOn(TargetPlatform.android, 'rotates the raw buffer upright and cover-crops it', (tester) async {
+      fake.previewTransform = back90;
+      final c = await opened();
+      await tester.pumpWidget(host(CameraPreview(controller: c, mode: PreviewMode.texture)));
+
+      final fit = tester.widget<FittedBox>(find.byType(FittedBox));
+      expect(fit.fit, BoxFit.cover);
+      expect(fit.clipBehavior, Clip.hardEdge);
+      expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 1);
+      expect(streamBox(tester).width, 1640.0, reason: 'sized to the buffer BEFORE rotation');
+      expect(streamBox(tester).height, 1232.0);
+      expect(tester.getSize(find.byType(RotatedBox)), const Size(1232, 1640), reason: 'upright = portrait');
+      expect(find.byType(Transform), findsNothing, reason: 'the back camera is not mirrored');
+    });
+
+    testOn(TargetPlatform.android, 'mirrors the front camera in screen space, outside the rotation', (tester) async {
+      fake.previewTransform = const PreviewTransform(direct: 1, rotationDegrees: 270, mirrored: 1, bufferWidth: 1640, bufferHeight: 1232);
+      final c = await opened();
+      await tester.pumpWidget(host(CameraPreview(controller: c, mode: PreviewMode.texture)));
+
+      final flip = tester.widget<Transform>(find.byType(Transform));
+      expect(flip.transform.entry(0, 0), -1.0, reason: 'horizontal flip');
+      expect(find.descendant(of: find.byType(Transform), matching: find.byType(RotatedBox)), findsOneWidget);
+      expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 3);
+    });
+
+    testOn(TargetPlatform.android, 're-reads the transform when the native side reports a change', (tester) async {
+      fake.previewTransform = back90;
+      final c = await opened();
+      await tester.pumpWidget(host(CameraPreview(controller: c, mode: PreviewMode.texture)));
+      expect(find.byType(RotatedBox), findsOneWidget);
+
+      // e.g. a shader was set: the session fell back to the GL renderer.
+      fake.previewTransform = const PreviewTransform(direct: 0, rotationDegrees: 0, mirrored: 0, bufferWidth: 1920, bufferHeight: 1080);
+      fake.emitEvent(CameraEventType.previewTransformChanged.index, textureId: 7);
+      await tester.pump(); // deliver the event
+      await tester.pump(); // rebuild
+
+      expect(find.byType(RotatedBox), findsNothing, reason: 'GL output is already upright');
+      expect(streamBox(tester).width, 1080.0, reason: 'back on the GL sizing path');
+    });
+
+    testOn(TargetPlatform.iOS, 'iOS never asks for the transform', (tester) async {
+      final c = await opened();
+      await tester.pumpWidget(host(CameraPreview(controller: c, mode: PreviewMode.texture)));
+
+      expect(fake.previewTransformReads, 0);
+      expect(find.byType(RotatedBox), findsNothing);
+    });
+  });
+
   group('TapToFocusDetector', () {
     // The 400x600 host matches the default test surface, so logical tap
     // coordinates land exactly where they are aimed.

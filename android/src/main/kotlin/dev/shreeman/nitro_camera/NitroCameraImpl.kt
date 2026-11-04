@@ -13,6 +13,7 @@ import android.view.Surface
 import androidx.core.content.ContextCompat
 import dev.shreeman.nitro_camera.core.CameraDeviceDetails
 import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
+import dev.shreeman.nitro_camera.outputs.VideoOutput
 import dev.shreeman.nitro_camera.session.CameraSession
 import dev.shreeman.nitro_camera.utils.DirectFlow
 import io.flutter.view.TextureRegistry
@@ -185,6 +186,28 @@ class NitroCameraImpl(
         return _charsCache.getOrPut(id) { cameraManager.getCameraCharacteristics(id) }
     }
 
+    // Device-list JSON: characteristics, formats and vendor extensions are
+    // immutable per camera, but building the JSON is expensive — the extension
+    // query (getCameraExtensionCharacteristics, API 31+) alone costs ~100ms of
+    // binder round-trips per camera. Built once (per-camera queries in
+    // parallel) and shared: a caller arriving mid-build awaits the same work.
+    // Invalidated on hot-plug together with _cachedIds.
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    @Volatile private var _devicesJson: Deferred<String>? = null
+
+    private fun devicesJsonAsync(): Deferred<String> = synchronized(this) {
+        _devicesJson?.takeUnless { it.isCancelled || (it.isCompleted && it.getCompletionExceptionOrNull() != null) }
+            ?: ioScope.async {
+                val parts = getIds().map { id ->
+                    async { deviceDetails.buildCameraDeviceJson(id, getCharacteristics(id)) }
+                }.awaitAll()
+                JSONArray().also { arr -> parts.forEach { arr.put(it) } }.toString()
+            }.also { _devicesJson = it }
+    }
+
+    // NOT prewarmed at plugin creation: measured on OnePlus CPH2447, building it
+    // while the engine draws its first frame delayed "Displayed" ~190 → ~390 ms.
+
     override fun getCameraPermissionStatus(): Long {
         return if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) 1L else 2L
@@ -215,25 +238,7 @@ class NitroCameraImpl(
 
     override fun getDeviceCount(): Long = getIds().size.toLong()
 
-    // Device-list JSON cache: characteristics, formats and vendor extensions
-    // are immutable per camera, but building the JSON is expensive — the
-    // extension query (getCameraExtensionCharacteristics, API 31+) alone costs
-    // ~100ms of binder round-trips per camera. Built once (per-camera queries
-    // in parallel), served from cache afterwards; invalidated on hot-plug
-    // together with _cachedIds (see enableDeviceAvailabilityEvents).
-    @Volatile private var _devicesJsonCache: String? = null
-
-    override suspend fun getAvailableCameraDevicesJson(): String {
-        _devicesJsonCache?.let { return it }
-        val parts = coroutineScope {
-            getIds().map { id ->
-                async(Dispatchers.IO) { deviceDetails.buildCameraDeviceJson(id, getCharacteristics(id)) }
-            }.awaitAll()
-        }
-        val json = JSONArray().also { arr -> parts.forEach { arr.put(it) } }.toString()
-        _devicesJsonCache = json
-        return json
-    }
+    override suspend fun getAvailableCameraDevicesJson(): String = devicesJsonAsync().await()
 
     override fun getAvailableCameraDevices(): List<CameraDevice> {
         return getIds().map { id -> deviceDetails.buildCameraDevice(id, getCharacteristics(id)) }
@@ -332,13 +337,27 @@ class NitroCameraImpl(
 
     override suspend fun openCamera(
         deviceId: String, width: Long, height: Long, fps: Long, enableAudio: Long,
-        frameWidth: Long, frameHeight: Long, enablePhoto: Long,
+        frameWidth: Long, frameHeight: Long, enablePhoto: Long, directPreview: Long,
     ): Long {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED) throw SecurityException("Camera permission not granted")
         ensureThermalMonitoring()
 
         val openStart = android.os.SystemClock.elapsedRealtime()
+
+        // Build the pre-wired recorder surface (MediaCodec persistent surface + a
+        // prepared dormant MediaRecorder, ~80 ms) WHILE the texture is created and
+        // the HAL opens, instead of after — it used to sit between "camera opened"
+        // and createCaptureSession on every open. The session adopts it below.
+        val prewarm: java.util.concurrent.Future<VideoOutput.Prewarmed?>? = runCatching {
+            val chars = getCharacteristics(deviceId)
+            if (CameraSession.canPreWireRecorderSurface(chars)) {
+                java.util.concurrent.CompletableFuture.supplyAsync {
+                    VideoOutput.prewarm(context, chars, width.toInt(), height.toInt())
+                }
+            } else null
+        }.getOrNull()
+        var prewarmAdopted = false
 
         var textureId: Long = 0
         var surfaceProducer: Any? = null
@@ -378,6 +397,7 @@ class NitroCameraImpl(
         val availableIds = getIds()
         if (!availableIds.contains(deviceId)) {
             Log.e(TAG, "Unknown camera device $deviceId.")
+            runCatching { prewarm?.get()?.release() }
             withContext(Dispatchers.Main) {
                surfaceTextureEntry?.release()
                (surfaceProducer as? io.flutter.view.TextureRegistry.SurfaceProducer)?.release()
@@ -414,7 +434,7 @@ class NitroCameraImpl(
                                         // surfaces as an event instead of a
                                         // silent black preview (vision-camera's
                                         // CameraState observer semantics).
-                                        sessions[textureId]?.onDeviceDisconnected()
+                                        sessions[textureId]?.onDeviceDisconnected(cam)
                                             ?: cam.close()
                                     }
                                 }
@@ -425,7 +445,7 @@ class NitroCameraImpl(
                                             Exception("Camera open failed: ${cameraErrorMessage(error)}")))
                                     } else {
                                         // Mid-session fatal device/service error.
-                                        sessions[textureId]?.onDeviceError(error)
+                                        sessions[textureId]?.onDeviceError(error, cam)
                                             ?: cam.close()
                                     }
                                 }
@@ -480,6 +500,7 @@ class NitroCameraImpl(
                     frameWidth   = (if (frameWidth > 0) frameWidth else width).toInt(),
                     frameHeight  = (if (frameHeight > 0) frameHeight else height).toInt(),
                     enablePhoto  = enablePhoto != 0L,
+                    directRequested = directPreview != 0L,
                 )
                 session.onFrame = { frame ->
                     _frameFlow.emit(frame)
@@ -490,6 +511,10 @@ class NitroCameraImpl(
                 }
                 synchronized(sessionsLock) { sessions[textureId] = session }
 
+                runCatching { prewarm?.get() }.getOrNull()?.let {
+                    session.videoOutput.adoptPrewarmed(it)
+                    prewarmAdopted = true
+                }
                 session.startPreview()
                 val openMs = android.os.SystemClock.elapsedRealtime() - openStart
                 Log.i(TAG, "switch: close=${lastCloseDurationMs}ms open=${openMs}ms")
@@ -497,6 +522,7 @@ class NitroCameraImpl(
             }
         } catch (e: Exception) {
             Log.e(TAG, "General openCamera failure: ${e.message}")
+            if (!prewarmAdopted) runCatching { prewarm?.get()?.release() }
             // Scope the failure to THIS texture id — a 0L broadcast id would
             // surface the error on every other live session's event stream.
             emitEvent(CameraEventType.ERROR, textureId = textureId,
@@ -639,6 +665,9 @@ class NitroCameraImpl(
         )
     }
 
+    override fun getPreviewTransform(textureId: Long): PreviewTransform =
+        session(textureId)?.previewTransform() ?: PreviewTransform(0L, 0L, 0L, 0L, 0L)
+
     override fun getSessionStateJson(textureId: Long): String {
         val s = session(textureId) ?: return JSONObject().put("running", false).toString()
         return JSONObject().apply {
@@ -722,13 +751,13 @@ class NitroCameraImpl(
             val cb = object : CameraManager.AvailabilityCallback() {
                 override fun onCameraAvailable(cameraId: String) {
                     _cachedIds = null // a USB camera may have appeared
-                    _devicesJsonCache = null
+                    _devicesJson = null
                     emitEvent(CameraEventType.DEVICECONNECTED, message = cameraId)
                 }
 
                 override fun onCameraUnavailable(cameraId: String) {
                     _cachedIds = null
-                    _devicesJsonCache = null
+                    _devicesJson = null
                     emitEvent(CameraEventType.DEVICEDISCONNECTED, message = cameraId)
                 }
             }

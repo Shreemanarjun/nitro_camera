@@ -14,7 +14,25 @@
   1000-QR throughput benchmark, which now matches react-native-vision-camera on
   the same phone (both at the 30 fps camera limit).
 
+* **Direct preview** (Android) — a `PreviewMode.texture` preview can take the
+  camera's buffers straight into the Flutter texture, with no GL copy: the
+  `NitraGLThread` disappears and the app uses ~3 % less of a core (OnePlus
+  CPH2447, 1000-QR benchmark: 47.2 % vs 50.3 % mean CPU, 274 vs 285 MB RSS,
+  same throughput). `CameraView` uses it for its default Texture mode;
+  `CameraController(directPreview: true)` opts in elsewhere. Dart rotates,
+  mirrors and cover-crops the raw buffer from the new
+  `NitroCamera.getPreviewTransform` / `CameraController.previewTransform`. The
+  session falls back to the GL renderer by itself when a shader, lens
+  undistortion, a platform view or GL recording needs it
+  (`CameraEventType.previewTransformChanged`). Only with an ImageReader-backed
+  texture (`handlesCropAndRotation() == false`); otherwise GL as before.
+
 ### Fixed
+
+* **Android**: the front camera's GL preview (platform view, shaders, lens
+  undistortion) was not mirrored — the opposite of the stock selfie preview.
+  It is now mirrored in screen space after rotation, like the direct preview.
+  Recordings keep their existing (un-mirrored) output.
 
 * Scanner: small QR codes (2.5–4 px modules) now decode — a 2× upscaled
   centre pass joins the adaptive ladder.
@@ -24,7 +42,16 @@
 
 ### Changed
 
-* Upgraded to nitro 0.8.4.
+* **Android startup**: the pre-wired recorder surface (MediaCodec persistent
+  surface + dormant MediaRecorder, ~80 ms) is now built while the camera
+  hardware opens instead of after it. Cold start on a OnePlus CPH2447: camera
+  opened → streams created 194 → 154 ms, first camera frames 772 → 720 ms
+  (medians, 16 vs 14 launches); instant recording start is unchanged.
+
+* Upgraded to nitro 0.8.5 (weak Dart DL symbols — fixes the iOS
+  "duplicate symbol" link error with two nitro SPM plugins, nitro_ecosystem#61).
+* `NitroCamera.openCamera` takes a trailing `directPreview` argument (the
+  raw native API; `CameraController` passes it for you).
 * **Android**: frames are posted to Dart from the camera thread (a direct hot
   flow) instead of hopping through a `Dispatchers.Default` collector:
   native → Dart handler p50 1.3 → 0.5 ms, p90 3.6 → 1.6 ms. With no buffer

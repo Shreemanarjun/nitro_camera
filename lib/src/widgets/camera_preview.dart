@@ -87,7 +87,30 @@ class CameraPreview extends StatelessWidget {
           case PreviewMode.impeller:
           case PreviewMode.texture:
             final texture = Texture(textureId: controller.textureId!);
-            if (defaultTargetPlatform == TargetPlatform.android) {
+            final transform = defaultTargetPlatform == TargetPlatform.android ? controller.previewTransform : null;
+            if (transform != null && transform.direct == 1) {
+              // Direct preview: the texture holds the raw sensor-orientation
+              // buffer (an ImageReader-backed producer applies no transform),
+              // so turn it upright here — clockwise by sensor ± display, as
+              // camera_android_camerax's ImageReaderRotatedPreview does — and
+              // mirror the front camera in SCREEN space after rotating (no
+              // per-orientation axis choice, which is camerax's foldable bug,
+              // flutter/flutter#190907). RotatedBox swaps the box's aspect.
+              Widget upright = RotatedBox(
+                quarterTurns: transform.rotationDegrees ~/ 90,
+                child: SizedBox(
+                  width: transform.bufferWidth.toDouble(),
+                  height: transform.bufferHeight.toDouble(),
+                  child: texture,
+                ),
+              );
+              if (transform.mirrored == 1) upright = Transform.flip(flipX: true, child: upright);
+              preview = FittedBox(
+                fit: resizeMode == PreviewResizeMode.contain ? BoxFit.contain : BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: upright,
+              );
+            } else if (defaultTargetPlatform == TargetPlatform.android) {
               // The native GL renderer draws the FULL upright frame into the
               // producer surface (whose size Flutter controls and may not match
               // any aspect). Declaring the true content aspect here makes the

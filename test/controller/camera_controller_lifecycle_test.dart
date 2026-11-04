@@ -32,7 +32,7 @@ void main() {
 
       await c.initialize();
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1920, 1080, 30, 0, 0, 0, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1920, 1080, 30, 0, 0, 0, 1, 0]);
       expect(c.textureId, 7);
       expect(c.isInitialized, isTrue);
       expect(c.isActive, isTrue);
@@ -83,7 +83,7 @@ void main() {
 
       await c.initialize(width: 640, height: 480, fps: 15);
 
-      expect(fake.argsOf('openCamera'), ['cam0', 640, 480, 15, 1, 0, 0, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 640, 480, 15, 1, 0, 0, 1, 0]);
       expect(c.configuration!.fps, 15);
     });
 
@@ -94,7 +94,7 @@ void main() {
 
       await c.initialize();
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 60, 0, 0, 0, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 60, 0, 0, 0, 1, 0]);
       expect(c.configuration!.fps, 60);
       expect(c.resolvedConfig!.selectedFps, 60);
       expect(c.resolvedConfig!.videoWidth, 1280);
@@ -209,7 +209,7 @@ void main() {
 
       expect(fake.callNames, ['closeCamera', 'openCamera', 'configure']);
       expect(fake.argsOf('closeCamera'), [7]);
-      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 24, 0, 0, 0, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1280, 720, 24, 0, 0, 0, 1, 0]);
       expect(c.textureId, 11);
       expect(c.width, 1280);
       expect(c.height, 720);
@@ -226,7 +226,7 @@ void main() {
 
       await c.configure(const CameraConfiguration(fps: 48));
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1440, 1080, 48, 0, 0, 0, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1440, 1080, 48, 0, 0, 0, 1, 0]);
       expect(c.width, 1440);
       expect(c.height, 1080);
     });
@@ -238,24 +238,34 @@ void main() {
       final c = controllerFor();
       await c.initialize(width: 1640, height: 1232, frameWidth: 640, frameHeight: 480);
 
-      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 30, 0, 640, 480, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 30, 0, 640, 480, 1, 0]);
       final s = c.getSessionState();
       expect((s.width, s.height), (1640, 1232), reason: 'preview');
       expect((s.frameWidth, s.frameHeight), (640, 480), reason: 'frames');
 
       fake.clear();
       await c.configure(const CameraConfiguration(fps: 24));
-      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 24, 0, 640, 480, 1]);
+      expect(fake.argsOf('openCamera'), ['cam0', 1640, 1232, 24, 0, 640, 480, 1, 0]);
+    });
+
+    test('directPreview is forwarded and survives a reopen', () async {
+      final c = CameraController(device: testDevice(), directPreview: true, native: fake);
+      await c.initialize();
+      expect(fake.argsOf('openCamera')!.last, 1);
+
+      fake.clear();
+      await c.configure(const CameraConfiguration(fps: 24));
+      expect(fake.argsOf('openCamera')!.last, 1);
     });
 
     test('photo: false drops the still output, survives a reopen and blocks capture', () async {
       final c = CameraController(device: testDevice(), photo: false, native: fake);
       await c.initialize();
-      expect(fake.argsOf('openCamera')!.last, 0);
+      expect(fake.argsOf('openCamera')![7], 0, reason: 'enablePhoto');
 
       fake.clear();
       await c.configure(const CameraConfiguration(fps: 24));
-      expect(fake.argsOf('openCamera')!.last, 0);
+      expect(fake.argsOf('openCamera')![7], 0, reason: 'enablePhoto');
 
       for (final capture in [c.takePhoto, c.takeSnapshot]) {
         await expectLater(

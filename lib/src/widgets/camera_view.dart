@@ -220,6 +220,8 @@ class _CameraViewState extends State<CameraView> {
       format: widget.format,
       audio: widget.audio,
       photo: widget.photo,
+      // A Texture preview can take the camera's buffers directly (no GL copy).
+      directPreview: widget.previewMode == PreviewMode.texture,
       native: widget.native,
     );
     await controller.initialize(

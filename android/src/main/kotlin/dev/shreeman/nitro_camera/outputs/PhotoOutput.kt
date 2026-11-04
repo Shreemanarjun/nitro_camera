@@ -18,6 +18,7 @@ import dev.shreeman.nitro_camera.session.CameraSession
 import dev.shreeman.nitro_camera.utils.ExifOrientation
 import dev.shreeman.nitro_camera.utils.JpegOrientation
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,6 +54,12 @@ import android.hardware.camera2.CameraDevice as AndroidCameraDevice
 class PhotoOutput(private val session: CameraSession) {
 
     private companion object {
+        /// Message prefix the Dart side maps to CaptureException('capture/raw-unavailable').
+        const val RAW_UNAVAILABLE = "RAW_UNAVAILABLE"
+
+        /// Camera ids whose HAL advertised RAW but delivered no frame (process-wide).
+        val rawUnavailableIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
         /// Max wait for the AE precapture sequence to settle before capturing anyway.
         const val PRECAPTURE_TIMEOUT_MS = 1_500L
 
@@ -355,7 +362,11 @@ class PhotoOutput(private val session: CameraSession) {
         val caps = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
             ?: intArrayOf()
         if (!caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
-            throw IllegalStateException("RAW capture not supported by this camera")
+            throw IllegalStateException("$RAW_UNAVAILABLE: RAW capture not supported by this camera")
+        }
+        // Advertised but undeliverable here before — don't freeze the preview again.
+        if (session.deviceId in rawUnavailableIds) {
+            throw IllegalStateException("$RAW_UNAVAILABLE: this camera did not deliver a RAW frame earlier")
         }
 
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -372,6 +383,7 @@ class PhotoOutput(private val session: CameraSession) {
         val rawReader = ImageReader.newInstance(
             rawSize.width, rawSize.height, ImageFormat.RAW_SENSOR, 2)
         var rawSession: CameraCaptureSession? = null
+        var rawUndelivered = false
 
         // Tear down the normal session — it is restored in the finally block.
         try { session.captureSession?.stopRepeating() } catch (_: Exception) {}
@@ -500,9 +512,21 @@ class PhotoOutput(private val session: CameraSession) {
                 isMirrored  = 0L,
                 timestamp   = System.currentTimeMillis(),
             )
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            // Any RAW-path timeout (session config, frame or result) means the HAL
+            // advertises RAW but can't deliver it — seen on OnePlus CPH2447's
+            // logical multi-camera, which then also breaks the device.
+            rawUnavailableIds += session.deviceId
+            rawUndelivered = true
+            throw IllegalStateException("$RAW_UNAVAILABLE: no RAW frame within 4 s", e)
         } catch (e: Exception) {
             throw IllegalStateException("DNG capture failed: ${e.message}", e)
         } finally {
+            // Flush any in-flight RAW request before closing: a pending capture
+            // makes the camera service drain for ~10 s and can end in
+            // ERROR_CAMERA_DEVICE on the restored session.
+            try { rawSession?.stopRepeating() } catch (_: Exception) {}
+            try { rawSession?.abortCaptures() } catch (_: Exception) {}
             try { rawSession?.close() } catch (_: Exception) {}
             try { rawReader.close() } catch (_: Exception) {}
             // Restore the normal preview session via the existing config path.
@@ -511,7 +535,18 @@ class PhotoOutput(private val session: CameraSession) {
             // waitUntilDrained — unavoidable from app code. The example limits
             // the blast radius by disabling RAW after the first failure so this
             // one-time freeze never repeats.
-            if (!session.isClosed) session.startPreview()
+            // A HAL that swallowed the RAW request is left broken (later
+            // ERROR_CAMERA_DEVICE on the restored session, OnePlus CPH2447):
+            // reopen the device instead of reconfiguring the same one.
+            if (!session.isClosed) {
+                if (rawUndelivered) {
+                    val manager = session.context.getSystemService(android.content.Context.CAMERA_SERVICE)
+                        as android.hardware.camera2.CameraManager
+                    withContext(NonCancellable) { session.reopenDevice(manager) }
+                } else {
+                    session.startPreview()
+                }
+            }
         }
     }
 

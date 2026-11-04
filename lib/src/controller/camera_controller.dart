@@ -43,6 +43,14 @@ class CameraController extends ChangeNotifier {
   /// [CaptureException]. Android only; iOS/macOS always attach it.
   final bool photo;
 
+  /// Lets the camera write straight into the preview Texture, skipping the
+  /// native GL copy (Android, ImageReader-backed textures; ~3 % of a core
+  /// at 30 fps). [CameraPreview] frames it from [previewTransform]. Only for
+  /// [PreviewMode.texture] — a platform view needs the GL path. The session
+  /// falls back to GL by itself when a shader, lens undistortion or GL
+  /// recording needs it.
+  final bool directPreview;
+
   /// Whether the preview/camera session is active.
   ///
   /// Setting this to `false` pauses streaming (equivalent to [NitroCamera.stopPreview]).
@@ -75,8 +83,18 @@ class CameraController extends ChangeNotifier {
     this.format,
     this.audio = false,
     this.photo = true,
+    this.directPreview = false,
     NitroCamera? native,
   }) : _native = native ?? NitroCamera.instance;
+
+  /// How [CameraPreview] must frame the Texture right now (see
+  /// [PreviewTransform]); `direct == 0` means the native side already did.
+  PreviewTransform get previewTransform {
+    final tid = _textureId;
+    return tid == null
+        ? const PreviewTransform(direct: 0, rotationDegrees: 0, mirrored: 0, bufferWidth: 0, bufferHeight: 0)
+        : _native.getPreviewTransform(tid);
+  }
 
   // ---- State ----
 
@@ -241,6 +259,7 @@ class CameraController extends ChangeNotifier {
       _frameWidth,
       _frameHeight,
       photo ? 1 : 0,
+      directPreview ? 1 : 0,
     );
     // The native side returns 0 when the open failed (unknown device, HAL
     // rejection, ...). Treating 0 as a live session would publish a broken
@@ -303,6 +322,7 @@ class CameraController extends ChangeNotifier {
         _frameWidth,
         _frameHeight,
         photo ? 1 : 0,
+        directPreview ? 1 : 0,
       );
       if (tid == 0) {
         _textureId = null;
@@ -370,6 +390,9 @@ class CameraController extends ChangeNotifier {
         .where(CameraSessionEvent.isKnownType)
         .listen((e) {
           final type = CameraSessionEvent.fromNative(e).type;
+          // A direct preview's framing changed (display rotation, or the
+          // session fell back to GL): rebuild the preview.
+          if (type == CameraEventType.previewTransformChanged) return notifyListeners();
           final ended =
               type == CameraEventType.stopped || type == CameraEventType.error;
           if (!ended || !_isRecording) return;
@@ -714,9 +737,21 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Captures a photo with explicit [options] (flash, quality, shutter sound…).
+  ///
+  /// A DNG request on a camera that can't deliver RAW (not advertised, or the
+  /// HAL produced no RAW frame — OnePlus multi-camera devices) throws
+  /// `CaptureException('capture/raw-unavailable')`; the preview keeps running
+  /// and later DNG requests on that camera fail immediately.
   Future<PhotoResult> takePhotoWithOptions(PhotoCaptureOptions options) async {
     _requirePhoto();
-    return await _native.takePhotoWithOptions(_textureId!, options.toNative());
+    try {
+      return await _native.takePhotoWithOptions(_textureId!, options.toNative());
+    } catch (e) {
+      final msg = e.toString();
+      final i = msg.indexOf('RAW_UNAVAILABLE: ');
+      if (i < 0) rethrow;
+      throw CaptureException('capture/raw-unavailable', msg.substring(i + 'RAW_UNAVAILABLE: '.length), cause: e);
+    }
   }
 
   /// Captures the current preview frame as a fast JPEG snapshot (no full

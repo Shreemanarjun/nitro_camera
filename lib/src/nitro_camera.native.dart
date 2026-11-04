@@ -63,6 +63,7 @@ enum CameraEventType {
   orientationChanged, // physical device rotated; `reason` = degrees (0/90/180/270)
   detection, // native detector result; `message` = JSON array of detections
   thermalStateChanged, // device thermal pressure changed; `reason` = level (0 nominal..3 critical)
+  previewTransformChanged, // the preview switched direct <-> GL; re-read getPreviewTransform
 }
 
 /// Why the camera session was interrupted (mirrors AVFoundation reasons).
@@ -265,6 +266,28 @@ class ResolvedConfig {
   });
 }
 
+/// How the Flutter Texture must be framed. In direct mode (Android, texture
+/// preview, nothing needing the GL renderer) the camera writes raw sensor-
+/// orientation buffers straight into the texture, so Dart rotates, mirrors and
+/// crops them; otherwise the native side already did (identity transform).
+/// Returned by [NitroCamera.getPreviewTransform].
+@HybridStruct()
+class PreviewTransform {
+  final int direct; // 0 / 1
+  final int rotationDegrees; // clockwise turn that makes the buffer upright
+  final int mirrored; // 0 / 1 — flip horizontally after rotating (front camera)
+  final int bufferWidth; // the texture buffer's size before rotation
+  final int bufferHeight;
+
+  const PreviewTransform({
+    required this.direct,
+    required this.rotationDegrees,
+    required this.mirrored,
+    required this.bufferWidth,
+    required this.bufferHeight,
+  });
+}
+
 /// Per-capture options for [NitroCamera.takePhotoWithOptions].
 @HybridStruct()
 class PhotoOptions {
@@ -398,6 +421,10 @@ abstract class NitroCamera extends HybridObject {
   /// [enablePhoto] — 0 leaves the still (JPEG) stream out of the session, as
   /// vision-camera does without a photo output; photo capture then fails.
   /// Android only — iOS/macOS always attach the photo output.
+  /// [directPreview] — 1 lets the camera write straight into the Flutter
+  /// texture (no GL copy) while no shader, lens undistortion or GL recording
+  /// needs the renderer; frame it with [getPreviewTransform]. Only for the
+  /// Texture preview — a platform view needs the GL path. Android only.
   @nitroNativeAsync
   Future<int> openCamera(
     String deviceId,
@@ -408,6 +435,7 @@ abstract class NitroCamera extends HybridObject {
     int frameWidth,
     int frameHeight,
     int enablePhoto,
+    int directPreview,
   );
 
   @nitroNativeAsync
@@ -551,6 +579,11 @@ abstract class NitroCamera extends HybridObject {
   /// Returns the live session state (running, fps, resolution, pixelFormat) as a
   /// JSON object. Useful for diagnostics and UI read-back.
   String getSessionStateJson(int textureId);
+
+  /// How to frame the Texture right now (see [PreviewTransform]). Changes on
+  /// device rotation ([CameraEventType.orientationChanged]) and when the
+  /// session switches direct <-> GL ([CameraEventType.previewTransformChanged]).
+  PreviewTransform getPreviewTransform(int textureId);
 
   /// Sets the video stabilization mode. Pass a [VideoStabilizationMode] value.
   void setVideoStabilization(int textureId, int mode);

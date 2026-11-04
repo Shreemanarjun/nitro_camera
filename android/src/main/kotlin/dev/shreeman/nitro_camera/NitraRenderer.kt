@@ -36,6 +36,9 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     @Volatile private var distK3 = 0f
     @Volatile private var distFocal = 0.5f
 
+    /** True while lens undistortion is active (needs the GL path). */
+    fun hasDistortion(): Boolean = distK1 != 0f || distK2 != 0f || distK3 != 0f
+
     /** Configure barrel-undistortion. [focalNorm] = focal length / buffer width. */
     fun setDistortion(k1: Float, k2: Float, k3: Float, focalNorm: Float) {
         distK1 = k1
@@ -466,7 +469,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 "content=${width}x$height sensor=$sensorOrientation front=$isFrontCamera " +
                 "display=$displayRotationDegrees effOrient=$effectiveOrientation " +
                 "oesRot=$oesRotation extra=$extraRotation crop=($cropX,$cropY) " +
-                "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}]")
+                "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}] " +
+                "screenMirror=${isFrontCamera && surface != recorderEglSurface}")
         }
         val texM = FloatArray(16)
         android.opengl.Matrix.setIdentityM(texM, 0)
@@ -482,6 +486,22 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         // platform-view mode).
         val stMatrix = FloatArray(16)
         android.opengl.Matrix.multiplyMM(stMatrix, 0, texM, 0, transformMatrix, 0)
+        // The ±cropX above flips the TEXTURE axis inside the rotated sampling
+        // space, which after the front sensor's 270° turn leaves the preview
+        // upright but un-mirrored (opposite the stock OnePlus selfie preview and
+        // the direct preview). Mirror the preview OUTPUT horizontally — screen
+        // space, after rotation. The recorder keeps its existing (un-mirrored)
+        // output.
+        if (isFrontCamera && surface != recorderEglSurface) {
+            val flipX = FloatArray(16)
+            android.opengl.Matrix.setIdentityM(flipX, 0)
+            android.opengl.Matrix.translateM(flipX, 0, 0.5f, 0.5f, 0f)
+            android.opengl.Matrix.scaleM(flipX, 0, -1f, 1f, 1f)
+            android.opengl.Matrix.translateM(flipX, 0, -0.5f, -0.5f, 0f)
+            val mirrored = FloatArray(16)
+            android.opengl.Matrix.multiplyMM(mirrored, 0, stMatrix, 0, flipX, 0)
+            System.arraycopy(mirrored, 0, stMatrix, 0, 16)
+        }
         // Base texcoords (rotation now lives in uSTMatrix).
         texCoordBuffer.clear()
         texCoordBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
