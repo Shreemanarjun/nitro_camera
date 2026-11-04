@@ -46,3 +46,6 @@ app.*.map.json
 
 # Patrol generates this per run (patrol.leancode.co).
 patrol_test/test_bundle.dart
+
+# Patrol dart-defines (often secrets)
+.patrol.env
