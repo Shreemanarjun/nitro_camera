@@ -34,6 +34,10 @@ target 'Runner' do
   target 'RunnerTests' do
     inherit! :search_paths
   end
+  # Patrol's native test runner target (see patrol_test/).
+  target 'RunnerUITests' do
+    inherit! :complete
+  end
 end
 
 post_install do |installer|
