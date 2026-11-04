@@ -1,4 +1,4 @@
-## 0.0.3 - 2026-11-02
+## 0.0.3 - 2026-11-04
 
 ### Added
 
@@ -28,6 +28,13 @@
   texture (`handlesCropAndRotation() == false`); otherwise GL as before.
 
 ### Fixed
+
+* **Android**: a DNG request on a camera that advertises RAW but never delivers a
+  RAW frame (e.g. OnePlus logical multi-cameras) now throws
+  `CaptureException('capture/raw-unavailable')` instead of an untyped native
+  error. Later DNG requests on that camera fail immediately (no second preview
+  freeze), and the camera device is reopened — the HAL left it broken, which
+  used to surface as `ERROR_CAMERA_DEVICE` on the next operation.
 
 * **Android**: the front camera's GL preview (platform view, shaders, lens
   undistortion) was not mirrored — the opposite of the stock selfie preview.
