@@ -3,6 +3,7 @@ import AVFoundation
 import CoreVideo
 import CoreMedia
 import CoreImage
+import QuartzCore
 import Metal
 import Flutter
 
@@ -38,6 +39,45 @@ final class FrameOutput: NSObject, FlutterTexture,
 
     // Latest camera frame (GPU path → Flutter Texture)
     private var latestPixelBuffer: CVPixelBuffer?
+    /// Host time (CACurrentMediaTime) until which BLACK frames are dropped —
+    /// set after a change that makes AVFoundation rebuild the pipeline (video
+    /// HDR, low-light boost, stabilization, pixel format), which emits black
+    /// frames (measured on iPhone 12: frame mean 1.0, ≤440 ms). Dropping them
+    /// keeps the texture on the last good frame and never hands a black frame
+    /// to a processor or the recorder. Guarded by `pixelLock`.
+    private var settleUntil: CFTimeInterval = 0
+
+    /// Opens the black-frame settle window (see `settleUntil`).
+    func beginReconfigureSettle(seconds: CFTimeInterval = 1.0) {
+        pixelLock.lock()
+        settleUntil = CACurrentMediaTime() + seconds
+        pixelLock.unlock()
+    }
+
+    /// Whether [buffer] is (near-)black: mean of a 16×16 grid of luma (YUV
+    /// plane 0) or green (BGRA) samples ≤ 4 — a few hundred byte reads.
+    private static func isBlack(_ buffer: CVPixelBuffer) -> Bool {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let planar = CVPixelBufferIsPlanar(buffer)
+        guard let base = planar ? CVPixelBufferGetBaseAddressOfPlane(buffer, 0)
+                                : CVPixelBufferGetBaseAddress(buffer) else { return false }
+        let w = planar ? CVPixelBufferGetWidthOfPlane(buffer, 0) : CVPixelBufferGetWidth(buffer)
+        let h = planar ? CVPixelBufferGetHeightOfPlane(buffer, 0) : CVPixelBufferGetHeight(buffer)
+        let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0) : CVPixelBufferGetBytesPerRow(buffer)
+        let px = base.assumingMemoryBound(to: UInt8.self)
+        let bpp = planar ? 1 : 4
+        let channel = planar ? 0 : 1 // BGRA → green ≈ luma
+        var sum = 0
+        for gy in 0..<16 {
+            let y = (h - 1) * gy / 15
+            for gx in 0..<16 {
+                let x = (w - 1) * gx / 15
+                sum += Int(px[y * stride + x * bpp + channel])
+            }
+        }
+        return sum / 256 <= 4
+    }
     private let pixelLock = NSLock()
     // Latched true in teardown() (under pixelLock). Once set, captureOutput must
     // NOT call textureFrameAvailable — the texture is about to be unregistered,
@@ -234,6 +274,13 @@ final class FrameOutput: NSObject, FlutterTexture,
             return
         }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        // Pipeline just rebuilt (HDR/low-light/stabilization/format): drop its
+        // black frames so the preview holds the last good one.
+        pixelLock.lock()
+        let settling = CACurrentMediaTime() < settleUntil
+        pixelLock.unlock()
+        if settling && Self.isBlack(pixelBuffer) { return }
 
         frameActivityCounter &+= 1
         if !firstFrameLogged {

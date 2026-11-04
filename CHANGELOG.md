@@ -29,6 +29,25 @@
 
 ### Fixed
 
+* **iOS recording** (found by the first iOS Patrol run, iPhone 12):
+  * A session teardown during a recording (lens switch, resolution change)
+    now **finalises** the clip and emits `stopped` with its path, instead of
+    cancelling it and deleting the file.
+  * `stopRecording()` after a `maxDurationMs` / `maxFileSizeBytes` auto-stop is
+    a clean no-op (empty, non-finalised result, like Android) instead of
+    throwing `recorder/finalize-failed`.
+  * Back-to-back recordings no longer fail with a spurious timeout: a stop's
+    10 s watchdog could fail a LATER stop that was still finalising.
+  * `setTargetOrientation` now applies to recordings (the clip's display
+    rotation), not only to stills.
+  * `startHighSpeedRecording` no longer crashes (uncaught NSException) on
+    formats that can't encode H.264 — it falls back to a writable codec (HEVC)
+    and reports the codec actually used.
+* **iOS preview**: toggling video HDR, low-light boost, stabilization or the
+  pixel format no longer flashes black frames (up to ~440 ms) into the preview,
+  frame processors and recordings — the last good frame is held while the
+  pipeline rebuilds. HDR / low-light no-op re-applies are skipped.
+
 * **Android**: a DNG request on a camera that advertises RAW but never delivers a
   RAW frame (e.g. OnePlus logical multi-cameras) now throws
   `CaptureException('capture/raw-unavailable')` instead of an untyped native

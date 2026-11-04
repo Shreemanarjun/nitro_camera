@@ -25,6 +25,10 @@ final class VideoRecorder {
     /// Whether the session graph has an audio-data output feeding us — set
     /// during session configuration; recordings then mux an AAC audio track.
     var hasAudioOutput = false
+    /// Physical device orientation the session is locked to (0/90/180/270,
+    /// OrientationManager convention; -1 = default). Read at record start and
+    /// stamped as the clip's display rotation — buffers stay portrait.
+    var targetOrientationDeg: Int64 = -1
     /// Event hook: (CameraEventType index, message) — wired to the session's hub.
     var onEvent: ((Int64, String) -> Void)?
 
@@ -48,6 +52,9 @@ final class VideoRecorder {
     /// when a stop / finalise / teardown race.
     private var movieContinuation: CheckedContinuation<RecordingResult, Error>?
     private let continuationLock = NSLock()
+    /// Bumped per stop() under `continuationLock`, so a stop's watchdog can
+    /// only fail ITS OWN stop — not a later one that is still finalising.
+    private var stopGeneration = 0
 
     // Recording limits / timeline anchors captured at start.
     private var recordingMaxDurationMs: Int64 = 0
@@ -129,7 +136,21 @@ final class VideoRecorder {
         // HEVC defaults whose compression properties (BaseLayerFrameRate…) are
         // invalid for H.264 — AVAssetWriterInput then throws an uncatchable
         // NSInvalidArgumentException and kills the app at start-recording.
-        let wantedCodec: AVVideoCodecType = (options.codec == 1) ? .hevc : .h264
+        // recommendedVideoSettings(forVideoCodecType:) raises an UNCATCHABLE
+        // NSException for a codec the active format can't encode — e.g. H.264
+        // on a 240 fps high-speed format, where only HEVC is offered (crashed
+        // startHighSpeedRecording on iPhone 12). Pick only from what the
+        // output says it can write; prefer the requested codec.
+        let requestedCodec: AVVideoCodecType = (options.codec == 1) ? .hevc : .h264
+        let writable = videoOutput.availableVideoCodecTypesForAssetWriter(writingTo: fileType)
+        guard !writable.isEmpty else { throw CameraError.configurationFailed }
+        let wantedCodec: AVVideoCodecType = writable.contains(requestedCodec)
+            ? requestedCodec
+            : (writable.contains(.hevc) ? .hevc : writable[0])
+        if wantedCodec != requestedCodec {
+            NSLog("NitroCamera record: %@ not writable for this format — using %@",
+                  requestedCodec.rawValue, wantedCodec.rawValue)
+        }
         // Fallback dimensions: buffers are delivered PORTRAIT (the session sets
         // connection.videoOrientation = .portrait), so the active format's
         // width/height are swapped.
@@ -151,6 +172,15 @@ final class VideoRecorder {
         let selectedHeight = Self.int64Setting(videoSettings[AVVideoHeightKey]) ?? Int64(dims.width)
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
+        // Buffers are delivered upright for portrait (sensor 0 in this
+        // convention), so the clip's display rotation is the locked device
+        // orientation — negated for the mirrored front lens (Android's
+        // JpegOrientation.compute(sensor, target, isFrontFacing)).
+        if targetOrientationDeg >= 0 {
+            let d = targetOrientationDeg % 360
+            let rot = device.position == .front ? (360 - d) % 360 : d
+            vInput.transform = CGAffineTransform(rotationAngle: CGFloat(rot) * .pi / 180)
+        }
         guard writer.canAdd(vInput) else { throw CameraError.configurationFailed }
         writer.add(vInput)
 
@@ -178,7 +208,7 @@ final class VideoRecorder {
             self.recordingMaxFileSizeBytes = options.maxFileSizeBytes
             self.recordingWidth = selectedWidth
             self.recordingHeight = selectedHeight
-            self.recordingCodec = options.codec == 1 ? 1 : 0
+            self.recordingCodec = wantedCodec == .hevc ? 1 : 0
             self.recordingFileType = options.fileType == 1 ? 1 : 0
             self.recordingFinishedReason = 0
             self.recordingPaused = false
@@ -378,12 +408,23 @@ final class VideoRecorder {
                 let stopping = self.movieContinuation != nil
                 guard self.isWriting, let writer = self.assetWriter, !stopping else {
                     self.continuationLock.unlock()
-                    // Nothing recording / a stop already in flight → fail fast
-                    // instead of leaking the continuation.
+                    if !stopping {
+                        // Nothing recording (e.g. a maxDuration/maxFileSize
+                        // auto-stop already finalised it): a clean no-op, the
+                        // same empty, non-finalised result Android returns.
+                        continuation.resume(returning: RecordingResult(
+                            path: "", durationMs: 0, fileSize: 0, width: 0, height: 0,
+                            codec: 0, fileType: 0, finishedReason: 0))
+                        return
+                    }
+                    // A stop already in flight → fail fast instead of leaking
+                    // the continuation.
                     continuation.resume(throwing: CameraError.captureFailed)
                     return
                 }
                 self.movieContinuation = continuation
+                self.stopGeneration += 1
+                let generation = self.stopGeneration
                 self.continuationLock.unlock()
 
                 self.isWriting = false
@@ -429,7 +470,8 @@ final class VideoRecorder {
                 // resumes the continuation — if the writer wedges, fail the
                 // await instead of hanging Dart forever.
                 DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
-                    guard let self = self, let cont = self.takeMovieContinuation() else { return }
+                    guard let self = self,
+                          let cont = self.takeMovieContinuation(ifGeneration: generation) else { return }
                     NSLog("NitroCamera record: stop WATCHDOG — finishWriting silent for 10s (status=%d)",
                           writer.status.rawValue)
                     cont.resume(throwing: CameraError.captureTimedOut)
@@ -498,24 +540,61 @@ final class VideoRecorder {
         if let url = url { try? FileManager.default.removeItem(at: url) }
     }
 
-    /// Aborts any in-flight recording so the writer doesn't outlive the
-    /// session, and fails a pending stop continuation. Called from
-    /// CameraSession.close() — ON `frameQueue`: the sample callbacks read this
-    /// state there, and one may still be mid-append even after the delegate
-    /// detach that precedes this call.
+    /// Ends an in-flight recording when the session is torn down (a lens
+    /// switch or a reopening configure) so the writer doesn't outlive it.
+    /// The clip is FINALISED, not discarded — the same contract as Android
+    /// (finalise-then-switch) — and announced with a `stopped` event carrying
+    /// its path, like an auto-stop. Called from CameraSession.close() after
+    /// capture stopped and the frame queue drained; state is read ON
+    /// `frameQueue`, where the sample callbacks touch it.
     func interrupt() {
+        var finishing: AVAssetWriter?
+        var url: URL?
         frameQueue.sync {
+            if self.isWriting, let w = self.assetWriter, w.status == .writing {
+                self.videoWriterInput?.markAsFinished()
+                self.audioWriterInput?.markAsFinished()
+                if self.lastVideoPTS.isValid, self.recordingStartPTS.isValid,
+                   CMTimeCompare(self.lastVideoPTS, self.recordingStartPTS) > 0 {
+                    w.endSession(atSourceTime: self.lastVideoPTS)
+                }
+                finishing = w
+                url = self.recordingURL
+            } else if let w = self.assetWriter, w.status == .writing {
+                w.cancelWriting()
+            }
             self.isWriting = false
-            if let w = self.assetWriter, w.status == .writing { w.cancelWriting() }
             self.assetWriter = nil
             self.videoWriterInput = nil
             self.audioWriterInput = nil
+            self.recordingURL = nil
+        }
+        if let w = finishing {
+            // Bounded: teardown must not hang on a wedged writer.
+            let done = DispatchSemaphore(value: 0)
+            w.finishWriting { done.signal() }
+            _ = done.wait(timeout: .now() + 3)
+            if w.status == .completed, let url = url {
+                NSLog("NitroCamera record: finalised on session close → %@", url.lastPathComponent)
+                onEvent?(1 /* stopped */, url.path)
+            } else {
+                NSLog("NitroCamera record: finalise on close FAILED status=%d", w.status.rawValue)
+                onEvent?(2 /* error */, w.error?.localizedDescription ?? "recording could not be finalised")
+            }
         }
         takeMovieContinuation()?.resume(throwing: CameraError.captureFailed)
     }
 
     private func takeMovieContinuation() -> CheckedContinuation<RecordingResult, Error>? {
         continuationLock.lock(); defer { continuationLock.unlock() }
+        let c = movieContinuation; movieContinuation = nil; return c
+    }
+
+    /// Takes the pending stop continuation only if it still belongs to stop
+    /// number [generation] (watchdog path).
+    private func takeMovieContinuation(ifGeneration generation: Int) -> CheckedContinuation<RecordingResult, Error>? {
+        continuationLock.lock(); defer { continuationLock.unlock() }
+        guard stopGeneration == generation else { return nil }
         let c = movieContinuation; movieContinuation = nil; return c
     }
 }

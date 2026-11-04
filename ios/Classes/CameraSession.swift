@@ -520,11 +520,15 @@ public class CameraSession: NSObject {
         // setters) while HDR still applies on the session queue.
         sessionQueue.async { [weak self] in
             guard let self = self, self.device.activeFormat.isVideoHDRSupported else { return }
+            // No-op guard: re-applying the same value still rebuilds the pipeline.
+            if !self.device.automaticallyAdjustsVideoHDREnabled,
+               self.device.isVideoHDREnabled == enabled { return }
             do {
                 try self.device.lockForConfiguration()
                 self.device.automaticallyAdjustsVideoHDREnabled = false
                 self.device.isVideoHDREnabled = enabled
                 self.device.unlockForConfiguration()
+                self.frameOutput.beginReconfigureSettle()
             } catch {
                 NSLog("NitroCamera setHdr failed: %@", error.localizedDescription)
             }
@@ -561,6 +565,7 @@ public class CameraSession: NSObject {
                 kCVPixelBufferPixelFormatTypeKey as String: type
             ]
             self.session.commitConfiguration()
+            self.frameOutput.beginReconfigureSettle()
         }
     }
 
@@ -579,6 +584,7 @@ public class CameraSession: NSObject {
             let target: AVCaptureVideoStabilizationMode = (mode == 0) ? .off : .auto
             guard conn.preferredVideoStabilizationMode != target else { return }
             conn.preferredVideoStabilizationMode = target
+            self.frameOutput.beginReconfigureSettle()
         }
     }
 
@@ -591,10 +597,12 @@ public class CameraSession: NSObject {
         // immediately while the change still applies (same recipe as setHdr).
         sessionQueue.async { [weak self] in
             guard let self = self, self.device.isLowLightBoostSupported else { return }
+            guard self.device.automaticallyEnablesLowLightBoostWhenAvailable != enabled else { return }
             do {
                 try self.device.lockForConfiguration()
                 self.device.automaticallyEnablesLowLightBoostWhenAvailable = enabled
                 self.device.unlockForConfiguration()
+                self.frameOutput.beginReconfigureSettle()
             } catch {
                 NSLog("NitroCamera setLowLightBoost failed: %@", error.localizedDescription)
             }
@@ -649,11 +657,12 @@ public class CameraSession: NSObject {
     private(set) var targetOrientationDeg: Int64 = -1
     /// Locks output orientation to the given physical device orientation
     /// (0/90/180/270, OrientationManager convention; -1 resumes default).
-    /// On iOS this currently orients STILLS: the photo connection's
-    /// `videoOrientation` is set per-capture from this value. Preview and
-    /// recording stay portrait-fixed (the Flutter layer owns preview rotation).
+    /// Orients STILLS (the photo connection's `videoOrientation` is set
+    /// per-capture) and RECORDINGS (stamped as the clip's display rotation).
+    /// Preview stays portrait-fixed (the Flutter layer owns preview rotation).
     func setTargetOrientation(_ degrees: Int64) {
         targetOrientationDeg = degrees
+        recorder.targetOrientationDeg = degrees
         // Forwarded on the session queue — capturePhoto reads it there.
         sessionQueue.async { [weak self] in
             self?.photoOutput.targetOrientationDeg = degrees

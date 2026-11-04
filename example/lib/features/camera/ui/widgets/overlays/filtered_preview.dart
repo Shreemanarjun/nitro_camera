@@ -41,37 +41,45 @@ class FilteredPreview extends StatelessWidget {
     ],
   };
 
+  static const List<double> _identity = [
+    1, 0, 0, 0, 0, //
+    0, 1, 0, 0, 0, //
+    0, 0, 1, 0, 0, //
+    0, 0, 0, 1, 0,
+  ];
+
   @override
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return child; // Android: native GL filter.
+    // Keep the tree SHAPE constant: wrapping the camera view only when a
+    // filter is on re-parents it, which disposes its state and reopens the
+    // camera on every filter change. Identity matrix / transparent vignette
+    // when off.
     return Watch((_) {
       final name = cameraStore.currentFilterName.value;
-      Widget out = child;
-      final matrix = _matrices[name];
-      if (matrix != null) {
-        out = ColorFiltered(
-          colorFilter: ColorFilter.matrix(matrix),
-          child: out,
-        );
-      }
-      if (name == 'VIGNETTE') {
-        out = Stack(
-          fit: StackFit.expand,
-          children: [
-            out,
-            const DecoratedBox(
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          ColorFiltered(
+            colorFilter: ColorFilter.matrix(_matrices[name] ?? _identity),
+            child: child,
+          ),
+          IgnorePointer(
+            child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: RadialGradient(
                   radius: 1.0,
-                  colors: [Colors.transparent, Colors.black],
-                  stops: [0.55, 1.0],
+                  colors: [
+                    Colors.transparent,
+                    name == 'VIGNETTE' ? Colors.black : Colors.transparent,
+                  ],
+                  stops: const [0.55, 1.0],
                 ),
               ),
             ),
-          ],
-        );
-      }
-      return out;
+          ),
+        ],
+      );
     });
   }
 }
