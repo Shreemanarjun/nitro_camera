@@ -609,9 +609,10 @@ packages:
   nitro_zxing:
     dependency: "direct main"
     description:
-      path: "../../nitro_zxing"
-      relative: true
-    source: path
+      name: nitro_zxing
+      sha256: "7512de423291f51308b1bed65aa0d5146eb4bd72cb3f48ab99716c7301eca41e"
+      url: "https://pub.dev"
+    source: hosted
     version: "0.0.1"
   objective_c:
     dependency: transitive
