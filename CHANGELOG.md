@@ -84,7 +84,7 @@
   left to overflow, Android no longer emits `frameDropped` for a slow Dart
   consumer; the Dart side coalesces a busy port instead.
 * `attachDirect` frames are copied into one reused `NitroBuffer`, so a
-  `@zeroCopy` native call (e.g. nitro_zxing's `decodeLuma`) takes them by
+  `@zeroCopy` native call (e.g. nitro_zxing's `decode`) takes them by
   pointer with no second copy. `FrameData.bytes` is borrowed in this mode:
   valid only during the handler call.
 * `resolvedConfig` / `onConfigResolved` are now populated when the camera is

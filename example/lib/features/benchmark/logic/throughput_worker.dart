@@ -68,8 +68,9 @@ bool throughputFrameHandler(FrameData f) {
 
 /// The frame's luma plane through zxing-cpp; null on a miss.
 String? _decodeCpp(FrameData f) {
-  final r = NitroZxing.instance.decodeLuma(f.bytes, f.width, f.height, f.effectiveBytesPerRow, ZxingFormat.qrCode, true);
-  return r.text.isEmpty ? null : r.text;
+  return NitroZxing.instance
+      .decode(f.bytes, width: f.width, height: f.height, rowStride: f.effectiveBytesPerRow, formats: {ZxingFormat.qrCode}, live: true)
+      ?.text;
 }
 
 void _submit(String value) {
