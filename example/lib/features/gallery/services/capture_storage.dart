@@ -57,9 +57,11 @@ class CaptureStorage {
     final src = File(srcPath);
     final dir = await capturesDir();
     final ext = p.extension(srcPath).toLowerCase();
-    final prefix = videoExtensions.contains(ext)
-        ? 'VID'
-        : (ext == '.dng' ? 'RAW' : 'IMG');
+    final prefix = switch (ext) {
+      _ when videoExtensions.contains(ext) => 'VID',
+      '.dng' => 'RAW',
+      _ => 'IMG',
+    };
     final stamp = _stamp(capturedAt ?? _bestCaptureTime(src));
 
     var target = File(p.join(dir.path, '${prefix}_$stamp$ext'));

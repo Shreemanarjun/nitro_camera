@@ -9,6 +9,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "103.0.0"
+  analysis_server_plugin:
+    dependency: transitive
+    description:
+      name: analysis_server_plugin
+      sha256: c58b2a05b260a023eefd0848496ff6b113a318c6c95dad4215165a4bd54ae600
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.18"
   analyzer:
     dependency: transitive
     description:
@@ -17,6 +25,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "13.3.0"
+  analyzer_plugin:
+    dependency: transitive
+    description:
+      name: analyzer_plugin
+      sha256: c2a75baf1657171cc7872db96a12b07e385873cf7a73f2b4f7638e9d0701ee53
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.14.12"
+  ansicolor:
+    dependency: transitive
+    description:
+      name: ansicolor
+      sha256: "50e982d500bc863e1d703448afdbf9e5a72eb48840a4f766fa361ffd6877055f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.3"
   archive:
     dependency: transitive
     description:
@@ -169,6 +193,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
+  csslib:
+    dependency: transitive
+    description:
+      name: csslib
+      sha256: "09bad715f418841f976c77db72d5398dc1253c21fb9c0c7f0b0b985860b2d58e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
   cupertino_icons:
     dependency: "direct main"
     description:
@@ -177,6 +209,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
+  dart_code_linter:
+    dependency: "direct dev"
+    description:
+      name: dart_code_linter
+      sha256: "7b1c61a4552a29db1869f68d9e0a6621d6fc1df14f072c7807c405fdc3fcb12b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.4.4"
   dart_style:
     dependency: transitive
     description:
@@ -346,6 +386,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  html:
+    dependency: transitive
+    description:
+      name: html
+      sha256: "43b67b8f43321ab066817dfac5619596c98bb1b61624e77203bb4351785f9699"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.15.7"
   http:
     dependency: transitive
     description:
@@ -790,6 +838,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  pub_updater:
+    dependency: transitive
+    description:
+      name: pub_updater
+      sha256: "3aadeb8c68d15ef9d117b36474ddcc543b48ae1e64f7dd71407da26df66bf7c8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.0"
   pubspec_parse:
     dependency: transitive
     description:
@@ -1155,8 +1211,16 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.3"
+  yaml_edit:
+    dependency: transitive
+    description:
+      name: yaml_edit
+      sha256: "07c9e63ba42519745182b88ca12264a7ba2484d8239958778dfe4d44fe760488"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.4"
   zxing_lib:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: zxing_lib
       sha256: f9170470b6bc947d21a6783486f88ef48aad66fc1380c8acd02b118418ec0ce0

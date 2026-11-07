@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
@@ -8,6 +9,7 @@ import 'dart:ui' as ui;
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
 import '../../theme/app_theme.dart';
+import '../../../processors/zxing_cpp_scan.dart';
 
 class FrameOverlay extends StatefulWidget {
   final bool isProcessing;
@@ -117,8 +119,11 @@ class _FrameOverlayState extends State<FrameOverlay> {
       mode: cameraStore.scanOneShot.value
           ? ScanMode.oneShot
           : ScanMode.continuous,
+      // zxing-cpp for every format it reads; Dart engines for the rest.
+      handler: zxingCppHandlerFor(kind),
     );
-    await scanner.start(NitroCamera.instance.frameStream);
+    // Worker reads frames natively: no per-frame copy through the UI isolate.
+    await scanner.start(NitroCamera.instance.frameStream, direct: true);
     if (!mounted || epoch != _scannerEpoch) {
       // Widget gone, or a newer restart superseded this init while its worker
       // was spawning — tear down instead of installing leaked subscriptions.
@@ -337,7 +342,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                     width: 90,
                     height: 120,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: const BorderRadius.all(Radius.circular(16)),
                       boxShadow: [
                         BoxShadow(
                           color: AppColors.accent.withValues(alpha: 0.1),
@@ -350,7 +355,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                       ),
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: const BorderRadius.all(Radius.circular(16)),
                       child: RawImage(image: _image, fit: BoxFit.cover),
                     ),
                   ),
@@ -444,7 +449,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
                       color: oneShot
                           ? AppColors.accent
                           : Colors.black.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: const BorderRadius.all(Radius.circular(16)),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.15),
                       ),
@@ -493,28 +498,26 @@ class _FrameOverlayState extends State<FrameOverlay> {
               onTap: _resumeOneShot,
               child: Align(
                 alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 230),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 230),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: const BorderRadius.all(Radius.circular(16)),
+                    border: Border.all(
+                      color: AppColors.accent.withValues(alpha: 0.5),
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppColors.accent.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    child: const Text(
-                      'TAP TO SCAN AGAIN',
-                      style: TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.4,
-                      ),
+                  ),
+                  child: const Text(
+                    'TAP TO SCAN AGAIN',
+                    style: TextStyle(
+                      color: AppColors.accent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.4,
                     ),
                   ),
                 ),
@@ -541,7 +544,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
     }
     final cover = cameraStore.resizeCover.value;
     final sx = size.width / fw, sy = size.height / fh;
-    final scale = cover ? (sx > sy ? sx : sy) : (sx < sy ? sx : sy);
+    final scale = cover ? math.max(sx, sy) : math.min(sx, sy);
     final side = kScannerWindowFraction * (fw < fh ? fw : fh) * scale;
     return Rect.fromCenter(
       center: Offset(size.width / 2, size.height / 2),
@@ -637,8 +640,10 @@ class _PulsingChipState extends State<_PulsingChip>
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.accent),
+          borderRadius: const BorderRadius.all(Radius.circular(18)),
+          border: const Border.fromBorderSide(
+            BorderSide(color: AppColors.accent),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -674,14 +679,14 @@ class _ZoomChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: const BorderRadius.all(Radius.circular(22)),
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: const BorderRadius.all(Radius.circular(22)),
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Column(
@@ -740,14 +745,14 @@ class _ScanKindChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: const BorderRadius.all(Radius.circular(24)),
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: const BorderRadius.all(Radius.circular(24)),
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Row(
@@ -779,7 +784,9 @@ class _ScanKindChips extends StatelessWidget {
                         color: kind == selected
                             ? AppColors.accent
                             : Colors.transparent,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: const BorderRadius.all(
+                          Radius.circular(20),
+                        ),
                       ),
                       child: Text(
                         kind.label,
@@ -821,14 +828,14 @@ class _AnimatedStatsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: const BorderRadius.all(Radius.circular(20)),
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: const BorderRadius.all(Radius.circular(20)),
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Column(
@@ -853,13 +860,12 @@ class _AnimatedStatsCard extends StatelessWidget {
                   builder: (ctx, v, _) => Text(
                     v == 0 ? "—" : "${v.toStringAsFixed(1)} ms",
                     style: _valStyle.copyWith(
-                      color: v == 0
-                          ? Colors.white38
-                          : v < 20
-                          ? AppColors.success
-                          : v < 50
-                          ? AppColors.accent
-                          : AppColors.danger,
+                      color: switch (v) {
+                        0.0 => Colors.white38,
+                        < 20 => AppColors.success,
+                        < 50 => AppColors.accent,
+                        _ => AppColors.danger,
+                      },
                     ),
                   ),
                 ),
@@ -978,7 +984,7 @@ class _PremiumViewfinder extends StatelessWidget {
             width: 280,
             height: 280,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(48),
+              borderRadius: const BorderRadius.all(Radius.circular(48)),
               border: Border.all(color: color.withValues(alpha: 0.1), width: 2),
               boxShadow: isScanning
                   ? [
@@ -1150,7 +1156,7 @@ class _SuccessFlash extends StatelessWidget {
       builder: (context, value, _) => Container(
         decoration: BoxDecoration(
           color: AppColors.success.withValues(alpha: (1.0 - value) * 0.2),
-          borderRadius: BorderRadius.circular(48),
+          borderRadius: const BorderRadius.all(Radius.circular(48)),
         ),
       ),
     );
@@ -1208,14 +1214,14 @@ class _QRResultCard extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 40),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: const BorderRadius.all(Radius.circular(24)),
           child: BackdropFilter(
             filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: const BorderRadius.all(Radius.circular(24)),
                 border: Border.all(
                   color: AppColors.success.withValues(alpha: 0.3),
                   width: 2,

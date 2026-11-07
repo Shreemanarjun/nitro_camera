@@ -28,7 +28,7 @@ class GlassTooltip extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 500),
       decoration: BoxDecoration(
         color: Colors.black87,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
         border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       textStyle: const TextStyle(

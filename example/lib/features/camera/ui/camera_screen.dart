@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nitro_camera/nitro_camera.dart';
@@ -131,7 +133,7 @@ class _CameraScreenState extends State<CameraScreen>
         if (cameraPermission != 1) {
           return PermissionGuard(
             cameraStatus: cameraPermission,
-            onGrant: cameraStore.grantPermission,
+            onGrant: () => unawaited(cameraStore.grantPermission()),
           );
         }
 
@@ -230,7 +232,7 @@ class _CameraScreenState extends State<CameraScreen>
                     ),
                     decoration: BoxDecoration(
                       color: Colors.black45,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: const BorderRadius.all(Radius.circular(12)),
                     ),
                     child: Text(
                       "${zoom.toStringAsFixed(1)}x",
@@ -347,7 +349,6 @@ class _CameraScreenState extends State<CameraScreen>
     );
   }
 }
-
 
 /// Fades a control out (and disables its hit-testing) while a recording is in
 /// progress, so the sparse recording view has no overlapping chrome.

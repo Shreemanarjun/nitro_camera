@@ -9,7 +9,7 @@ Future<bool> confirmDelete(BuildContext context, {required int count}) async {
     builder: (ctx) => AlertDialog(
       backgroundColor: const Color(0xFF11161A),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
       ),
       title: Text(
@@ -65,7 +65,9 @@ void showGallerySnack(BuildContext context, String message) {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         backgroundColor: const Color(0xE6151A1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(
+          borderRadius: const BorderRadius.all(Radius.circular(10)),
+        ),
         duration: const Duration(milliseconds: 1600),
         content: Text(
           message.toUpperCase(),

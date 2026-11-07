@@ -498,7 +498,7 @@ class _RawPreview extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [Color(0xFF17242B), Color(0xFF0B1013)],
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(

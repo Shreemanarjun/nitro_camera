@@ -68,7 +68,9 @@ class MediaTile extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: selected ? 0.35 : 0.15),
                   border: selected
-                      ? Border.all(color: AppColors.accent, width: 2)
+                      ? const Border.fromBorderSide(
+                          BorderSide(color: AppColors.accent, width: 2),
+                        )
                       : null,
                 ),
                 child: Align(
@@ -166,7 +168,7 @@ class _VideoTileContentState extends State<_VideoTileContent> {
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
                 ),
                 child: Text(
                   formatClipDuration(d),
@@ -217,8 +219,10 @@ Widget rawBadge() {
     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
     decoration: BoxDecoration(
       color: Colors.black54,
-      borderRadius: BorderRadius.circular(4),
-      border: Border.all(color: AppColors.accent, width: 0.8),
+      borderRadius: const BorderRadius.all(Radius.circular(4)),
+      border: const Border.fromBorderSide(
+        BorderSide(color: AppColors.accent, width: 0.8),
+      ),
     ),
     child: const Text(
       'RAW',

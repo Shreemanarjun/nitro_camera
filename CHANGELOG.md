@@ -35,6 +35,27 @@
   stream listeners call `releaseNativeBuffer`.
 * **Session state** — `SessionState.colorRange` (full / video YUV range),
   `audio` and `audioError`.
+* **Pluggable scanner engine** — `CodeScanner(handler:)` replaces the built-in
+  Dart decoder with any top-level `FrameHandler<CodeResult?>`, e.g. zxing-cpp
+  via `nitro_zxing` (the example app does this: QR scans drop from tens of ms
+  to ~4 ms a frame at 60 FPS on an iPhone 12). Helpers for such handlers:
+  `scannerWindowOf(frame)` (the viewfinder window to crop to) and
+  `scanFrameAdaptive(frame, kind, formats:)` (run the built-in engines only
+  for the formats the custom engine doesn't read).
+* **Direct scanner frames** — `CodeScanner.start(frames, direct: true)` has
+  the worker isolate read the native frame stream itself
+  (`CameraFrameProcessor.attachDirect`): no UI-isolate hop and no per-frame
+  copy. `frames` is ignored in this mode; handlers must not keep
+  `FrameData.bytes` past the call.
+
+### Changed
+
+* **Faster built-in scanner engines** — the postal / width engines threshold
+  each window once (`GrayWindow.mask`) instead of on every pixel test, size
+  bars in a single pass, and the streaming scan reuses its per-frame buffers
+  instead of allocating several full-window copies per frame (which kept the
+  worker's GC busy). Results are unchanged; the ALL-formats scan with no code
+  in view went from ~720 ms to ~50 ms a frame on an iPhone 12.
 
 ### Fixed
 

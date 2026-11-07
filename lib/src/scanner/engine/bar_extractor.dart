@@ -19,12 +19,15 @@ List<Bar>? extractBars(GrayWindow win, {int minBars = 12}) {
   final w = win.width, h = win.height;
   if (w < 20 || h < 10) return null;
 
+  final mask = win.mask;
+
   // Row profile → candidate content bands.
   final rowDark = List<int>.filled(h, 0);
   for (var y = 0; y < h; y++) {
     var c = 0;
+    final o = y * w;
     for (var x = 0; x < w; x++) {
-      if (win.dark(x, y)) c++;
+      c += mask[o + x];
     }
     rowDark[y] = c;
   }
@@ -51,25 +54,31 @@ List<Bar>? extractBars(GrayWindow win, {int minBars = 12}) {
     final colThr = (bH * 0.10).clamp(2, 1 << 30).toInt();
     final bars = <Bar>[];
     var x0 = -1;
+    // Dark extent of the bar being built, gathered during the column scan
+    // (same result as re-scanning the bar's pixels once it closes).
+    var yMin = bBot, yMax = bTop;
     for (var x = 0; x <= w; x++) {
-      var c = 0;
+      var c = 0, cMin = bBot, cMax = bTop;
       if (x < w) {
         for (var y = bTop; y <= bBot; y++) {
-          if (win.dark(x, y)) c++;
+          if (mask[y * w + x] != 0) {
+            c++;
+            if (y < cMin) cMin = y;
+            cMax = y;
+          }
         }
       }
       final on = x < w && c >= colThr;
-      if (on && x0 < 0) x0 = x;
+      if (on && x0 < 0) {
+        x0 = x;
+        yMin = bBot;
+        yMax = bTop;
+      }
+      if (on) {
+        if (cMin < yMin) yMin = cMin;
+        if (cMax > yMax) yMax = cMax;
+      }
       if (!on && x0 >= 0) {
-        var yMin = bBot, yMax = bTop;
-        for (var bx = x0; bx < x; bx++) {
-          for (var y = bTop; y <= bBot; y++) {
-            if (win.dark(bx, y)) {
-              if (y < yMin) yMin = y;
-              if (y > yMax) yMax = y;
-            }
-          }
-        }
         bars.add(Bar(x0, x - 1, yMin - bTop, yMax - bTop));
         x0 = -1;
       }

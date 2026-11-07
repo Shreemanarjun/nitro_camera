@@ -20,14 +20,14 @@ class ProcessorBadge extends StatelessWidget {
       top: MediaQuery.of(context).padding.top + 120,
       child: IgnorePointer(
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
           child: BackdropFilter(
             filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.40),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: const BorderRadius.all(Radius.circular(12)),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
               ),
               child: Watch((context) {
@@ -36,7 +36,7 @@ class ProcessorBadge extends StatelessWidget {
                 // The demo processor exposes a live luminance signal; other
                 // implementations just show their name.
                 final value = processor is LuminanceFrameProcessor
-                    ? ' ${(processor.luminance.value * 100).round()}%'
+                    ? ' ${processor.percent.value}%'
                     : '';
                 // Live profiling (vision-camera-style): processed FPS + mean
                 // processFrame cost, once the first 1 s window has closed.

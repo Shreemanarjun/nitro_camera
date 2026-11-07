@@ -31,7 +31,12 @@ class ManualControlsLayer extends StatelessWidget {
           // Rack-focus rail — right edge, anchored in the upper region so it
           // stays clear of the exposure wheels below (bottom: 300 reserves that
           // band for the wheels + chrome).
-          Positioned(right: 12, top: 0, bottom: 300, child: Center(child: _FocusRail())),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 300,
+            child: Center(child: _FocusRail()),
+          ),
           // Exposure wheels sit clear ABOVE the bottom chrome (pro-strip pills
           // + mode tabs + capture row, ~235 pt of fixed bottom-anchored UI).
           Positioned(left: 0, right: 0, bottom: 248, child: _ExposureWheels()),
@@ -62,10 +67,7 @@ class _FocusRail extends StatelessWidget {
           GestureDetector(
             onTap: () => cameraStore.setFocusDistance(-1),
             behavior: HitTestBehavior.opaque,
-            child: _Bubble(
-              label: 'AF',
-              active: !manual,
-            ),
+            child: _Bubble(label: 'AF', active: !manual),
           ),
           const SizedBox(height: 10),
           GestureDetector(
@@ -85,17 +87,27 @@ class _FocusRail extends StatelessWidget {
                       height: _h,
                       decoration: BoxDecoration(
                         color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
+                        borderRadius: const BorderRadius.all(
+                          Radius.circular(2),
+                        ),
                       ),
                     ),
                   ),
                   const Positioned(
                     top: 2,
-                    child: Icon(Icons.landscape_rounded, size: 16, color: Colors.white54),
+                    child: Icon(
+                      Icons.landscape_rounded,
+                      size: 16,
+                      color: Colors.white54,
+                    ),
                   ),
                   const Positioned(
                     bottom: 2,
-                    child: Icon(Icons.local_florist_rounded, size: 16, color: Colors.white54),
+                    child: Icon(
+                      Icons.local_florist_rounded,
+                      size: 16,
+                      color: Colors.white54,
+                    ),
                   ),
                   // Thumb.
                   Positioned(
@@ -224,10 +236,7 @@ class _Wheel extends StatelessWidget {
                     child: GestureDetector(
                       onTap: () => onTap(s),
                       behavior: HitTestBehavior.opaque,
-                      child: _Bubble(
-                        label: label(s),
-                        active: isSelected(s),
-                      ),
+                      child: _Bubble(label: label(s), active: isSelected(s)),
                     ),
                   ),
               ],
@@ -257,10 +266,8 @@ class _Bubble extends StatelessWidget {
         color: active
             ? AppColors.accent.withValues(alpha: 0.24)
             : Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: active ? AppColors.accent : Colors.white24,
-        ),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
+        border: Border.all(color: active ? AppColors.accent : Colors.white24),
       ),
       child: Text(
         label,

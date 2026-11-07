@@ -59,11 +59,11 @@ class ThroughputBottomPanel extends StatelessWidget {
                         label: state.active
                             ? 'Stop'
                             : 'Start ${ThroughputController.target} QRs (${tp.engine.value.name})',
-                        onPressed: state == ThroughputState.preparing
-                            ? null
-                            : (state.active
-                                  ? tp.stop
-                                  : () => tp.start(server.text)),
+                        onPressed: switch (state) {
+                          ThroughputState.preparing => null,
+                          _ when state.active => tp.stop,
+                          _ => () => tp.start(server.text),
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),

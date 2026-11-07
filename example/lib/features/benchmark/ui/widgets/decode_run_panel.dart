@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:signals_flutter/signals_flutter.dart';
 
@@ -17,7 +19,7 @@ class DecodeRunPanel extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
       ),
       child: Watch((context) {
         final running = bench.running.value;
@@ -27,7 +29,7 @@ class DecodeRunPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             FilledButton(
-              onPressed: running ? null : bench.run,
+              onPressed: running ? null : () => unawaited(bench.run()),
               child: Text(running ? bench.phase.value : 'Run benchmark'),
             ),
             if (results.isEmpty && !running)

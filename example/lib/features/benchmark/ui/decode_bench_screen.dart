@@ -51,7 +51,7 @@ class _DecodeBenchScreenState extends State<DecodeBenchScreen> {
           width: 1280,
           height: 720,
           fps: 30,
-          onInitialized: _bench.onCamera,
+          onInitialized: (c) => unawaited(_bench.onCamera(c)),
           onClosing: () => unawaited(_bench.stopScanner()),
           // The bar and panel watch their own signals, so readout ticks never
           // rebuild the CameraView.

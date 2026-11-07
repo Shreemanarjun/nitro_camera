@@ -94,7 +94,8 @@ class FrameStatsCollector {
     final w = f.width, h = f.height;
     if (w <= 0 || h <= 0 || px.isEmpty) return;
     final isBgra = f.pixelFormat == 1;
-    final rowStride = f.bytesPerRow > 0 ? f.bytesPerRow : (isBgra ? w * 4 : w);
+    final packedStride = isBgra ? w * 4 : w;
+    final rowStride = f.bytesPerRow > 0 ? f.bytesPerRow : packedStride;
 
     var frameSum = 0;
     var frameSamples = 0;
@@ -112,7 +113,7 @@ class FrameStatsCollector {
           if (i >= px.length) continue;
           luma = px[i];
         }
-        final clamped = luma < 0 ? 0 : (luma > 255 ? 255 : luma);
+        final clamped = luma.clamp(0, 255);
         _hist[clamped]++;
         frameSum += clamped;
         frameSamples++;

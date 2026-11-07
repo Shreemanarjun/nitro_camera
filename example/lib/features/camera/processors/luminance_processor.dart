@@ -20,6 +20,11 @@ class LuminanceFrameProcessor implements FrameProcessor {
   /// Mean luminance of the last processed frame, 0..1.
   final luminance = signal(0.0);
 
+  /// [luminance] as a whole percent. UI should watch this, not [luminance]:
+  /// a computed only notifies when the rounded value changes, so the badge
+  /// doesn't rebuild (and re-blur) on every one of 60 frames a second.
+  late final percent = computed(() => (luminance.value * 100).round());
+
   /// Frames processed since the last attach. This is the DELIVERY signal —
   /// luminance can legitimately be 0.0 (covered lens / black scene), so
   /// "are frames flowing?" must be answered by this counter, not the value.

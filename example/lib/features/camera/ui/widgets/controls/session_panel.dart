@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nitro_camera/nitro_camera.dart';
 import 'package:signals/signals_flutter.dart';
 
 import '../../../state/camera_store.dart';
@@ -9,6 +10,12 @@ import '../../theme/app_theme.dart';
 /// session-introspection + event-stream APIs.
 class SessionPanel extends StatelessWidget {
   const SessionPanel({super.key});
+
+  static String _describe(ResolvedCameraConfig r) =>
+      '${r.videoWidth}×${r.videoHeight} @ ${r.selectedFps}fps'
+      ' · ${r.pixelFormat.name}'
+      ' · af:${r.autoFocusSystem.value}'
+      '${r.videoHdrEnabled ? ' · HDR' : ''}';
 
   @override
   Widget build(BuildContext context) {
@@ -21,15 +28,7 @@ class SessionPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const _Header('NEGOTIATED CONFIG'),
-          Text(
-            resolved == null
-                ? '—'
-                : '${resolved.videoWidth}×${resolved.videoHeight} @ ${resolved.selectedFps}fps'
-                      ' · ${resolved.pixelFormat.name}'
-                      ' · af:${resolved.autoFocusSystem.value}'
-                      '${resolved.videoHdrEnabled ? ' · HDR' : ''}',
-            style: _mono,
-          ),
+          Text(resolved == null ? '—' : _describe(resolved), style: _mono),
           const SizedBox(height: 10),
           const _Header('LIVE SESSION STATE'),
           Text(

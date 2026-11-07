@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart'
     show expect, isNull, isNotNull, isNot, isTrue;
 import 'package:nitro_camera/nitro_camera.dart';
@@ -34,7 +36,7 @@ final class Camera extends Module {
     );
   }
 
-  Future<void> verifyPreviewHealthy() async {
+  void verifyPreviewHealthy() {
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.activeController.value, isNotNull);
     expect(cameraStore.activeTextureId.value, isNotNull);

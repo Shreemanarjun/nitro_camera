@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -50,6 +52,8 @@ class GalleryScreen extends StatefulWidget {
 }
 
 class _GalleryScreenState extends State<GalleryScreen> {
+  static String _itemCount(int n) => '$n ITEM${n == 1 ? '' : 'S'}';
+
   bool _selecting = false;
   final Set<String> _selected = {};
 
@@ -150,7 +154,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
                   ),
                 ),
                 Text(
-                  '${items.length} ITEM${items.length == 1 ? '' : 'S'}',
+                  _itemCount(items.length),
                   style: const TextStyle(
                     color: Colors.white38,
                     fontSize: 11,
@@ -178,7 +182,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
               color: AppColors.danger,
               size: 22,
             ),
-            onPressed: _deleteSelected,
+            onPressed: () => unawaited(_deleteSelected()),
           ),
         ] else if (items.isNotEmpty)
           IconButton(

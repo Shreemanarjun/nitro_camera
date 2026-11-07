@@ -193,7 +193,7 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
         margin: const EdgeInsets.all(12),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: const BorderRadius.all(Radius.circular(20)),
           border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
         child: BackdropFilter(
@@ -215,7 +215,9 @@ class _MediaInfoSheetState extends State<MediaInfoSheet> {
                         height: 4,
                         decoration: BoxDecoration(
                           color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(2),
+                          ),
                         ),
                       ),
                     ),

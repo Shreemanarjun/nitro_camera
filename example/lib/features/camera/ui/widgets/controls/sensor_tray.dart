@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -120,10 +122,11 @@ class SensorTray extends StatelessWidget {
                         label: "2.0×",
                         tooltip: '2× digital zoom',
                         selected: digital2xActive,
-                        onTap: () async {
-                          await cameraStore.selectDevice(baselineLens);
-                          cameraStore.setZoom(2.0);
-                        },
+                        onTap: () => unawaited(
+                          cameraStore
+                              .selectDevice(baselineLens)
+                              .then((_) => cameraStore.setZoom(2.0)),
+                        ),
                       ),
                   ],
                 ),
@@ -170,7 +173,9 @@ class _LensChip extends StatelessWidget {
               color: selected ? AppColors.accent : AppColors.border,
               width: selected ? 1.5 : 1,
             ),
-            boxShadow: selected ? AppShadow.glow(AppColors.accent, alpha: 0.28) : null,
+            boxShadow: selected
+                ? AppShadow.glow(AppColors.accent, alpha: 0.28)
+                : null,
           ),
           child: Center(
             child: Text(
@@ -203,14 +208,14 @@ class _CategoryTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: const BorderRadius.all(Radius.circular(20)),
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: const BorderRadius.all(Radius.circular(20)),
             border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Row(
@@ -249,7 +254,7 @@ class _CategoryTabs extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
             color: selected ? AppColors.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: const BorderRadius.all(Radius.circular(18)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,

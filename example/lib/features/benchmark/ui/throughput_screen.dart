@@ -60,9 +60,12 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
               fps: 60,
               // --dart-define=PREVIEW=platformView for the preview-cost A/B.
               previewMode: PreviewMode.values.byName(
-                const String.fromEnvironment('PREVIEW', defaultValue: 'texture'),
+                const String.fromEnvironment(
+                  'PREVIEW',
+                  defaultValue: 'texture',
+                ),
               ),
-              onInitialized: _tp.onCamera,
+              onInitialized: (c) => unawaited(_tp.onCamera(c)),
               onClosing: () => unawaited(_tp.stopScanner()),
             );
           }),

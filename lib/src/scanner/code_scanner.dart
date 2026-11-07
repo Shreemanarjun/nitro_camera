@@ -169,6 +169,18 @@ List<double> mapDecodedPointsToWindow(
   return out;
 }
 
+// Per-worker scratch buffers, one slot per role so buffers alive at the same
+// time never alias: a streaming scan otherwise allocates several full-window
+// (up to ~600 KB) buffers per frame, and that volume keeps triggering
+// full-heap GC marking on the worker. Callers overwrite every byte.
+const _slotDecimated = 0, _slotRotated = 1, _slotUpscaled = 2, _slotMask = 3;
+final _scratch = List<Uint8List>.generate(4, (_) => Uint8List(0));
+Uint8List _buf(int slot, int n) {
+  var b = _scratch[slot];
+  if (b.length < n) _scratch[slot] = b = Uint8List(n);
+  return Uint8List.sublistView(b, 0, n);
+}
+
 /// One decode attempt over the window at 1/[factor] scale, optionally trying
 /// the upright and/or 90°-rotated orientation. [formats] applies to the
 /// upright pass; the rotated pass drops 2D formats (rotation-invariant).
@@ -186,7 +198,7 @@ _RawHit? _decodePass(
   if (factor > 1) {
     w = win.side ~/ factor;
     h = win.side ~/ factor;
-    final dec = Uint8List(w * h);
+    final dec = _buf(_slotDecimated, w * h);
     for (var y = 0; y < h; y++) {
       final src = (win.top + y * factor) * srcStride + win.left;
       final dst = y * w;
@@ -215,7 +227,7 @@ _RawHit? _decodePass(
   if (tryRotated) {
     final rotatable = formats.where((x) => !x.is2D).toSet();
     if (rotatable.isNotEmpty) {
-      final rot = Uint8List(w * h);
+      final rot = _buf(_slotRotated, w * h);
       // rotate 90° clockwise: (x, y) → (h-1-y, x)
       for (var y = 0; y < h; y++) {
         final src = (top + y) * stride + left;
@@ -246,7 +258,7 @@ _RawHit? _decodeUpscaledCentre(FrameData f, _Window win, Set<CodeFormat> formats
   final cl = win.left + inset, ct = win.top + inset;
   final stride = f.effectiveBytesPerRow, src = f.bytes;
   final n = side * 2;
-  final up = Uint8List(n * n);
+  final up = _buf(_slotUpscaled, n * n);
   // Even output pixels copy the source; odd ones average their neighbours.
   for (var y = 0; y < side; y++) {
     final r0 = (ct + y) * stride + cl;
@@ -287,10 +299,21 @@ int _lastFactor = 1;
 int _lastMisses = 0;
 int _frameIdx = 0;
 
+/// The streaming scan window (the viewfinder square, full-frame pixels) for
+/// [f], as configured by [scannerWorkerInit]. Custom [CodeScanner.handler]s
+/// crop to it and map their points into it with [mapDecodedPointsToWindow].
+({int left, int top, int side}) scannerWindowOf(FrameData f) {
+  final w = _windowOf(f, _scanWindowFraction);
+  return (left: w.left, top: w.top, side: w.side);
+}
+
 /// Streaming decode with the adaptive ladder + last-hit cache. Used by the
 /// [CodeScanner] worker handlers; call [decodeCodeFrame] for stateless
-/// one-shot decodes.
-CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
+/// one-shot decodes. [formats] narrows [kind]'s set, e.g. to the formats a
+/// custom handler's own engine doesn't cover.
+CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind, {Set<CodeFormat>? formats}) {
+  final wanted = formats ?? kind.formats;
+  if (wanted.isEmpty) return null;
   final win = _windowOf(f, _scanWindowFraction);
   _frameIdx++;
 
@@ -302,7 +325,7 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   // 0. Last-hit replay: exact level + orientation + format of the previous
   // success.
   final lastFormat = _lastFormat;
-  if (lastFormat != null && kind.formats.contains(lastFormat)) {
+  if (lastFormat != null && wanted.contains(lastFormat)) {
     final hit = _lastUpscaled
         ? _decodeUpscaledCentre(f, win, {lastFormat})
         : _decodePass(f, win, _lastFactor, {lastFormat}, tryUpright: !_lastRotated, tryRotated: _lastRotated);
@@ -314,21 +337,21 @@ CodeResult? scanFrameAdaptive(FrameData f, CodeScanKind kind) {
   }
 
   // 1. Fast level.
-  var hit = _decodePass(f, win, fA, kind.formats, tryUpright: true, tryRotated: true);
+  var hit = _decodePass(f, win, fA, wanted, tryUpright: true, tryRotated: true);
 
   // 2. Thorough level, every 2nd miss, BOTH orientations — small 1D codes
   // that level A can't resolve are often only readable rotated (portrait
   // phone), so B must retry rotation too.
   final runB = fB < fA && _frameIdx % 2 == 0;
   if (hit == null && runB) {
-    hit = _decodePass(f, win, fB, kind.formats, tryUpright: true, tryRotated: true);
+    hit = _decodePass(f, win, fB, wanted, tryUpright: true, tryRotated: true);
   }
 
   // 3. Upscaled centre on the misses B doesn't take — codes too small for
   // zxing even at full resolution.
   var upscaled = false;
   if (hit == null && !runB) {
-    hit = _decodeUpscaledCentre(f, win, kind.formats);
+    hit = _decodeUpscaledCentre(f, win, wanted);
     upscaled = hit != null;
   }
 
@@ -376,6 +399,7 @@ RawDecode? _decodeWindow(
     top: top,
     width: w,
     height: h,
+    maskStorage: _buf(_slotMask, w * h),
   );
 
   // 2. Postal engine (height-modulated).
@@ -526,12 +550,18 @@ class CodeScanner {
     int confirmationFrames = 2,
     Duration cooldown = const Duration(milliseconds: 1500),
     double windowFraction = kScannerWindowFraction,
+
+    /// Replaces the built-in Dart decoder, e.g. with a native engine. Must be
+    /// top-level or static (it runs on the worker isolate); it may call
+    /// [scanFrameAdaptive] for formats its engine doesn't cover, and
+    /// [scannerWindowOf] to crop to the same viewfinder window.
+    FrameHandler<CodeResult?>? handler,
   }) : _confirmer = ScanConfirmer(
          confirmationFrames: confirmationFrames,
          cooldown: cooldown,
        ),
        _proc = CameraFrameProcessor<CodeResult?>(
-         _handlerFor(kind),
+         handler ?? _handlerFor(kind),
          workerInit: scannerWorkerInit,
          workerInitArg: windowFraction.clamp(0.1, 1.0),
        );
@@ -559,7 +589,12 @@ class CodeScanner {
   }
 
   /// Spawns the worker and starts consuming [frames].
-  Future<void> start(Stream<CameraFrame> frames) async {
+  ///
+  /// With [direct], the worker subscribes to the camera's native frame stream
+  /// itself ([CameraFrameProcessor.attachDirect]) and [frames] is ignored:
+  /// no UI-isolate hop and no per-frame copy into a new transferable buffer,
+  /// so no GC churn at 60 fps. Handlers must not keep `FrameData.bytes`.
+  Future<void> start(Stream<CameraFrame> frames, {bool direct = false}) async {
     if (_started) return;
     _started = true;
     await _proc.start();
@@ -570,7 +605,11 @@ class CodeScanner {
       if (mode == ScanMode.oneShot) _armed = false;
       if (!_confirmed.isClosed) _confirmed.add(confirmed);
     });
-    _sub = _proc.attach(frames);
+    if (direct) {
+      _proc.attachDirect();
+    } else {
+      _sub = _proc.attach(frames);
+    }
   }
 
   Future<void> dispose() async {

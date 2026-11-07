@@ -35,11 +35,15 @@ abstract class FrameProcessor {
   /// A live session adopted this processor. May be called once per session
   /// reopen; use it to reset per-session state or to grab session facts
   /// (resolution, fps) from [controller].
+  // Optional hook: no-op by default.
+  // ignore: no-empty-block
   void onAttach(CameraController controller) {}
 
   /// One delivered camera frame. Synchronous — see the class contract.
   void processFrame(CameraFrame frame);
 
   /// The processor was replaced or cleared — release per-run state here.
+  // Optional hook: no-op by default.
+  // ignore: no-empty-block
   void onDetach() {}
 }

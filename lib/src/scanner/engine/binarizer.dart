@@ -13,6 +13,10 @@ class GrayWindow {
   final int height;
   late final int threshold = _otsu();
 
+  /// Optional reusable storage for [mask] (at least `width × height` bytes),
+  /// so a per-frame scan doesn't allocate a fresh full-window buffer.
+  final Uint8List? _maskStorage;
+
   GrayWindow(
     this.luma, {
     required this.stride,
@@ -20,12 +24,36 @@ class GrayWindow {
     required this.top,
     required this.width,
     required this.height,
-  });
+    Uint8List? maskStorage,
+  }) : _maskStorage = maskStorage;
 
   bool dark(int x, int y) {
+    if (x >= 0 && x < width && y >= 0 && y < height) return mask[y * width + x] != 0;
+    // Outside the window (e.g. x = 0 of a zero-width window): read the plane
+    // directly, exactly as before the mask existed.
     final idx = (top + y) * stride + left + x;
-    // <=: Otsu returns the last value of the dark class (inclusive).
     return idx >= 0 && idx < luma.length && luma[idx] <= threshold;
+  }
+
+  /// Row-major `width × height` dark mask (1 = dark), built once: callers
+  /// that sweep every pixel read this instead of re-thresholding per call.
+  late final Uint8List mask = _buildMask();
+
+  Uint8List _buildMask() {
+    final size = width * height;
+    final s = _maskStorage;
+    final m = (s != null && s.length >= size) ? Uint8List.sublistView(s, 0, size) : Uint8List(size);
+    final t = threshold, n = luma.length;
+    for (var y = 0; y < height; y++) {
+      final row = (top + y) * stride + left, o = y * width;
+      for (var x = 0; x < width; x++) {
+        final idx = row + x;
+        // <=: Otsu returns the last value of the dark class (inclusive).
+        // Every byte is written: reused storage needs no clearing.
+        m[o + x] = (idx >= 0 && idx < n && luma[idx] <= t) ? 1 : 0;
+      }
+    }
+    return m;
   }
 
   int _otsu() {

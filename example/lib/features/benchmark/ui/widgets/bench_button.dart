@@ -20,9 +20,9 @@ class BenchButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: primary ? Colors.white : Colors.white.withValues(alpha: 0.2),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: const BorderRadius.all(Radius.circular(12)),
         onTap: onPressed,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14),

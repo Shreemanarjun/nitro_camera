@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -58,7 +60,9 @@ class ProControlsSheet extends StatelessWidget {
                           height: 4,
                           decoration: BoxDecoration(
                             color: Colors.white24,
-                            borderRadius: BorderRadius.circular(2),
+                            borderRadius: const BorderRadius.all(
+                              Radius.circular(2),
+                            ),
                           ),
                         ),
                         const Spacer(),
@@ -245,7 +249,7 @@ class ProControlsBody extends StatelessWidget {
 
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: s.takeSnapshot,
+          onPressed: () => unawaited(s.takeSnapshot()),
           icon: const Icon(Icons.bolt, size: 16),
           label: const Text('TAKE SNAPSHOT'),
           style: OutlinedButton.styleFrom(
@@ -362,7 +366,7 @@ class _SegmentRow<T> extends StatelessWidget {
                 color: sel
                     ? AppColors.accent.withValues(alpha: 0.15)
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: const BorderRadius.all(Radius.circular(10)),
                 border: Border.all(
                   color: sel ? AppColors.accent : Colors.white12,
                 ),

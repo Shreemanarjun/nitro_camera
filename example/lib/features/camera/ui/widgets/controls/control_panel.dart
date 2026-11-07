@@ -17,14 +17,14 @@ class ControlPanel extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 400),
           margin: const EdgeInsets.symmetric(horizontal: 24),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(40),
+            borderRadius: const BorderRadius.all(Radius.circular(40)),
             child: BackdropFilter(
               filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
               child: Container(
                 padding: const EdgeInsets.all(32),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.8),
-                  borderRadius: BorderRadius.circular(40),
+                  borderRadius: const BorderRadius.all(Radius.circular(40)),
                   border: Border.all(
                     color: Colors.white.withValues(alpha: 0.1),
                     width: 1.5,
@@ -400,7 +400,7 @@ class _PremiumChip extends StatelessWidget {
           color: isSelected
               ? AppColors.accent
               : Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
           border: Border.all(
             color: isSelected
                 ? AppColors.accent
@@ -441,7 +441,7 @@ class _ChoiceBtn extends StatelessWidget {
           color: isSelected
               ? AppColors.accent.withValues(alpha: 0.1)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: const BorderRadius.all(Radius.circular(10)),
           border: Border.all(
             color: isSelected
                 ? AppColors.accent

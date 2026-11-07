@@ -413,7 +413,7 @@ final class ComboStress extends Module {
     // (a) stop with nothing started.
     await _illegal(
       'stopRecording() with nothing started',
-      () async => c.stopRecording(),
+      () => c.stopRecording(),
     );
     expect(
       c.isRecording,
@@ -484,12 +484,13 @@ final class ComboStress extends Module {
 
     await _illegal(
       'a second stopRecording() immediately after a completed stop',
-      () async => c.stopRecording(),
+      () => c.stopRecording(),
     );
     expect(
       c.isRecording,
       isFalse,
-      reason: 'a double stopRecording() flipped the controller back to '
+      reason:
+          'a double stopRecording() flipped the controller back to '
           '"recording"',
     );
 
@@ -503,10 +504,13 @@ final class ComboStress extends Module {
     );
     expect(c.isRecording, isTrue, reason: 'double-start case never started');
 
-    await _illegal('a second startRecording() while already recording', () async {
-      await c.startRecording(busyB);
-      return null;
-    });
+    await _illegal(
+      'a second startRecording() while already recording',
+      () async {
+        await c.startRecording(busyB);
+        return null;
+      },
+    );
     expect(
       c.isRecording,
       isTrue,
@@ -888,7 +892,8 @@ final class ComboStress extends Module {
     expect(
       byDuration.info.durationMs,
       isNotNull,
-      reason: 'the maxDuration clip carries no mvhd duration — '
+      reason:
+          'the maxDuration clip carries no mvhd duration — '
           '${byDuration.info}',
     );
     expect(

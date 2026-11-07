@@ -42,14 +42,14 @@ class TopBar extends StatelessWidget {
   /// The frosted-glass icon strip. Every target is 40×40.
   Widget _iconStrip() {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: const BorderRadius.all(Radius.circular(24)),
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.40),
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: const BorderRadius.all(Radius.circular(24)),
             border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
           child: Row(
@@ -289,7 +289,7 @@ class _StripBadge extends StatelessWidget {
                 color: active
                     ? AppColors.accent.withValues(alpha: 0.16)
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: const BorderRadius.all(Radius.circular(6)),
                 border: Border.all(
                   color: active
                       ? AppColors.accent

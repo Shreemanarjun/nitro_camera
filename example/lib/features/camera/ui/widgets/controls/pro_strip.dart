@@ -205,9 +205,12 @@ class _ProStripState extends State<ProStrip> {
       return _ProPill(
         icon: Icons.blur_linear_rounded,
         label: 'ANALYZE 1:$rate',
-        tooltip: rate == 1
-            ? 'Analyze every frame'
-            : 'Analyze every ${rate == 2 ? '2nd' : '${rate}rd'} frame',
+        tooltip: switch (rate) {
+          1 => 'Analyze every frame',
+          2 => 'Analyze every 2nd frame',
+          3 => 'Analyze every 3rd frame',
+          _ => 'Analyze every ${rate}th frame',
+        },
         active: rate != 1,
         onTap: _cycleSampling,
       );
@@ -287,7 +290,8 @@ class _ProStripState extends State<ProStrip> {
   /// while the layer is up or any manual value is engaged.
   Widget _manualPill() => Watch((context) {
     final open = cameraStore.manualPanelOpen.value;
-    final engaged = cameraStore.focusDistance.value >= 0 ||
+    final engaged =
+        cameraStore.focusDistance.value >= 0 ||
         cameraStore.manualIso.value > 0 ||
         cameraStore.manualShutterNs.value > 0;
     return _ProPill(
@@ -478,7 +482,7 @@ class _ProPill extends StatelessWidget {
             color: active
                 ? AppColors.accent
                 : Colors.black.withValues(alpha: 0.55),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: const BorderRadius.all(Radius.circular(16)),
             border: Border.all(
               color: active
                   ? AppColors.accent
@@ -518,7 +522,7 @@ class _SliderBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         child: BackdropFilter(
           filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: Container(
@@ -527,7 +531,7 @@ class _SliderBubble extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: const BorderRadius.all(Radius.circular(16)),
               border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
             ),
             child: Row(

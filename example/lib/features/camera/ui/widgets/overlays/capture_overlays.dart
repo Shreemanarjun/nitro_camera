@@ -64,7 +64,7 @@ class VideoRecordingHUD extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.black45,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: const BorderRadius.all(Radius.circular(20)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -180,7 +180,9 @@ class _FocusIndicatorState extends State<FocusIndicator>
             width: 70,
             height: 70,
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.white, width: 1.5),
+              border: const Border.fromBorderSide(
+                BorderSide(color: Colors.white, width: 1.5),
+              ),
               color: Colors.white.withValues(alpha: 0.1),
             ),
             child: const Center(
@@ -241,8 +243,10 @@ class _ThumbnailBadgeState extends State<ThumbnailBadge> {
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.accent, width: 1.5),
+              borderRadius: const BorderRadius.all(Radius.circular(10)),
+              border: const Border.fromBorderSide(
+                BorderSide(color: AppColors.accent, width: 1.5),
+              ),
               image: DecorationImage(
                 image: FileImage(File(widget.path)),
                 fit: BoxFit.cover,

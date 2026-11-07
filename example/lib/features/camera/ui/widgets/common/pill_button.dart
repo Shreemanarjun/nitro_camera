@@ -22,8 +22,10 @@ class PillButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: Colors.black45,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.accent, width: 1),
+          borderRadius: const BorderRadius.all(Radius.circular(14)),
+          border: const Border.fromBorderSide(
+            BorderSide(color: AppColors.accent, width: 1),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

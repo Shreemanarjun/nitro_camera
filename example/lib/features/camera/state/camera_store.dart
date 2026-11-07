@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -69,6 +70,7 @@ class CameraStore {
   // ── Quick-wins (vision-camera parity) ───────────────────────────────────────
   final videoCodec = signal(VideoCodec.h264);
   final geotagEnabled = signal(false);
+
   /// Record audio with video (mic). Toggling reopens the session (audio is
   /// an open-time field).
   final micEnabled = signal(true);
@@ -189,8 +191,10 @@ class CameraStore {
   final flashMode = signal(FlashMode.off);
   final currentZoom = signal(1.0);
   final exposure = signal(0.0);
+
   /// Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
   final focusDistance = signal(-1.0);
+
   /// Manual exposure: ISO (-1 = auto) and shutter time in nanoseconds (-1 = auto).
   final manualIso = signal(-1.0);
   final manualShutterNs = signal(-1.0);
@@ -268,7 +272,7 @@ class CameraStore {
   late final resolutionLabel = computed(() {
     final rc = resolvedConfig.value;
     final w = rc != null
-        ? (rc.videoWidth > rc.videoHeight ? rc.videoWidth : rc.videoHeight)
+        ? math.max(rc.videoWidth, rc.videoHeight)
         : width.value;
     if (w >= 3840) return '4K';
     if (w >= 1920) return '1080P';
@@ -418,7 +422,7 @@ class CameraStore {
   }
 
   Future<void> _initImpl() async {
-    await Future.microtask(() {});
+    await Future<void>.value(); // yield once before the heavy init work
     unawaited(hydrateGallery());
     try {
       loading.value = true;
@@ -645,7 +649,7 @@ class CameraStore {
     activeController.value?.setFilterShader(filters[name] ?? '');
   }
 
-  Future<void> setPreviewMode(PreviewMode m) async {
+  void setPreviewMode(PreviewMode m) {
     previewMode.value = m;
     activeController.value?.setFilterShader(
       filters[currentFilterName.value] ?? '',

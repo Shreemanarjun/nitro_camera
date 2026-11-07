@@ -77,7 +77,9 @@ class _SettingsSheetState extends State<SettingsSheet> {
                         height: 4,
                         decoration: BoxDecoration(
                           color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(2),
+                          ),
                         ),
                       ),
                       const Spacer(),
@@ -103,7 +105,9 @@ class _SettingsSheetState extends State<SettingsSheet> {
                       padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: const BorderRadius.all(
+                          Radius.circular(22),
+                        ),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.08),
                         ),
@@ -171,7 +175,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
         decoration: BoxDecoration(
           color: selected ? AppColors.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: const BorderRadius.all(Radius.circular(20)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

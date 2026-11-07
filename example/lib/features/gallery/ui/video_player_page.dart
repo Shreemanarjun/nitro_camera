@@ -298,7 +298,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: const BorderRadius.all(Radius.circular(14)),
                   ),
                   child: Row(
                     children: [
@@ -331,7 +331,7 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
                             value: positionMs,
                             onChangeStart: _onScrubStart,
                             onChanged: _onScrubUpdate,
-                            onChangeEnd: _onScrubEnd,
+                            onChangeEnd: (v) => unawaited(_onScrubEnd(v)),
                           ),
                         ),
                       ),
@@ -402,8 +402,10 @@ class _ScrubBubble extends StatelessWidget {
                   clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: Colors.black87,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.accent, width: 1),
+                    borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    border: const Border.fromBorderSide(
+                      BorderSide(color: AppColors.accent, width: 1),
+                    ),
                   ),
                   child: Stack(
                     fit: StackFit.expand,

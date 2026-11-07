@@ -19,9 +19,9 @@ class EngineToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: selected ? benchAccent : benchScrim,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: const BorderRadius.all(Radius.circular(10)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: const BorderRadius.all(Radius.circular(10)),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),

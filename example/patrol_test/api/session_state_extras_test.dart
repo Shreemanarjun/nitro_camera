@@ -8,6 +8,6 @@ void main() {
     apiClients,
   ) async {
     await modules.camera.openAppToPreview();
-    await modules.cameraApis.verifySessionStateExtras();
+    modules.cameraApis.verifySessionStateExtras();
   });
 }

@@ -44,54 +44,59 @@ class BottomControls extends StatelessWidget {
               if (!isRecording)
                 SizedBox(
                   height: 46,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  children: ['SCANNER', 'PHOTO', 'VIDEO'].map((m) {
-                    final isSelected = mode == m;
-                    return GestureDetector(
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        cameraStore.setMode(m);
-                      },
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              m,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? AppColors.accent
-                                    : AppColors.onSurfaceMuted,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                letterSpacing: 1.2,
+                  // Three fixed chips: shrink-wrapping keeps them centred and
+                  // costs nothing at this size (the rule targets long lists).
+                  // ignore: avoid-shrink-wrap-in-lists
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    children: ['SCANNER', 'PHOTO', 'VIDEO'].map((m) {
+                      final isSelected = mode == m;
+                      return GestureDetector(
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          cameraStore.setMode(m);
+                        },
+                        child: Container(
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                m,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? AppColors.accent
+                                      : AppColors.onSurfaceMuted,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  letterSpacing: 1.2,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            // A short yellow underline marks the active mode
-                            // (the iOS Camera dial indicator).
-                            AnimatedContainer(
-                              duration: AppMotion.normal,
-                              curve: AppMotion.curve,
-                              width: isSelected ? 16 : 0,
-                              height: 2,
-                              decoration: BoxDecoration(
-                                color: AppColors.accent,
-                                borderRadius: BorderRadius.circular(2),
+                              const SizedBox(height: 4),
+                              // A short yellow underline marks the active mode
+                              // (the iOS Camera dial indicator).
+                              AnimatedContainer(
+                                duration: AppMotion.normal,
+                                curve: AppMotion.curve,
+                                width: isSelected ? 16 : 0,
+                                height: 2,
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent,
+                                  borderRadius: const BorderRadius.all(
+                                    Radius.circular(2),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    }).toList(),
+                  ),
                 ),
-              ),
               // The recording timer lives in the top-center REC pill
               // (VideoRecordingHUD) — a single source, no duplicate here.
               const SizedBox(height: 12),
@@ -113,7 +118,9 @@ class BottomControls extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: AppColors.surfaceRaised,
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.border, width: 2),
+                            border: const Border.fromBorderSide(
+                              BorderSide(color: AppColors.border, width: 2),
+                            ),
                             boxShadow: AppShadow.soft,
                             image:
                                 lastCapturedPath != null &&
@@ -127,27 +134,32 @@ class BottomControls extends StatelessWidget {
                                   )
                                 : null,
                           ),
-                          child: lastCapturedPath != null && isLastCapturedVideo
-                              ? const Icon(
-                                  Icons.play_circle_fill,
-                                  color: Colors.white,
-                                  size: 28,
-                                )
-                              : (lastCapturedPath == null
-                                    ? const Icon(
-                                        Icons.photo_library_outlined,
-                                        color: Colors.white12,
-                                        size: 24,
-                                      )
-                                    : null),
+                          child: switch ((
+                            lastCapturedPath,
+                            isLastCapturedVideo,
+                          )) {
+                            (null, _) => const Icon(
+                              Icons.photo_library_outlined,
+                              color: Colors.white12,
+                              size: 24,
+                            ),
+                            (_, true) => const Icon(
+                              Icons.play_circle_fill,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                            _ => null,
+                          },
                         ),
                       ),
                     ),
 
                     GlassTooltip(
-                      message: mode == 'VIDEO'
-                          ? (isRecording ? 'Stop recording' : 'Record video')
-                          : 'Take photo',
+                      message: switch ((mode, isRecording)) {
+                        ('VIDEO', true) => 'Stop recording',
+                        ('VIDEO', false) => 'Record video',
+                        _ => 'Take photo',
+                      },
                       preferBelow: false,
                       child: GestureDetector(
                         onTap: isRunning
@@ -177,7 +189,10 @@ class BottomControls extends StatelessWidget {
                               // Soft depth + a red glow while recording so the
                               // active state reads at a glance.
                               boxShadow: isRecording
-                                  ? AppShadow.glow(AppColors.danger, alpha: 0.45)
+                                  ? AppShadow.glow(
+                                      AppColors.danger,
+                                      alpha: 0.45,
+                                    )
                                   : AppShadow.soft,
                             ),
                             child: Center(
@@ -211,7 +226,6 @@ class BottomControls extends StatelessWidget {
       );
     });
   }
-
 }
 
 /// Camera-flip control: each tap spins the glyph a half turn in sync with the

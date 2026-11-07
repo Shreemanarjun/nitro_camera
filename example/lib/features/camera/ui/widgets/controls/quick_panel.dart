@@ -47,14 +47,14 @@ class QuickPanel extends StatelessWidget {
       margin: const EdgeInsets.only(top: 10),
       constraints: const BoxConstraints(maxWidth: 360),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: const BorderRadius.all(Radius.circular(20)),
         child: BackdropFilter(
           filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
           child: Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: const BorderRadius.all(Radius.circular(20)),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             // Cap the panel height so the promoted rows can never overflow a
@@ -286,9 +286,7 @@ class QuickPanel extends StatelessWidget {
                             Text(
                               'ALL SETTINGS',
                               style: TextStyle(
-                                color: AppColors.accent.withValues(
-                                  alpha: 0.95,
-                                ),
+                                color: AppColors.accent.withValues(alpha: 0.95),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 letterSpacing: 1.6,
@@ -339,7 +337,7 @@ class _PanelRow extends StatelessWidget {
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: const BorderRadius.all(Radius.circular(12)),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
               ),
               child: Row(
@@ -361,7 +359,9 @@ class _PanelRow extends StatelessWidget {
                           color: selected
                               ? AppColors.accent
                               : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(10),
+                          ),
                         ),
                         child: Text(
                           text,

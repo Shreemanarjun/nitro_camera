@@ -47,7 +47,7 @@ class PermissionGuard extends StatelessWidget {
               foregroundColor: Colors.black,
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: const BorderRadius.all(Radius.circular(20)),
               ),
               elevation: 0,
             ),
@@ -77,7 +77,7 @@ class ErrorCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
       decoration: BoxDecoration(
         color: AppColors.danger.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
         border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
       ),
       child: Row(

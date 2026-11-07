@@ -35,7 +35,7 @@ class ThroughputTopBar extends StatelessWidget {
                 vertical: 10,
               ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: const BorderRadius.all(Radius.circular(10)),
                 borderSide: BorderSide.none,
               ),
             ),
