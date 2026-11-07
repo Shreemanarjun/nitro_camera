@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
 
@@ -131,6 +132,81 @@ void main() {
     });
   });
 
+  group('OrientationManager replay (vision-camera #4150)', () {
+    test('a listener that subscribes late gets the current orientation first', () async {
+      final m = OrientationManager(native: fake);
+      await m.start();
+      fake.emitEvent(_kOrientationChanged, reason: 90);
+      await settle();
+
+      final seen = <int>[];
+      final sub = m.orientationStream.listen(seen.add);
+      await settle();
+      expect(seen, [90], reason: 'replayed without waiting for a rotation');
+
+      fake.emitEvent(_kOrientationChanged, reason: 180);
+      await settle();
+      expect(seen, [90, 180]);
+
+      await sub.cancel();
+      await m.dispose();
+    });
+
+    test('nothing is replayed before the first reading', () async {
+      final m = OrientationManager(native: fake);
+      await m.start();
+      final seen = <int>[];
+      final sub = m.orientationStream.listen(seen.add);
+      await settle();
+      expect(seen, isEmpty);
+      await sub.cancel();
+      await m.dispose();
+    });
+  });
+
+  group('UI rotation (vision-camera #4147)', () {
+    test('uiRotation matches upstream getUIRotation: shortest signed turn', () {
+      // outputDegrees → rotation with a portrait (0°) interface.
+      expect(OrientationManager.uiRotation(outputDegrees: 0), 0);
+      expect(OrientationManager.uiRotation(outputDegrees: 90), -90);
+      expect(OrientationManager.uiRotation(outputDegrees: 180), 180);
+      expect(OrientationManager.uiRotation(outputDegrees: 270), 90);
+      // Interface and output agree → nothing to rotate.
+      expect(OrientationManager.uiRotation(outputDegrees: 90, interfaceDegrees: 90), 0);
+      // 270° the long way is -90° the short way.
+      expect(OrientationManager.uiRotation(outputDegrees: 0, interfaceDegrees: 270), -90);
+    });
+
+    test('clockwiseDegrees: Android passes through, iOS UIDevice order is mirrored', () {
+      for (final d in [0, 90, 180, 270]) {
+        expect(OrientationManager.clockwiseDegrees(d, platform: TargetPlatform.android), d);
+      }
+      expect(OrientationManager.clockwiseDegrees(0, platform: TargetPlatform.iOS), 0);
+      expect(OrientationManager.clockwiseDegrees(90, platform: TargetPlatform.iOS), 270, reason: 'landscapeLeft = right edge up');
+      expect(OrientationManager.clockwiseDegrees(180, platform: TargetPlatform.iOS), 180);
+      expect(OrientationManager.clockwiseDegrees(270, platform: TargetPlatform.iOS), 90);
+    });
+
+    test('uiRotationStream counter-rotates the controls and skips repeats', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final m = OrientationManager(native: fake);
+      await m.start();
+      final seen = <int>[];
+      final sub = m.uiRotationStream().listen(seen.add);
+
+      for (final d in [90, 90, 180, 270, 0]) {
+        fake.emitEvent(_kOrientationChanged, reason: d);
+      }
+      await settle();
+
+      // Phone turned clockwise by 90° → controls turn back by 90°.
+      expect(seen, [-90, 180, 90, 0]);
+      await sub.cancel();
+      await m.dispose();
+    });
+  });
+
   group('OrientationManager.drive', () {
     test('device mode forwards every rotation to the controller', () async {
       final controller = await openController();
@@ -196,8 +272,7 @@ void main() {
       await m.start();
 
       m.drive(controller, OutputOrientationMode.preview);
-      expect(fake.argsOf('setTargetOrientation'), [controller.textureId, -1],
-          reason: '-1 hands control back to the display');
+      expect(fake.argsOf('setTargetOrientation'), [controller.textureId, -1], reason: '-1 hands control back to the display');
 
       fake.clear();
       fake.emitEvent(_kOrientationChanged, reason: 180);
@@ -289,12 +364,56 @@ void main() {
       await never.dispose();
       await never.dispose();
 
-      expect(
-        fake.calls.where((c) => c.name == 'enableOrientationEvents').length,
-        2,
-        reason: 'dispose always disables; only start is idempotent',
-      );
+      expect(fake.called('enableOrientationEvents'), isFalse, reason: 'a manager that never started holds no share of the sensor');
+
+      final started = OrientationManager(native: fake);
+      await started.start();
+      await started.dispose();
+      await started.dispose();
+      expect(fake.calls.where((c) => c.name == 'enableOrientationEvents').map((c) => c.args), [
+        [1],
+        [0],
+      ]);
+    });
+
+    test('managers share the sensor: only the last dispose turns it off', () async {
+      final a = OrientationManager(native: fake);
+      final b = OrientationManager(native: fake);
+      await a.start();
+      await b.start();
+      expect(fake.calls.where((c) => c.name == 'enableOrientationEvents').length, 1);
+
+      await a.dispose();
+      expect(fake.calls.where((c) => c.name == 'enableOrientationEvents').length, 1, reason: 'b still listens');
+
+      final seen = <int>[];
+      final sub = b.orientationStream.listen(seen.add);
+      fake.emitEvent(_kOrientationChanged, reason: 180);
+      await settle();
+      expect(seen, [180]);
+
+      await b.dispose();
       expect(fake.argsOf('enableOrientationEvents'), [0]);
+      await sub.cancel();
+    });
+
+    test('a manager started later replays the reading an earlier one already has', () async {
+      final a = OrientationManager(native: fake);
+      await a.start();
+      fake.emitEvent(_kOrientationChanged, reason: 270);
+      await settle();
+
+      final b = OrientationManager(native: fake);
+      await b.start();
+      expect(b.currentOrientation, 270, reason: 'the native sensor won\'t re-send an unchanged reading');
+      final seen = <int>[];
+      final sub = b.orientationStream.listen(seen.add);
+      await settle();
+      expect(seen, [270]);
+
+      await sub.cancel();
+      await a.dispose();
+      await b.dispose();
     });
   });
 
@@ -370,7 +489,29 @@ void main() {
       await obs.dispose();
       await obs.dispose();
 
+      expect(fake.called('enableDeviceAvailabilityEvents'), isFalse, reason: 'an observer that never started holds no share of the callback');
+    });
+
+    test('observers share the callback: only the last dispose turns it off', () async {
+      final a = CameraDevicesObserver(native: fake);
+      final b = CameraDevicesObserver(native: fake);
+      await a.start();
+      await b.start();
+      expect(fake.calls.where((c) => c.name == 'enableDeviceAvailabilityEvents').length, 1);
+
+      await a.dispose();
+      await a.dispose();
+      expect(fake.calls.where((c) => c.name == 'enableDeviceAvailabilityEvents').length, 1, reason: 'b still listens');
+
+      final seen = <CameraSessionEvent>[];
+      final sub = b.changes.listen(seen.add);
+      fake.emitEvent(_kDeviceConnected, message: 'usb-1');
+      await settle();
+      expect(seen, hasLength(1));
+
+      await b.dispose();
       expect(fake.argsOf('enableDeviceAvailabilityEvents'), [0]);
+      await sub.cancel();
     });
   });
 }

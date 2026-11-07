@@ -7,6 +7,7 @@ export 'camera_device.dart';
 export 'camera_event.dart';
 export 'detection.dart';
 export 'camera_exception.dart';
+export 'camera_overlay.dart';
 export 'photo_options.dart';
 export 'recording.dart';
 export 'resolved_config.dart';

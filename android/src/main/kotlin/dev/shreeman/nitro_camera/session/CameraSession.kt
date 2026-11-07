@@ -207,6 +207,61 @@ class CameraSession(
     // Depth stream (setDepthOutput) and its sink.
     @Volatile private var depthOutput: DepthOutput? = null
     var onDepth: ((DepthFrame) -> Unit)? = null
+    var onSynced: ((nitro.nitro_camera_module.SyncedFrame) -> Unit)? = null
+    @Volatile private var syncOutput: dev.shreeman.nitro_camera.outputs.SyncOutput? = null
+
+    /**
+     * Draws [data] (Dart `CameraOverlay.encode`) into the camera output —
+     * preview, recordings and plugin outputs — via the GL renderer; an empty
+     * overlay clears it. A direct preview moves to the GL renderer, since
+     * only the renderer can draw over the camera image.
+     */
+    fun setOverlay(data: java.nio.ByteBuffer) {
+        val commands = dev.shreeman.nitro_camera.overlay.OverlayCommands.parse(data)
+        if (commands.isEmpty()) {
+            glHandler.post { renderer.setOverlay(null) }
+            return
+        }
+        // Rasterise at the upright frame size (the space the coordinates use).
+        val longSide = maxOf(width, height)
+        val shortSide = minOf(width, height)
+        val portrait = renderer.isContentPortrait()
+        val bmp = dev.shreeman.nitro_camera.overlay.OverlayRaster.render(
+            commands, if (portrait) shortSide else longSide, if (portrait) longSide else shortSide)
+        renderer.setOverlay(bmp)
+        switchToGlPreview()
+    }
+
+    /// Starts / reconfigures / stops the GPU resizer (ML tensors on the
+    /// resized stream). It renders on the GL path, so a direct preview moves
+    /// to the GL renderer.
+    fun setResizer(options: ResizerOptions, onResized: (ResizedFrame) -> Unit) {
+        if (options.enabled != 0L && (options.width <= 0 || options.height <= 0 || options.channels !in listOf(3L, 4L)))
+            throw IllegalArgumentException("INVALID_ARGUMENT: resizer needs a positive size and 3 or 4 channels")
+        renderer.resizerTextureId = textureId
+        renderer.onResized = onResized
+        renderer.setResizer(options)
+        if (options.enabled != 0L) switchToGlPreview()
+    }
+
+    /// Starts / stops pairing frames with the depth map from the same capture
+    /// (vision-camera's CameraOutputSynchronizer). Enabling turns depth on
+    /// first and throws its DEPTH_UNSUPPORTED / SESSION_BUSY errors.
+    fun setSynchronizedOutput(enabled: Boolean) {
+        if (!enabled) {
+            frameOutput.onSyncImage = null
+            depthOutput?.onSyncDepth = null
+            syncOutput = null
+            return
+        }
+        setDepthOutput(true)
+        val sync = dev.shreeman.nitro_camera.outputs.SyncOutput(textureId, characteristics.isFrontFacing) {
+            onSynced?.invoke(it)
+        }
+        syncOutput = sync
+        frameOutput.onSyncImage = sync::onImage
+        depthOutput?.onSyncDepth = sync::onDepth
+    }
     // Manual exposure: iso/nanos <= 0 = auto (AE on).
     private var manualIso: Double = -1.0
     private var manualExposureNanos: Double = -1.0
@@ -522,6 +577,8 @@ class CameraSession(
 
     fun startPreview() {
         if (isClosed) return
+        // A camera extension owns the device while it is on (setExtension).
+        if (activeExtension >= 0) return
 
         // Already configured? Re-send the repeating request instead of calling
         // createCaptureSession again — a second createCaptureSession on a live
@@ -903,6 +960,20 @@ class CameraSession(
         NitroCameraOutputs.listen(textureId, null)
         onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, "")
 
+        // A persistent recording outlives this session: detach its surface
+        // from the renderer (so nothing draws into it during teardown), then
+        // park the paused recorder for the next session to adopt.
+        if (videoOutput.isPersistentRecording && recordingViaSessionSurface == null) {
+            val detached = java.util.concurrent.CountDownLatch(1)
+            if (glHandler.looper.thread.isAlive) {
+                glHandler.postAtFrontOfQueue {
+                    try { renderer.setRecordingSurface(null) } finally { detached.countDown() }
+                }
+                try { detached.await(250, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+            }
+            videoOutput.park()
+        }
+
         // Stop internal frame delivery immediately (thread-safe, cheap).
         try { renderer.inputSurfaceTexture?.setOnFrameAvailableListener(null) } catch (_: Exception) {}
 
@@ -914,6 +985,7 @@ class CameraSession(
             // (a) Hardware — the critical path that frees the HAL for the next
             //     open. Camera2 objects are thread-safe.
             val hardware = async(Dispatchers.IO) {
+                closeExtensionSession()
                 try { captureSession?.stopRepeating() } catch (_: Exception) {}
                 try { captureSession?.close() } catch (_: Exception) {}
                 captureSession = null
@@ -1081,6 +1153,8 @@ class CameraSession(
     /// stream needs a reconfigure, like vision-camera adding an output).
     fun setDepthOutput(enabled: Boolean) {
         if (enabled == (depthOutput != null)) return
+        if (enabled && activeExtension >= 0)
+            throw IllegalStateException("SESSION_BUSY: camera extensions have no depth output — turn the extension off first")
         // A new stream means a session rebuild, which would cut a recording.
         if (videoOutput.isRecording)
             throw IllegalStateException("SESSION_BUSY: stop the recording before changing the depth output")
@@ -1096,7 +1170,11 @@ class CameraSession(
             currentRequestBuilder = null
             try { old?.stopRepeating() } catch (_: Exception) {}
             try { old?.close() } catch (_: Exception) {}
-            if (!enabled) { depthOutput?.close(); depthOutput = null }
+            if (!enabled) {
+                frameOutput.onSyncImage = null // pairing needs depth
+                syncOutput = null
+                depthOutput?.close(); depthOutput = null
+            }
             startPreview()
         }
     }
@@ -1419,7 +1497,198 @@ class CameraSession(
 
     suspend fun takePhoto(options: PhotoOptions? = null): PhotoResult {
         check(enablePhoto) { "Photo output disabled for this session (enablePhoto = 0)" }
+        if (activeExtension >= 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return takeExtensionPhoto(options)
         return photoOutput.takePhoto(options)
+    }
+
+    // ── Camera extensions (night / HDR / bokeh / face retouch / auto) ────────
+    //
+    // A CameraExtensionSession replaces the regular session while an
+    // extension is on. It carries ONLY the preview and a JPEG still output
+    // (the platform's limit), so frame processing, depth and recording are
+    // unavailable until the extension is turned off again.
+
+    /// The active Camera2 extension id, or -1 for the regular session.
+    @Volatile var activeExtension: Int = -1
+        private set
+    @Volatile private var extensionSession: Any? = null // CameraExtensionSession (API 31)
+    private var extensionReader: android.media.ImageReader? = null
+
+    /**
+     * Turns a vendor camera extension on ([name] = auto / face-retouch /
+     * bokeh / hdr / night) or off (empty). Throws `EXTENSION_UNSUPPORTED:`
+     * when this camera / Android version lacks it, `SESSION_BUSY:` while
+     * recording.
+     */
+    suspend fun setExtension(name: String) {
+        if (isClosed) throw IllegalStateException("SESSION_NOT_RUNNING: session closed")
+        if (name.isEmpty()) {
+            if (activeExtension < 0) return
+            closeExtensionSession()
+            activeExtension = -1
+            startPreview()
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+            throw UnsupportedOperationException("EXTENSION_UNSUPPORTED: camera extensions need Android 12")
+        val ext = ExtensionNames.toCamera2(name)
+            ?: throw IllegalArgumentException("INVALID_ARGUMENT: unknown camera extension '$name'")
+        if (videoOutput.isRecording)
+            throw IllegalStateException("SESSION_BUSY: stop the recording before turning on a camera extension")
+        if (ext == activeExtension) return
+        openExtensionSession(ext, name)
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
+    private suspend fun openExtensionSession(ext: Int, name: String) {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val chars = manager.getCameraExtensionCharacteristics(deviceId)
+        if (ext !in chars.supportedExtensions)
+            throw UnsupportedOperationException("EXTENSION_UNSUPPORTED: '$name' is not available on camera $deviceId")
+        val previewSizes = chars.getExtensionSupportedSizes(ext, android.graphics.SurfaceTexture::class.java)
+            .map { it.width to it.height }
+        val jpegSizes = chars.getExtensionSupportedSizes(ext, android.graphics.ImageFormat.JPEG)
+            .map { it.width to it.height }
+        val preview = ExtensionNames.pickSize(previewSizes, resolvedSize.width, resolvedSize.height, 1920L * 1080)
+            ?: throw UnsupportedOperationException("EXTENSION_UNSUPPORTED: no preview size for '$name'")
+        val still = ExtensionNames.pickSize(jpegSizes, resolvedSize.width, resolvedSize.height)
+            ?: throw UnsupportedOperationException("EXTENSION_UNSUPPORTED: no still size for '$name'")
+
+        // Leave the regular session (or a previous extension) first.
+        closeExtensionSession()
+        val pSurface = if (directPreview) {
+            val producer = surfaceProducer as io.flutter.view.TextureRegistry.SurfaceProducer
+            producer.setSize(preview.first, preview.second)
+            producer.getSurface()
+        } else {
+            renderer.inputSurfaceTexture?.setDefaultBufferSize(preview.first, preview.second)
+            renderer.inputSurface ?: throw IllegalStateException("SESSION_NOT_RUNNING: no preview surface")
+        }
+        val reader = android.media.ImageReader.newInstance(still.first, still.second, android.graphics.ImageFormat.JPEG, 2)
+        extensionReader = reader
+        activeExtension = ext // startPreview() stays out of the way from here on
+
+        val executor = java.util.concurrent.Executor { cameraHandler.post(it) }
+        suspendCancellableCoroutine<Unit> { cont ->
+            cameraHandler.post {
+                try { captureSession?.stopRepeating() } catch (_: Exception) {}
+                try { captureSession?.close() } catch (_: Exception) {}
+                captureSession = null
+                currentRequestBuilder = null
+                val config = android.hardware.camera2.params.ExtensionSessionConfiguration(
+                    ext,
+                    listOf(
+                        android.hardware.camera2.params.OutputConfiguration(pSurface),
+                        android.hardware.camera2.params.OutputConfiguration(reader.surface),
+                    ),
+                    executor,
+                    object : CameraExtensionSession.StateCallback() {
+                        override fun onConfigured(session: CameraExtensionSession) {
+                            if (isClosed) { session.close(); return }
+                            extensionSession = session
+                            try {
+                                val req = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_PREVIEW)
+                                    .apply { addTarget(pSurface) }.build()
+                                session.setRepeatingRequest(req, executor, object : CameraExtensionSession.ExtensionCaptureCallback() {})
+                            } catch (e: Exception) {
+                                Log.e("NitroCamera", "extension[$name] preview request failed: ${e.message}")
+                            }
+                            Log.i("NitroCamera", "extension[$name] on: preview ${preview.first}x${preview.second}, still ${still.first}x${still.second}")
+                            onEvent?.invoke(CameraEventType.STARTED, InterruptionReason.NONE, "extension:$name")
+                            if (cont.isActive) cont.resume(Unit)
+                        }
+
+                        override fun onConfigureFailed(session: CameraExtensionSession) {
+                            Log.e("NitroCamera", "extension[$name] session configuration failed")
+                            activeExtension = -1
+                            extensionReader = null
+                            reader.close()
+                            startPreview()
+                            if (cont.isActive) cont.resumeWith(Result.failure(
+                                UnsupportedOperationException("EXTENSION_UNSUPPORTED: '$name' session could not be configured")))
+                        }
+                    },
+                )
+                try {
+                    cameraDevice.createExtensionSession(config)
+                } catch (e: Exception) {
+                    activeExtension = -1
+                    extensionReader = null
+                    reader.close()
+                    startPreview()
+                    if (cont.isActive) cont.resumeWith(Result.failure(
+                        UnsupportedOperationException("EXTENSION_UNSUPPORTED: ${e.message}")))
+                }
+            }
+        }
+    }
+
+    private fun closeExtensionSession() {
+        val s = extensionSession
+        extensionSession = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (s as? CameraExtensionSession)?.let { try { it.close() } catch (_: Exception) {} }
+        }
+        extensionReader?.let { try { it.close() } catch (_: Exception) {} }
+        extensionReader = null
+    }
+
+    /// A still through the extension (its processing — e.g. night's
+    /// multi-frame merge — can take a second or more).
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
+    private suspend fun takeExtensionPhoto(options: PhotoOptions?): PhotoResult {
+        val session = extensionSession as? CameraExtensionSession
+            ?: throw IllegalStateException("SESSION_NOT_RUNNING: extension session not ready")
+        val reader = extensionReader ?: throw IllegalStateException("SESSION_NOT_RUNNING: no extension still output")
+        val executor = java.util.concurrent.Executor { cameraHandler.post(it) }
+        val jpegOrientation = dev.shreeman.nitro_camera.utils.JpegOrientation.compute(
+            sensorOrientation = characteristics.sensorOrientationDegrees(0),
+            deviceOrientationDeg = effectiveDeviceOrientationDegrees(),
+            isFrontFacing = characteristics.isFrontFacing,
+        )
+        val bytes = suspendCancellableCoroutine<ByteArray> { cont ->
+            reader.setOnImageAvailableListener({ r ->
+                val image = try { r.acquireNextImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+                try {
+                    val buf = image.planes[0].buffer
+                    val out = ByteArray(buf.remaining())
+                    buf.get(out)
+                    if (cont.isActive) cont.resume(out)
+                } finally {
+                    image.close()
+                }
+            }, cameraHandler)
+            try {
+                val req = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                    addTarget(reader.surface)
+                    set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+                }.build()
+                if (options?.enableShutterSound == 1L) photoOutput.playShutterSound()
+                session.capture(req, executor, object : CameraExtensionSession.ExtensionCaptureCallback() {
+                    override fun onCaptureFailed(s: CameraExtensionSession, r: CaptureRequest) {
+                        if (cont.isActive) cont.resumeWith(Result.failure(IllegalStateException("CAPTURE_FAILED: extension capture failed")))
+                    }
+                })
+            } catch (e: Exception) {
+                if (cont.isActive) cont.resumeWith(Result.failure(e))
+            }
+        }
+        return withContext(Dispatchers.IO) {
+            val file = java.io.File(context.cacheDir, "cap_${System.currentTimeMillis()}.jpg")
+            file.writeBytes(bytes)
+            val exif = androidx.exifinterface.media.ExifInterface(file.absolutePath)
+            val w = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_WIDTH, 0)
+            val h = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_IMAGE_LENGTH, 0)
+            PhotoResult(
+                path = file.absolutePath,
+                width = w.toLong(),
+                height = h.toLong(),
+                fileSize = file.length(),
+                orientation = exif.rotationDegrees.toLong(),
+                isMirrored = if (exif.isFlipped) 1L else 0L,
+                timestamp = System.currentTimeMillis(),
+            )
+        }
     }
 
     suspend fun takeDngPhoto(options: PhotoOptions): PhotoResult =
@@ -1427,8 +1696,9 @@ class CameraSession(
 
     // ── Recording (session orchestration; recorder mechanics in VideoOutput) ────
 
-    suspend fun startVideoRecording(outputPath: String, options: RecordingOptions) {
-        if (isClosed) throw IllegalStateException("Camera session is closed")
+    /// Routes the active recording's auto-stop and failure callbacks to this
+    /// session (used at record start and when adopting a parked recording).
+    private fun wireRecordingCallbacks() {
         // Auto-stop (maxDuration/maxFileSize) → finalise + emit a `stopped` event
         // carrying the path (no pending stopVideoRecording call in that path).
         // stopVideoRecording() routes both the persistent-surface and GL paths.
@@ -1447,6 +1717,32 @@ class CameraSession(
                 "recording failed: MediaRecorder error $what/$extra",
             )
         }
+    }
+
+    /**
+     * Continues a persistent recording parked by the session this one
+     * replaced (vision-camera enablePersistentRecorder). Its recorder surface
+     * joins this session's GL renderer, which draws upright frames into it
+     * whichever camera is active (the raw-buffer persistent-surface path
+     * can't: its rotation is fixed in the container at record start).
+     * Returns whether a recording was adopted.
+     */
+    fun adoptParkedRecording(): Boolean {
+        if (isClosed) return false
+        val surface = videoOutput.adoptParked() ?: return false
+        wireRecordingCallbacks()
+        switchToGlPreview {
+            renderer.setRecordingSurface(surface)
+            videoOutput.resumeAdopted()
+        }
+        return true
+    }
+
+    suspend fun startVideoRecording(outputPath: String, options: RecordingOptions) {
+        if (isClosed) throw IllegalStateException("Camera session is closed")
+        if (activeExtension >= 0)
+            throw IllegalStateException("SESSION_BUSY: camera extensions can't record — turn the extension off first")
+        wireRecordingCallbacks()
         // Await the cameraHandler result so a MediaRecorder prepare/start failure
         // propagates to the caller (Dart) instead of being silently swallowed.
         suspendCancellableCoroutine { cont ->
@@ -1463,7 +1759,9 @@ class CameraSession(
                     // input surface before start() are discarded by the encoder, so
                     // target-then-start is safe.)
                     val session = captureSession
-                    val persistent = if (persistentSurfaceInSession && !persistentSurfaceUnusable) {
+                    // A recording that must survive this session takes the GL
+                    // path (see adoptParkedRecording).
+                    val persistent = if (options.persistent == 0L && persistentSurfaceInSession && !persistentSurfaceUnusable) {
                         videoOutput.persistentRecorderSurfaceOrNull
                     } else null
                     if (session != null && persistent != null) {
@@ -1524,6 +1822,7 @@ class CameraSession(
                         lon = options.longitude,
                         hasLocation = options.hasLocation != 0L,
                         portrait = recPortrait,
+                        persistent = options.persistent != 0L,
                     )
                     // 2. Start the hardware recorder FIRST (important for some drivers)
                     videoOutput.startVideoRecorder()

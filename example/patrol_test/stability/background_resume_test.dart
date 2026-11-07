@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('preview resumes after background then foreground', (
+  testApp(tags: 'slow', 'preview resumes after background then foreground', (
     $,
     modules,
     system,

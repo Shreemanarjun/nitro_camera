@@ -24,6 +24,53 @@ void main() {
     await fake.close();
   });
 
+  group('synchronized output (vision-camera CameraOutputSynchronizer)', () {
+    SyncedFrame pair({required int textureId, required double metresAt0}) {
+      final depth = Float32List.fromList([metresAt0, 0, 0, 0]).buffer.asUint8List();
+      return SyncedFrame(
+        pixels: Uint8List(8),
+        size: 8,
+        width: 4,
+        height: 2,
+        bytesPerRow: 4,
+        pixelFormat: 0,
+        isMirrored: 0,
+        depth: depth,
+        depthSize: depth.length,
+        depthWidth: 2,
+        depthHeight: 2,
+        depthBytesPerRow: 8,
+        timestamp: 123,
+        textureId: textureId,
+      );
+    }
+
+    test('enable / disable reach native', () async {
+      await c.setSynchronizedOutput(true);
+      expect(fake.argsOf('setSynchronizedOutput'), [7, 1]);
+      await c.setSynchronizedOutput(false);
+      expect(fake.argsOf('setSynchronizedOutput'), [7, 0]);
+    });
+
+    test('maps DEPTH_UNSUPPORTED like setDepthOutput', () async {
+      fake.failWith('setSynchronizedOutput', Exception('DEPTH_UNSUPPORTED: no depth'));
+      await expectLater(
+        c.setSynchronizedOutput(true),
+        throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/depth-unsupported')),
+      );
+    });
+
+    test('synchronizedFrames carries only this session\'s pairs, with typed metres', () async {
+      final seen = <double>[];
+      final sub = c.synchronizedFrames.listen((p) => seen.add(p.metresAt(0, 0)));
+      fake.emitSynced(pair(textureId: 99, metresAt0: 9.0)); // another session
+      fake.emitSynced(pair(textureId: 7, metresAt0: 1.5));
+      await Future<void>.delayed(Duration.zero);
+      expect(seen, [1.5]);
+      await sub.cancel();
+    });
+  });
+
   group('focusAt', () {
     test('passes the point and the adaptiveness, returns the native verdict', () async {
       expect(await c.focusAt(0.25, 0.75), isTrue);

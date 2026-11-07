@@ -21,7 +21,8 @@ enum ConstraintResolver {
         for device: AVCaptureDevice,
         targetWidth: Int64,
         targetHeight: Int64,
-        targetFps: Int64
+        targetFps: Int64,
+        multiCam: Bool = false
     ) -> AVCaptureDevice.Format? {
         // Orientation-independent target (long/short edges).
         let targetLong = Double(max(targetWidth, targetHeight))
@@ -65,6 +66,8 @@ enum ConstraintResolver {
             return total
         }
 
-        return device.formats.min(by: { penalty($0) < penalty($1) })
+        // A shared multi-cam session can only run multi-cam formats.
+        let candidates = multiCam ? device.formats.filter { $0.isMultiCamSupported } : device.formats
+        return candidates.min(by: { penalty($0) < penalty($1) })
     }
 }

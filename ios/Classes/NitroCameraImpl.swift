@@ -33,6 +33,14 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     private let depthSubject = PassthroughSubject<DepthFrame, Never>()
+    private let syncedSubject = PassthroughSubject<SyncedFrame, Never>()
+    private let resizedSubject = PassthroughSubject<ResizedFrame, Never>()
+    public var resizedStream: AnyPublisher<ResizedFrame, Never> {
+        resizedSubject.eraseToAnyPublisher()
+    }
+    public var syncedStream: AnyPublisher<SyncedFrame, Never> {
+        syncedSubject.eraseToAnyPublisher()
+    }
     public var depthStream: AnyPublisher<DepthFrame, Never> {
         depthSubject.eraseToAnyPublisher()
     }
@@ -241,6 +249,8 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             self?.frameSubject.send(frame)
         }
         realSession.onDepth = { [weak self] in self?.depthSubject.send($0) }
+        realSession.onSynced = { [weak self] in self?.syncedSubject.send($0) }
+        realSession.frameOutput.resizer.onResized = { [weak self] in self?.resizedSubject.send($0) }
         realSession.onEvent = { [weak self] type, message in
             self?.emitEvent(type, textureId: textureId, message: message)
         }
@@ -252,6 +262,10 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             emitEvent(2 /* error */, textureId: textureId, message: "AUDIO_UNAVAILABLE: \(problem)")
         }
 
+        // A persistent recording parked by the previous session continues
+        // here (vision-camera enablePersistentRecorder) — adopted before
+        // start() so this session's first frames are recorded.
+        realSession.recorder.adoptParked()
         realSession.start()
         emitEvent(0 /* started */, textureId: textureId)
         return textureId
@@ -379,6 +393,13 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             throw CameraError.coded("SESSION_NOT_RUNNING: no session \(textureId)")
         }
         try s.setDepthOutput(enabled != 0)
+    }
+
+    public func setSynchronizedOutput(textureId: Int64, enabled: Int64) async throws {
+        guard let s = session(for: textureId) else {
+            throw CameraError.coded("SESSION_NOT_RUNNING: no session \(textureId)")
+        }
+        try s.setSynchronizedOutput(enabled != 0)
     }
 
     public func setNativeBuffers(textureId: Int64, enabled: Int64) {
@@ -513,7 +534,28 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func updateOverlay(textureId: Int64, overlayData: Data) {
-        // Reserved.
+        session(for: textureId)?.frameOutput.overlay.update(overlayData)
+    }
+
+    public func setCameraExtension(textureId: Int64, name: String) async throws {
+        // AVFoundation has no vendor extension sessions (night / bokeh / HDR
+        // are automatic or per-capture settings on iOS).
+        if name.isEmpty { return }
+        throw CameraError.coded("EXTENSION_UNSUPPORTED: camera extensions are an Android feature")
+    }
+
+    public func setMultiCamEnabled(enabled: Int64) {
+        MultiCamCoordinator.shared.isEnabled = enabled != 0
+    }
+
+    public func setResizer(textureId: Int64, options: ResizerOptions) async throws {
+        guard let s = session(for: textureId) else {
+            throw CameraError.coded("SESSION_NOT_RUNNING: no session \(textureId)")
+        }
+        if options.enabled != 0, options.width <= 0 || options.height <= 0 || !(options.channels == 3 || options.channels == 4) {
+            throw CameraError.coded("INVALID_ARGUMENT: resizer needs a positive size and 3 or 4 channels")
+        }
+        s.frameOutput.resizer.configure(options)
     }
 
     // MARK: - Declarative configuration
@@ -564,6 +606,8 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             "pixelFormat": s.frameOutput.pixelFormat,
             "colorRange":  s.frameOutput.colorRange,
             "audio":       s.hasAudio,
+            "recording":   s.recorder.isRecording,
+            "recordingPaused": s.recorder.isRecordingPaused,
         ]
         if let problem = s.audioProblem { dict["audioError"] = problem }
         guard let data = try? JSONSerialization.data(withJSONObject: dict),

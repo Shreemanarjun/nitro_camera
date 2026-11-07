@@ -40,6 +40,9 @@ export 'src/nitro_camera.native.dart'
         RecordingOptions,
         PreviewTransform,
         DepthFrame,
+        SyncedFrame,
+        ResizedFrame,
+        ResizerOptions,
         EncodedOutputStats;
 
 // Data models.

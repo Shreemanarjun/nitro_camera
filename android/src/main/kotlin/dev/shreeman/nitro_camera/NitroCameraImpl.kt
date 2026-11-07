@@ -147,6 +147,12 @@ class NitroCameraImpl(
     private val _depthFlow = DirectFlow<DepthFrame>()
     override val depthStream: Flow<DepthFrame> = _depthFlow
 
+    private val _syncedFlow = DirectFlow<SyncedFrame>()
+    override val syncedStream: Flow<SyncedFrame> = _syncedFlow
+
+    private val _resizedFlow = DirectFlow<ResizedFrame>()
+    override val resizedStream: Flow<ResizedFrame> = _resizedFlow
+
     private val _eventFlow = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 32)
     override val eventStream: SharedFlow<CameraEvent> = _eventFlow
 
@@ -518,6 +524,7 @@ class NitroCameraImpl(
                 }
                 if (enableAudio != 0L && !audioOk) audioErrors[textureId] = "microphone permission denied"
                 session.onDepth = { _depthFlow.emit(it) }
+                session.onSynced = { _syncedFlow.emit(it) }
                 session.onEvent = { type, reason, message ->
                     _eventFlow.tryEmit(CameraEvent(type.nativeValue, textureId, reason.nativeValue, message))
                 }
@@ -528,6 +535,9 @@ class NitroCameraImpl(
                     prewarmAdopted = true
                 }
                 session.startPreview()
+                // A persistent recording parked by the previous session
+                // continues on this one (vision-camera enablePersistentRecorder).
+                session.adoptParkedRecording()
                 val openMs = android.os.SystemClock.elapsedRealtime() - openStart
                 Log.i(TAG, "switch: close=${lastCloseDurationMs}ms open=${openMs}ms")
                 textureId
@@ -648,7 +658,9 @@ class NitroCameraImpl(
     override fun setFrameFormat(textureId: Long, format: Long)            { session(textureId)?.setFrameFormat(format) }
     override fun setSamplingRate(textureId: Long, samplingRate: Long)      { session(textureId)?.setSamplingRate(samplingRate) }
     override fun setFilterShader(textureId: Long, shaderSource: String)   { session(textureId)?.setFilterShader(shaderSource) }
-    override fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer)      { /* reserved */ }
+    override fun updateOverlay(textureId: Long, overlayData: java.nio.ByteBuffer) {
+        session(textureId)?.setOverlay(overlayData)
+    }
 
     // ---- Declarative configuration & advanced controls ----
 
@@ -696,6 +708,8 @@ class NitroCameraImpl(
             put("colorRange", "full")
             put("audio", s.enableAudio)
             audioErrors[textureId]?.let { put("audioError", it) }
+            put("recording", s.videoOutput.isRecording)
+            put("recordingPaused", s.videoOutput.isRecordingPaused)
         }.toString()
     }
 
@@ -717,6 +731,24 @@ class NitroCameraImpl(
     override suspend fun setDepthOutput(textureId: Long, enabled: Long) {
         val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
         s.setDepthOutput(enabled != 0L)
+    }
+
+    override suspend fun setCameraExtension(textureId: Long, name: String) {
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        s.setExtension(name)
+    }
+
+    /// Android runs concurrent cameras (getConcurrentCameraIds) natively.
+    override fun setMultiCamEnabled(enabled: Long) {}
+
+    override suspend fun setResizer(textureId: Long, options: ResizerOptions) {
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        s.setResizer(options) { _resizedFlow.emit(it) }
+    }
+
+    override suspend fun setSynchronizedOutput(textureId: Long, enabled: Long) {
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        s.setSynchronizedOutput(enabled != 0L)
     }
 
     override fun setNativeBuffers(textureId: Long, enabled: Long) {

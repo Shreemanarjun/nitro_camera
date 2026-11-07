@@ -54,6 +54,10 @@ class FrameOutput(
     /** Delivery callback into the shared frame flow (set by NitroCameraImpl via the session). */
     var onFrame: ((CameraFrame) -> Unit)? = null
 
+    /// Frame + depth pairing hook (CameraSession.setSynchronizedOutput): gets
+    /// every image, still open, regardless of frame processing.
+    @Volatile var onSyncImage: ((android.media.Image) -> Unit)? = null
+
     private var frameCounter: Long = 0
     // Diagnostics counter for the rate-limited frameReader log (camera thread only).
     private var frameImgCount: Long = 0
@@ -89,6 +93,9 @@ class FrameOutput(
 
             var handle = 0L
             try {
+                onSyncImage?.let { sync ->
+                    try { sync(image) } catch (e: Exception) { Log.w("NitroCamera", "sync[$textureId]: ${e.message}") }
+                }
                 val det = nativeDetector()
                 if (det.isNotEmpty()) {
                     NitraDetectors.process(image, characteristics, textureId, det, onDetection)

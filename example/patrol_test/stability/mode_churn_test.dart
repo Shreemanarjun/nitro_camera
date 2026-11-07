@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('session survives rapid PHOTO VIDEO SCANNER churn', (
+  testApp(tags: 'slow', 'session survives rapid PHOTO VIDEO SCANNER churn', (
     $,
     modules,
     system,

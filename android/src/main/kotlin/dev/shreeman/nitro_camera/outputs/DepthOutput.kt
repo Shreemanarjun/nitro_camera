@@ -22,6 +22,10 @@ internal class DepthOutput(size: Size, private val textureId: Long, handler: Han
     val surface: Surface get() = reader.surface
     private var out: ByteBuffer? = null
 
+    /// Frame + depth pairing hook: the converted metres with the image's
+    /// sensor timestamp, which equals the video frame's for the same capture.
+    @Volatile var onSyncDepth: ((sensorTimestampNs: Long, metres: ByteBuffer, w: Int, h: Int) -> Unit)? = null
+
     init {
         reader.setOnImageAvailableListener({ r ->
             val image = try { r.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
@@ -34,6 +38,8 @@ internal class DepthOutput(size: Size, private val textureId: Long, handler: Han
                     ?: ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.LITTLE_ENDIAN).also { out = it }
                 dst.clear()
                 toMetres(src, plane.rowStride, plane.pixelStride, w, h, dst)
+                dst.rewind()
+                onSyncDepth?.invoke(image.timestamp, dst, w, h)
                 dst.rewind()
                 onFrame(DepthFrame(dst, (w * h * 4).toLong(), w.toLong(), h.toLong(), (w * 4).toLong(),
                     System.currentTimeMillis(), textureId))

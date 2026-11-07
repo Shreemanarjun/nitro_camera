@@ -16,11 +16,14 @@ typedef TestAppCallback =
 
 /// Project-standard Patrol wrapper: every test gets the Modules / System /
 /// ApiClients trio (patrol-test-architecture). One test per file.
-void testApp(String description, TestAppCallback body) {
+///
+/// [tags]: `'slow'` marks soak/perf tests (≥ ~25 s) so day-to-day runs can
+/// skip them with `--exclude-tags=slow`.
+void testApp(String description, TestAppCallback body, {Object? tags}) {
   // Same ColorOS SemanticsHandle flake filter as the plain suites — Patrol's
   // binding runs the identical end-of-test verifier. Idempotent.
   installSemanticsFlakeFilter();
-  patrolTest(description, ($) async {
+  patrolTest(description, tags: tags, ($) async {
     await body($, Modules($), System($), ApiClients());
   });
 }

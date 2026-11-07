@@ -77,6 +77,11 @@ final class VideoRecorder {
     // the writer session HERE so trailing audio can't lengthen the file past
     // the last video frame (vision-camera's endSession(atSourceTime:)).
     private var lastVideoPTS: CMTime = .invalid
+    // Raw (un-retimed) PTS of that last frame, and whether this recording
+    // survives its session (vision-camera's `enablePersistentRecorder`):
+    // both feed the hand-off to the next session in park()/adoptParked().
+    private var lastRawVideoPTS: CMTime = .invalid
+    private var recordingPersistent = false
 
     init(device: AVCaptureDevice,
          session: AVCaptureSession,
@@ -215,6 +220,8 @@ final class VideoRecorder {
             self.pauseStartPTS = .invalid
             self.totalPauseOffset = .zero
             self.lastVideoPTS = .invalid
+            self.lastRawVideoPTS = .invalid
+            self.recordingPersistent = options.persistent != 0
             self.isWriting = true
         }
         NSLog("NitroCamera record: start=%dms (fileType=%@ codec=%@)",
@@ -293,6 +300,7 @@ final class VideoRecorder {
         if writer.status == .writing, input.isReadyForMoreMediaData {
             if input.append(buffer) {
                 lastVideoPTS = pts
+                lastRawVideoPTS = rawPTS
             } else {
                 NSLog("NitroCamera record: video append FAILED at %.2fs (writer status=%d)",
                       CMTimeGetSeconds(pts), writer.status.rawValue)
@@ -550,8 +558,31 @@ final class VideoRecorder {
     func interrupt() {
         var finishing: AVAssetWriter?
         var url: URL?
+        var parked = false
         frameQueue.sync {
-            if self.isWriting, let w = self.assetWriter, w.status == .writing {
+            if self.recordingPersistent, self.isWriting, let w = self.assetWriter, w.status == .writing {
+                // Persistent recording: hand the open writer to the next
+                // session instead of finalising it (see ParkedRecording).
+                ParkedRecording.park(ParkedRecording(
+                    writer: w,
+                    videoInput: self.videoWriterInput,
+                    audioInput: self.audioWriterInput,
+                    url: self.recordingURL,
+                    startTime: self.recordingStartTime,
+                    startPTS: self.recordingStartPTS,
+                    lastVideoPTS: self.lastVideoPTS,
+                    lastRawVideoPTS: self.lastRawVideoPTS,
+                    pauseOffset: self.totalPauseOffset,
+                    paused: self.recordingPaused,
+                    maxDurationMs: self.recordingMaxDurationMs,
+                    maxFileSizeBytes: self.recordingMaxFileSizeBytes,
+                    width: self.recordingWidth,
+                    height: self.recordingHeight,
+                    codec: self.recordingCodec,
+                    fileType: self.recordingFileType,
+                    onUnclaimed: self.onEvent))
+                parked = true
+            } else if self.isWriting, let w = self.assetWriter, w.status == .writing {
                 self.videoWriterInput?.markAsFinished()
                 self.audioWriterInput?.markAsFinished()
                 if self.lastVideoPTS.isValid, self.recordingStartPTS.isValid,
@@ -569,6 +600,10 @@ final class VideoRecorder {
             self.audioWriterInput = nil
             self.recordingURL = nil
         }
+        if parked {
+            NSLog("NitroCamera record: persistent recording parked for the next session")
+            return
+        }
         if let w = finishing {
             // Bounded: teardown must not hang on a wedged writer.
             let done = DispatchSemaphore(value: 0)
@@ -585,6 +620,48 @@ final class VideoRecorder {
         takeMovieContinuation()?.resume(throwing: CameraError.captureFailed)
     }
 
+    /// Continues a recording parked by a closing session, if one is waiting
+    /// (call before this session starts delivering frames). The switch gap is
+    /// folded into the pause offset, so the clip resumes one frame after the
+    /// last frame written instead of holding a frozen frame for the gap.
+    /// Returns whether a recording was adopted.
+    @discardableResult
+    func adoptParked() -> Bool {
+        guard let p = ParkedRecording.claim() else { return false }
+        frameQueue.sync {
+            self.assetWriter = p.writer
+            self.videoWriterInput = p.videoInput
+            self.audioWriterInput = p.audioInput
+            self.recordingURL = p.url
+            self.recordingStartTime = p.startTime
+            self.recordingStartPTS = p.startPTS
+            self.lastVideoPTS = p.lastVideoPTS
+            self.lastRawVideoPTS = p.lastRawVideoPTS
+            self.totalPauseOffset = p.pauseOffset
+            self.recordingPaused = p.paused
+            // The gap starts one frame after the last written frame, so the
+            // first new frame lands right after it (no duplicate PTS).
+            self.pauseStartPTS = p.lastRawVideoPTS.isValid
+                ? CMTimeAdd(p.lastRawVideoPTS, CMTime(value: 1, timescale: 30))
+                : .invalid
+            self.recordingMaxDurationMs = p.maxDurationMs
+            self.recordingMaxFileSizeBytes = p.maxFileSizeBytes
+            self.recordingWidth = p.width
+            self.recordingHeight = p.height
+            self.recordingCodec = p.codec
+            self.recordingFileType = p.fileType
+            self.recordingFinishedReason = 0
+            self.recordingPersistent = true
+            self.isWriting = true
+        }
+        NSLog("NitroCamera record: adopted persistent recording %@", p.url?.lastPathComponent ?? "?")
+        return true
+    }
+
+    /// Whether a recording is in progress (paused or not), for session state.
+    var isRecording: Bool { frameQueue.sync { isWriting } }
+    var isRecordingPaused: Bool { frameQueue.sync { isWriting && recordingPaused } }
+
     private func takeMovieContinuation() -> CheckedContinuation<RecordingResult, Error>? {
         continuationLock.lock(); defer { continuationLock.unlock() }
         let c = movieContinuation; movieContinuation = nil; return c
@@ -596,5 +673,85 @@ final class VideoRecorder {
         continuationLock.lock(); defer { continuationLock.unlock() }
         guard stopGeneration == generation else { return nil }
         let c = movieContinuation; movieContinuation = nil; return c
+    }
+}
+
+
+/// A persistent recording between two sessions: the open writer handed over
+/// by a closing session (VideoRecorder.interrupt) until the next one adopts
+/// it (VideoRecorder.adoptParked). A recording nobody claims within
+/// `claimWindow` is finalised so the file is never lost.
+struct ParkedRecording {
+    let writer: AVAssetWriter
+    let videoInput: AVAssetWriterInput?
+    let audioInput: AVAssetWriterInput?
+    let url: URL?
+    let startTime: Date?
+    let startPTS: CMTime
+    let lastVideoPTS: CMTime
+    let lastRawVideoPTS: CMTime
+    let pauseOffset: CMTime
+    let paused: Bool
+    let maxDurationMs: Int64
+    let maxFileSizeBytes: Int64
+    let width: Int64
+    let height: Int64
+    let codec: Int64
+    let fileType: Int64
+    /// The parking session's event hook, for the unclaimed-finalise event.
+    let onUnclaimed: ((Int64, String) -> Void)?
+
+    static let claimWindow: TimeInterval = 10
+
+    private static var slot: ParkedRecording?
+    private static var generation = 0
+    private static let lock = NSLock()
+
+    static func park(_ recording: ParkedRecording) {
+        lock.lock()
+        let displaced = slot
+        slot = recording
+        generation += 1
+        let mine = generation
+        lock.unlock()
+        displaced?.finalise(reason: "replaced by a newer persistent recording")
+        DispatchQueue.global().asyncAfter(deadline: .now() + claimWindow) {
+            lock.lock()
+            guard generation == mine, let unclaimed = slot else { lock.unlock(); return }
+            slot = nil
+            lock.unlock()
+            unclaimed.finalise(reason: "no session reopened within \(Int(claimWindow)) s")
+        }
+    }
+
+    static func claim() -> ParkedRecording? {
+        lock.lock(); defer { lock.unlock() }
+        let p = slot
+        slot = nil
+        return p
+    }
+
+    static var isWaiting: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return slot != nil
+    }
+
+    /// Finishes the file (bounded) and reports it like a session-close stop.
+    func finalise(reason: String) {
+        guard writer.status == .writing else { return }
+        videoInput?.markAsFinished()
+        audioInput?.markAsFinished()
+        if lastVideoPTS.isValid, startPTS.isValid, CMTimeCompare(lastVideoPTS, startPTS) > 0 {
+            writer.endSession(atSourceTime: lastVideoPTS)
+        }
+        let done = DispatchSemaphore(value: 0)
+        writer.finishWriting { done.signal() }
+        _ = done.wait(timeout: .now() + 3)
+        NSLog("NitroCamera record: parked recording finalised (%@) status=%d", reason, writer.status.rawValue)
+        if writer.status == .completed, let url = url {
+            onUnclaimed?(1 /* stopped */, url.path)
+        } else {
+            onUnclaimed?(2 /* error */, writer.error?.localizedDescription ?? "parked recording could not be finalised")
+        }
     }
 }

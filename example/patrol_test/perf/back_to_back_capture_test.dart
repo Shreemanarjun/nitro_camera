@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('photo right after video stop stays unstuck', (
+  testApp(tags: 'slow', 'photo right after video stop stays unstuck', (
     $,
     modules,
     system,

@@ -13,6 +13,15 @@ enum PhotoOutputFormat {
   dng,
 }
 
+/// The container and RAW-ness of a captured [PhotoResult] — vision-camera's
+/// `PhotoFile.containerFormat` / `isRawPhoto` (v5.2.4 #4170). Read from the
+/// file both platforms write: `.dng` for RAW captures, `.jpg` otherwise.
+extension PhotoResultFormat on PhotoResult {
+  PhotoOutputFormat get containerFormat => path.toLowerCase().endsWith('.dng') ? PhotoOutputFormat.dng : PhotoOutputFormat.jpeg;
+
+  bool get isRawPhoto => containerFormat == PhotoOutputFormat.dng;
+}
+
 /// Type-safe options for a single photo capture (`CameraController.takePhoto`).
 ///
 /// Wraps the FFI [PhotoOptions] struct with enums / bools.

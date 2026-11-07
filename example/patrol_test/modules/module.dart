@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:patrol/patrol.dart';
 
 import '../../integration_test/support/harness.dart' as harness;
@@ -38,12 +40,42 @@ abstract base class Module {
   Future<void> acceptPermissionDialogs({int maxDialogs = 2}) async {
     for (var i = 0; i < maxDialogs; i++) {
       final visible = await $.platform.mobile.isPermissionDialogVisible(
-        timeout: const Duration(seconds: 5),
+        timeout: const Duration(seconds: 3),
       );
       if (!visible) break;
-      await Future<void>.delayed(const Duration(seconds: 1));
-      await $.platform.mobile.grantPermissionWhenInUse();
+      // Let the alert finish animating in before tapping.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if (Platform.isIOS) {
+        await _tapIosAllow();
+      } else {
+        await $.platform.mobile.grantPermissionWhenInUse();
+      }
       await $.tester.pump();
     }
+  }
+
+  /// iOS 27 alerts nest two identical "Allow" buttons, and Patrol's
+  /// grantPermissionWhenInUse needs a single match (XCTest records a
+  /// "Multiple matching elements" failure). Tap the first match by index.
+  Future<void> _tapIosAllow() async {
+    const labels = [
+      'Allow',
+      'Allow While Using App',
+      'Allow Full Access',
+      'OK',
+    ];
+    for (final label in labels) {
+      try {
+        await $.platform.ios.tap(
+          IOSSelector(label: label, instance: 0),
+          appId: 'com.apple.springboard',
+          timeout: const Duration(seconds: 1),
+        );
+        return;
+      } on Exception {
+        // Not this label; try the next.
+      }
+    }
+    throw StateError('no allow button on the iOS permission alert');
   }
 }

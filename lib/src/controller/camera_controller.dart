@@ -286,6 +286,15 @@ class CameraController extends ChangeNotifier {
     _sensorOrientation = device.sensorOrientation;
     _isActive = true;
     _watchNativeRecordingState();
+    // A persistent recording (RecordingOptions.persistent) from the session
+    // this one replaced continues here: the native layer adopted it at open.
+    try {
+      final st = getSessionState();
+      if (st.recording) {
+        _isRecording = true;
+        _isRecordingPaused = st.recordingPaused;
+      }
+    } catch (_) {}
     _configuration = CameraConfiguration(
       deviceId: device.id,
       format: fmt,
@@ -509,6 +518,87 @@ class CameraController extends ChangeNotifier {
   /// Depth maps of this session (float32 metres — see `DepthFrame.metres`).
   Stream<DepthFrame> get depthStream => _native.depthStream.where((f) => f.textureId == _textureId);
 
+  /// Pairs each video frame with the depth map captured WITH it and streams
+  /// the pairs on [synchronizedFrames] — vision-camera's
+  /// CameraOutputSynchronizer. Turns depth output on as needed, so it throws
+  /// the same `device/depth-unsupported` / `session/busy` errors as
+  /// [setDepthOutput]. The plain [frameStream] and [depthStream] keep
+  /// working alongside.
+  Future<void> setSynchronizedOutput(bool enabled) async {
+    _requireInitialized();
+    try {
+      await _native.setSynchronizedOutput(_textureId!, enabled ? 1 : 0);
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Draws [overlay] into the camera output — the preview AND recordings
+  /// show it, burned in — until replaced; `null` or an empty overlay clears
+  /// it. The role vision-camera's Skia frame processors play for bounding
+  /// boxes, labels and guides. Frame processors, the resizer and photos get
+  /// the frame without it. On Android it moves a direct preview to the GL
+  /// renderer.
+  void setOverlay(CameraOverlay? overlay) {
+    _requireInitialized();
+    _native.updateOverlay(_textureId!, (overlay ?? CameraOverlay()).encode());
+  }
+
+  /// Runs the cameras opened from now on SIMULTANEOUSLY — vision-camera's
+  /// `requiresMultiCam`. On iOS they then share one AVCaptureMultiCamSession
+  /// (without it iOS runs one camera at a time and a second open interrupts
+  /// the first); pick pairs from [getConcurrentCameraIds]. Opening a camera
+  /// that can't join (unsupported pair, or the cameras together exceed the
+  /// hardware budget) fails like any other open — [initialize] throws.
+  /// Depth and hardware detectors are unavailable in multi-cam mode on iOS.
+  /// Android runs concurrent cameras natively, so this is a no-op there.
+  static void setMultiCamEnabled(bool enabled, {NitroCamera? native}) =>
+      (native ?? NitroCamera.instance).setMultiCamEnabled(enabled ? 1 : 0);
+
+  /// Turns a vendor camera extension on (Android 12+ night, HDR, bokeh, face
+  /// retouch or auto — see [CameraDeviceInfo.extensions]) or off (`null`).
+  /// While one is on, the session carries only the preview and stills:
+  /// frame processing, depth and recording are unavailable, and stills take
+  /// the extension's processing time. Throws
+  /// `DeviceException('device/extension-unsupported')` when unavailable
+  /// (always on iOS), `SessionException('session/busy')` while recording.
+  Future<void> setExtension(CameraExtension? extension) async {
+    _requireInitialized();
+    try {
+      await _native.setCameraExtension(_textureId!, extension?.value ?? '');
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Starts (or reconfigures) the GPU resizer: every frame is scaled on the
+  /// GPU into an ML-ready tensor on [resizedFrames] — vision-camera-resizer.
+  /// Pass `const ResizerOptions(enabled: 0)` (or call [stopResizer]) to stop.
+  /// Throws [ArgumentError] for a non-positive size or channels other than 3
+  /// or 4.
+  Future<void> setResizer(ResizerOptions options) async {
+    _requireInitialized();
+    if (options.enabled != 0 && (options.width <= 0 || options.height <= 0 || (options.channels != 3 && options.channels != 4))) {
+      throw ArgumentError('resizer needs a positive size and 3 or 4 channels');
+    }
+    try {
+      await _native.setResizer(_textureId!, options);
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Stops the GPU resizer.
+  Future<void> stopResizer() => setResizer(const ResizerOptions(enabled: 0));
+
+  /// GPU-resized tensors of this session ([setResizer]); read `data` (or
+  /// `ResizedFrame.float32`) inside the listener only.
+  Stream<ResizedFrame> get resizedFrames => _native.resizedStream.where((f) => f.textureId == _textureId);
+
+  /// Frame + depth pairs of this session ([setSynchronizedOutput]); read
+  /// `pixels` / `SyncedFrame.metres` inside the listener only.
+  Stream<SyncedFrame> get synchronizedFrames => _native.syncedStream.where((f) => f.textureId == _textureId);
+
   /// Attaches a hardware H.264 encoder to the session through the native
   /// `NitroCameraOutputs` hook (the path an RTMP / WebRTC publisher plugin
   /// takes); replaces a running one. [width]/[height] apply on Android; iOS
@@ -564,6 +654,8 @@ class CameraController extends ChangeNotifier {
       ('INVALID_ARGUMENT: ', (m) => ArgumentError(m)),
       ('FOCUS_UNSUPPORTED: ', (m) => DeviceException('device/focus-unsupported', m, cause: e)),
       ('DEPTH_UNSUPPORTED: ', (m) => DeviceException('device/depth-unsupported', m, cause: e)),
+      ('EXTENSION_UNSUPPORTED: ', (m) => DeviceException('device/extension-unsupported', m, cause: e)),
+      ('MULTICAM_UNSUPPORTED: ', (m) => DeviceException('device/multicam-unsupported', m, cause: e)),
       ('NATIVE_BUFFER_UNSUPPORTED: ', (m) => DeviceException('device/native-buffer-unsupported', m, cause: e)),
       ('SESSION_NOT_RUNNING: ', (m) => SessionException('session/not-running', m, cause: e)),
       ('SESSION_BUSY: ', (m) => SessionException('session/busy', m, cause: e)),

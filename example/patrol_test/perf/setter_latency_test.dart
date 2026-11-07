@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('live setters dispatch without blocking the caller', (
+  testApp(tags: 'slow', 'live setters dispatch without blocking the caller', (
     $,
     modules,
     system,

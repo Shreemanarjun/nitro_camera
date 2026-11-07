@@ -4,6 +4,7 @@ import 'package:signals/signals_flutter.dart';
 import 'dart:io';
 import '../../../../gallery/ui/gallery_screen.dart';
 import '../../../state/camera_store.dart';
+import '../common/upright.dart';
 import '../common/glass_tooltip.dart';
 import '../../theme/app_theme.dart';
 
@@ -112,44 +113,46 @@ class BottomControls extends StatelessWidget {
                       preferBelow: false,
                       child: GestureDetector(
                         onTap: () => openGallery(context),
-                        child: Container(
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceRaised,
-                            shape: BoxShape.circle,
-                            border: const Border.fromBorderSide(
-                              BorderSide(color: AppColors.border, width: 2),
-                            ),
-                            boxShadow: AppShadow.soft,
-                            image:
-                                lastCapturedPath != null &&
-                                    !isLastCapturedVideo &&
-                                    !lastCapturedPath.toLowerCase().endsWith(
-                                      ".mp4",
+                        child: Upright(
+                          child: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceRaised,
+                              shape: BoxShape.circle,
+                              border: const Border.fromBorderSide(
+                                BorderSide(color: AppColors.border, width: 2),
+                              ),
+                              boxShadow: AppShadow.soft,
+                              image:
+                                  lastCapturedPath != null &&
+                                      !isLastCapturedVideo &&
+                                      !lastCapturedPath.toLowerCase().endsWith(
+                                        ".mp4",
+                                      )
+                                  ? DecorationImage(
+                                      image: FileImage(File(lastCapturedPath)),
+                                      fit: BoxFit.cover,
                                     )
-                                ? DecorationImage(
-                                    image: FileImage(File(lastCapturedPath)),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
+                                  : null,
+                            ),
+                            child: switch ((
+                              lastCapturedPath,
+                              isLastCapturedVideo,
+                            )) {
+                              (null, _) => const Icon(
+                                Icons.photo_library_outlined,
+                                color: Colors.white12,
+                                size: 24,
+                              ),
+                              (_, true) => const Icon(
+                                Icons.play_circle_fill,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              _ => null,
+                            },
                           ),
-                          child: switch ((
-                            lastCapturedPath,
-                            isLastCapturedVideo,
-                          )) {
-                            (null, _) => const Icon(
-                              Icons.photo_library_outlined,
-                              color: Colors.white12,
-                              size: 24,
-                            ),
-                            (_, true) => const Icon(
-                              Icons.play_circle_fill,
-                              color: Colors.white,
-                              size: 28,
-                            ),
-                            _ => null,
-                          },
                         ),
                       ),
                     ),
@@ -265,14 +268,16 @@ class _FlipCameraButtonState extends State<_FlipCameraButton> {
               color: Colors.white.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: AnimatedRotation(
-              turns: _turns,
-              duration: const Duration(milliseconds: 550),
-              curve: Curves.easeInOutCubic,
-              child: const Icon(
-                Icons.sync_rounded,
-                color: Colors.white,
-                size: 28,
+            child: Upright(
+              child: AnimatedRotation(
+                turns: _turns,
+                duration: const Duration(milliseconds: 550),
+                curve: Curves.easeInOutCubic,
+                child: const Icon(
+                  Icons.sync_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
               ),
             ),
           ),

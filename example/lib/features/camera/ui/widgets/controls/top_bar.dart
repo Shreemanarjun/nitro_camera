@@ -8,6 +8,7 @@ import 'package:signals/signals_flutter.dart';
 import '../../../processors/luminance_processor.dart';
 import '../../../state/camera_store.dart';
 import '../common/glass_tooltip.dart';
+import '../common/upright.dart';
 import 'quick_panel.dart';
 import '../../theme/app_theme.dart';
 
@@ -244,10 +245,12 @@ class _StripIcon extends StatelessWidget {
             shape: BoxShape.circle,
             color: active ? accent.withValues(alpha: 0.16) : Colors.transparent,
           ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: active ? accent : (color ?? Colors.white70),
+          child: Upright(
+            child: Icon(
+              icon,
+              size: 20,
+              color: active ? accent : (color ?? Colors.white70),
+            ),
           ),
         ),
       ),
@@ -282,28 +285,30 @@ class _StripBadge extends StatelessWidget {
           width: 40,
           height: 40,
           child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: active
-                    ? AppColors.accent.withValues(alpha: 0.16)
-                    : Colors.transparent,
-                borderRadius: const BorderRadius.all(Radius.circular(6)),
-                border: Border.all(
+            child: Upright(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
                   color: active
-                      ? AppColors.accent
-                      : Colors.white.withValues(alpha: 0.45),
-                  width: 1,
+                      ? AppColors.accent.withValues(alpha: 0.16)
+                      : Colors.transparent,
+                  borderRadius: const BorderRadius.all(Radius.circular(6)),
+                  border: Border.all(
+                    color: active
+                        ? AppColors.accent
+                        : Colors.white.withValues(alpha: 0.45),
+                    width: 1,
+                  ),
                 ),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: active ? AppColors.accent : Colors.white70,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.8,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: active ? AppColors.accent : Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
                 ),
               ),
             ),

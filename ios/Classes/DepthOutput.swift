@@ -36,27 +36,48 @@ final class DepthOutput: NSObject, AVCaptureDepthDataOutputDelegate {
 
     func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData,
                          timestamp: CMTime, connection: AVCaptureConnection) {
+        handle(depthData, timestamp: timestamp)
+    }
+
+    /// Converts and emits one depth map (also called by SyncOutput, whose
+    /// synchronizer replaces this output's own delegate callbacks).
+    func handle(_ depthData: AVDepthData, timestamp: CMTime) {
+        guard let dims = Self.copyMetres(depthData, into: &buffer, capacity: &capacity),
+              let dst = buffer else { return }
+        onFrame?(DepthFrame(data: dst, size: Int64(dims.w * 4 * dims.h), width: Int64(dims.w), height: Int64(dims.h),
+                            bytesPerRow: Int64(dims.w * 4),
+                            timestamp: Int64(CMTimeGetSeconds(timestamp) * 1000),
+                            textureId: textureId))
+    }
+
+    /// Copies [depthData] as packed float32 metres into a grow-only buffer.
+    /// Returns the map size, or nil when it can't be read.
+    static func copyMetres(_ depthData: AVDepthData,
+                           into buffer: inout UnsafeMutablePointer<UInt8>?,
+                           capacity: inout Int) -> (w: Int, h: Int)? {
         let depth = depthData.depthDataType == kCVPixelFormatType_DepthFloat32
             ? depthData : depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         let map = depth.depthDataMap
         CVPixelBufferLockBaseAddress(map, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(map) else { return }
+        guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
         let w = CVPixelBufferGetWidth(map)
         let h = CVPixelBufferGetHeight(map)
         let rowBytes = CVPixelBufferGetBytesPerRow(map)
         let n = w * 4 * h
         if buffer == nil || capacity < n {
-            buffer?.deallocate()
+            retireBorrowed(buffer)
             buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: n)
             capacity = n
         }
-        guard let dst = buffer else { return }
+        guard let dst = buffer else { return nil }
         for y in 0..<h { memcpy(dst + y * w * 4, base + y * rowBytes, w * 4) }
-        onFrame?(DepthFrame(data: dst, size: Int64(n), width: Int64(w), height: Int64(h),
-                            bytesPerRow: Int64(w * 4),
-                            timestamp: Int64(CMTimeGetSeconds(timestamp) * 1000),
-                            textureId: textureId))
+        return (w, h)
+    }
+
+    /// Restores this output's own delegate after a synchronizer released it.
+    func reattach() {
+        output.setDelegate(self, callbackQueue: queue)
     }
 
     /// Detaches the delegate and drains in-flight callbacks before the buffer goes.
@@ -64,7 +85,7 @@ final class DepthOutput: NSObject, AVCaptureDepthDataOutputDelegate {
         output.setDelegate(nil, callbackQueue: nil)
         queue.sync {}
         onFrame = nil
-        buffer?.deallocate()
+        retireBorrowed(buffer)
         buffer = nil
     }
 }

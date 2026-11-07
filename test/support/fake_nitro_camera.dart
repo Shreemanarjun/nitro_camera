@@ -107,8 +107,27 @@ class FakeNitroCamera extends NitroCamera {
   /// Pushes a depth map as if a native session produced it.
   void emitDepth(DepthFrame frame) => _depth.add(frame);
 
+  final StreamController<SyncedFrame> _synced = StreamController<SyncedFrame>.broadcast();
+
+  @override
+  Stream<SyncedFrame> get syncedStream => _synced.stream;
+
+  /// Pushes a frame + depth pair as if a native session produced it.
+  void emitSynced(SyncedFrame frame) => _synced.add(frame);
+
+  final StreamController<ResizedFrame> _resized = StreamController<ResizedFrame>.broadcast();
+
+  @override
+  Stream<ResizedFrame> get resizedStream => _resized.stream;
+
+  /// Pushes a resized tensor as if a native session produced it.
+  void emitResized(ResizedFrame frame) => _resized.add(frame);
+
   /// Result of the next [focusAt] (1 = focused).
   int focusAtResult = 1;
+
+  /// When set, the next [focusAt] throws it (e.g. a fixed-focus camera).
+  Object? focusAtError;
 
   // ---- Test drivers ----
 
@@ -417,12 +436,31 @@ class FakeNitroCamera extends NitroCamera {
   void releaseNativeBuffer(int handle) => _rec('releaseNativeBuffer', [handle], null);
 
   @override
-  Future<int> focusAt(int textureId, double x, double y, int locked) async =>
-      _rec('focusAt', [textureId, x, y, locked], focusAtResult);
+  Future<int> focusAt(int textureId, double x, double y, int locked) async {
+    final r = _rec('focusAt', [textureId, x, y, locked], focusAtResult);
+    final err = focusAtError;
+    if (err != null) throw err;
+    return r;
+  }
 
   @override
   Future<void> setDepthOutput(int textureId, int enabled) async =>
       _rec('setDepthOutput', [textureId, enabled], null);
+
+  @override
+  Future<void> setSynchronizedOutput(int textureId, int enabled) async =>
+      _rec('setSynchronizedOutput', [textureId, enabled], null);
+
+  @override
+  Future<void> setCameraExtension(int textureId, String name) async =>
+      _rec('setCameraExtension', [textureId, name], null);
+
+  @override
+  void setMultiCamEnabled(int enabled) => _rec('setMultiCamEnabled', [enabled], null);
+
+  @override
+  Future<void> setResizer(int textureId, ResizerOptions options) async =>
+      _rec('setResizer', [textureId, options], null);
 
   @override
   void startEncodedOutput(int textureId, int width, int height, int bitRate) =>

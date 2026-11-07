@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -159,16 +161,32 @@ class CameraPreview extends StatelessWidget {
 }
 
 /// A [GestureDetector] wrapper that translates tap positions to normalised
-/// camera coordinates (0.0–1.0) and calls [controller.setFocusPoint].
+/// camera coordinates (0.0–1.0) and focuses there.
+///
+/// vision-camera's `TapToFocusGestureController` with its
+/// `addOnTapListener` / `addOnFocusCompletedListener` (v5.2.4): [onTap] fires
+/// on every tap, before focusing; [onFocusCompleted] fires once the focus
+/// scan for that tap has ended (`focused` = it ended sharp), e.g. to fade out
+/// a focus ring.
 class TapToFocusDetector extends StatelessWidget {
   const TapToFocusDetector({
     super.key,
     required this.controller,
     required this.child,
+    this.onTap,
+    this.onFocusCompleted,
   });
 
   final CameraController controller;
   final Widget child;
+
+  /// The tapped point, normalised to 0..1 of this widget ((0,0) = top-left).
+  final ValueChanged<Offset>? onTap;
+
+  /// The tapped point and whether its focus scan ended sharp. Not called when
+  /// the camera can't focus (fixed-focus lenses): exposure is still metered
+  /// at the point, but there is no scan to complete.
+  final void Function(Offset point, bool focused)? onFocusCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -178,9 +196,35 @@ class TapToFocusDetector extends StatelessWidget {
         final box = context.findRenderObject() as RenderBox?;
         if (box == null) return;
         final local = box.globalToLocal(details.globalPosition);
-        final x = (local.dx / box.size.width).clamp(0.0, 1.0);
-        final y = (local.dy / box.size.height).clamp(0.0, 1.0);
-        controller.focus(x, y);
+        final point = Offset(
+          (local.dx / box.size.width).clamp(0.0, 1.0),
+          (local.dy / box.size.height).clamp(0.0, 1.0),
+        );
+        onTap?.call(point);
+        final completed = onFocusCompleted;
+        if (completed == null) {
+          controller.focus(point.dx, point.dy);
+          return;
+        }
+        // Only an awaitable focus can report completion. It throws on
+        // fixed-focus cameras, where the plain call still meters exposure.
+        // onError guards focusAt alone, so an error thrown by the callback
+        // itself is not swallowed (and doesn't trigger a second focus).
+        unawaited(
+          controller
+              .focusAt(point.dx, point.dy)
+              .then(
+                (focused) => completed(point, focused),
+                onError: (Object _) {
+                  // The session may have closed while the scan ran.
+                  if (controller.isInitialized) {
+                    try {
+                      controller.focus(point.dx, point.dy);
+                    } on CameraException catch (_) {}
+                  }
+                },
+              ),
+        );
       },
       child: child,
     );
@@ -195,10 +239,16 @@ class PinchToZoomDetector extends StatefulWidget {
     required this.child,
     this.minZoom,
     this.maxZoom,
+    this.onZoomChanged,
   });
 
   final CameraController controller;
   final Widget child;
+
+  /// The zoom factor the pinch just set (after clamping). Called many times
+  /// during one pinch — vision-camera's `ZoomGestureController`
+  /// `addOnZoomChangedListener` (v5.2.4), e.g. for a live "2.4×" label.
+  final ValueChanged<double>? onZoomChanged;
 
   /// Zoom clamp overrides. Default to the device's own
   /// [CameraDeviceInfo.minZoom] / [CameraDeviceInfo.maxZoom] range.
@@ -223,6 +273,7 @@ class _PinchToZoomDetectorState extends State<PinchToZoomDetector> {
           widget.maxZoom ?? device.maxZoom,
         );
         widget.controller.setZoom(newZoom);
+        widget.onZoomChanged?.call(newZoom);
       },
       child: widget.child,
     );

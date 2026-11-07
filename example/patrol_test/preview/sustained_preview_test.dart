@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('preview sustains frames without lag or stall', (
+  testApp(tags: 'slow', 'preview sustains frames without lag or stall', (
     $,
     modules,
     system,

@@ -10,6 +10,32 @@ import 'package:nitro_camera/nitro_camera.dart';
 /// per-capture FFI struct. A wrong bool→int polarity or a swapped enum index
 /// silently changes what the camera does, so every field is pinned here.
 void main() {
+  group('PhotoResult format (vision-camera #4170)', () {
+    PhotoResult result(String path) => PhotoResult(
+      path: path,
+      width: 4032,
+      height: 3024,
+      fileSize: 1,
+      orientation: 0,
+      isMirrored: 0,
+      timestamp: 0,
+    );
+
+    test('a .dng capture is RAW', () {
+      final r = result('/cache/cap_1.dng');
+      expect(r.containerFormat, PhotoOutputFormat.dng);
+      expect(r.isRawPhoto, isTrue);
+    });
+
+    test('a .jpg capture is a processed JPEG, whatever the case', () {
+      for (final p in ['/cache/cap_1.jpg', '/cache/A.JPG']) {
+        expect(result(p).containerFormat, PhotoOutputFormat.jpeg);
+        expect(result(p).isRawPhoto, isFalse);
+      }
+      expect(result('/cache/x.DNG').isRawPhoto, isTrue);
+    });
+  });
+
   group('PhotoCaptureOptions defaults', () {
     test('defaults match the documented capture behaviour', () {
       // Non-const so the generative constructor actually runs.

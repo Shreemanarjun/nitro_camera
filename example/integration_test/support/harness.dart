@@ -112,8 +112,13 @@ Future<void> bootApp(
     // mic) and only publishes cameraPermission after both — so accepting both
     // native dialogs is what flips it to granted.
     final granting = cameraStore.grantPermission();
+    // Both already held → the request short-circuits with no dialog, so skip
+    // the native accept loop (its dialog-visible wait cost ~5 s per test).
+    final noDialog =
+        alreadyGranted &&
+        NitroCamera.instance.getMicrophonePermissionStatus() == granted;
     if (grantPermissionNatively != null) {
-      await grantPermissionNatively();
+      if (!noDialog) await grantPermissionNatively();
       await granting;
       await pumpUntil(
         tester,

@@ -129,6 +129,7 @@ final class FrameOutput: NSObject, FlutterTexture,
     // Modernized properties for per-frame analysis
     var samplingRate: Int64 = 1
     var pixelFormat: Int64 = 1 // 0: YUV/Luma, 1: BGRA
+    var isFrontCamera: Bool { device.position == .front }
 
     /// Active GLSL preview/video filter (Android parity). When set AND the
     /// stream is BGRA (i.e. NOT scanner/YUV mode), the preview texture and the
@@ -148,6 +149,11 @@ final class FrameOutput: NSObject, FlutterTexture,
         }
         return CIContext(options: [.cacheIntermediates: false])
     }()
+    /// Shapes drawn into the preview and recordings (CameraOverlay).
+    lazy var overlay = OverlayRenderer(context: filterContext)
+    /// ML-ready tensors of every frame (setResizer).
+    lazy var resizer = GpuResizer(context: filterContext)
+
     private var filterPool: CVPixelBufferPool?
     private var filterPoolW = 0
     private var filterPoolH = 0
@@ -224,7 +230,7 @@ final class FrameOutput: NSObject, FlutterTexture,
     }
 
     deinit {
-        frameBuffer?.deallocate()
+        retireBorrowed(frameBuffer)
     }
 
     // MARK: - Configuration hooks
@@ -322,10 +328,15 @@ final class FrameOutput: NSObject, FlutterTexture,
             (recorder?.isRecordingActive == true && !shader.isEmpty && pixelFormat == 1)
                 ? renderFilter(pixelBuffer, shader: shader) : nil
 
+        // Overlay drawings (CameraOverlay) go into what the texture shows and
+        // what is recorded — never into the frame-processor / resizer input.
+        let overlayOn = overlay.isActive
+        let displayBuffer = overlayOn ? (overlay.composite(pixelBuffer) ?? pixelBuffer) : pixelBuffer
+
         // GPU path — the texture shows the RAW frame (Flutter filters the preview).
         pixelLock.lock()
         if closed { pixelLock.unlock(); return }
-        latestPixelBuffer = pixelBuffer
+        latestPixelBuffer = displayBuffer
         let reg = textureRegistry
         pixelLock.unlock()
         reg?.textureFrameAvailable(textureId)
@@ -333,10 +344,26 @@ final class FrameOutput: NSObject, FlutterTexture,
         // Recording path — feed the AVAssetWriter (runs on this same frameQueue).
         // Record the natively-FILTERED frame (wrapped with the original timing)
         // when a filter is active; otherwise the raw sample buffer.
-        if let fb = filteredForRecording, let sb = wrapSampleBuffer(fb, like: sampleBuffer) {
-            recorder?.appendVideo(sb)
+        if recorder?.isRecordingActive == true {
+            // Filtered and/or overlaid frames are re-wrapped with the original timing.
+            var recordBuffer: CVPixelBuffer? = filteredForRecording
+            if overlayOn {
+                recordBuffer = filteredForRecording.flatMap { overlay.composite($0) }
+                    ?? (displayBuffer !== pixelBuffer ? displayBuffer : nil)
+            }
+            if let rb = recordBuffer, let sb = wrapSampleBuffer(rb, like: sampleBuffer) {
+                recorder?.appendVideo(sb)
+            } else {
+                recorder?.appendVideo(sampleBuffer)
+            }
         } else {
             recorder?.appendVideo(sampleBuffer)
+        }
+
+        if resizer.isActive {
+            resizer.process(pixelBuffer,
+                            timestamp: Int64(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1000),
+                            textureId: textureId, mirrored: isFrontCamera)
         }
 
         // Plugin outputs (NitroCameraOutputs) — the raw sample buffer.
@@ -396,7 +423,7 @@ final class FrameOutput: NSObject, FlutterTexture,
         // (TransferableTypedData) before the next frame reuses this memory.
         let n = Int(size)
         if frameBuffer == nil || frameBufferCapacity < n {
-            frameBuffer?.deallocate()
+            retireBorrowed(frameBuffer)
             frameBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: n)
             frameBufferCapacity = n
         }
@@ -434,5 +461,19 @@ final class FrameOutput: NSObject, FlutterTexture,
         NSLog("NitroCamera stream: %lld frames dropped so far (reason: %@)",
               droppedFrameCounter, reason)
         onEvent?(5 /* frameDropped */, reason)
+    }
+}
+
+/// Frees a buffer that was handed to Dart as a zero-copy borrow. Stream
+/// events reach Dart asynchronously, so a queued frame may still point here
+/// after it is replaced (grow) or its owner is torn down — freeing now
+/// crashes the reader (EXC_BAD_ACCESS in a worker's memmove). Defer instead.
+/// ponytail: fixed 2 s grace; a Dart reader stalled longer still faults —
+/// switch to refcounted unlock if that ever shows up.
+func retireBorrowed<T>(_ p: UnsafeMutablePointer<T>?) {
+    guard let p else { return }
+    let address = UInt(bitPattern: p)
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+        UnsafeMutablePointer<T>(bitPattern: address)?.deallocate()
     }
 }

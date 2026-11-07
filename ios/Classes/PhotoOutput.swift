@@ -170,8 +170,9 @@ final class PhotoOutput: NSObject, AVCapturePhotoCaptureDelegate {
 
     /// Adds + configures the output on [session]. Must run inside the owning
     /// session's begin/commitConfiguration block.
-    func configure(in session: AVCaptureSession) {
-        if session.canAddOutput(output) { session.addOutput(output) }
+    /// [alreadyAdded]: a multi-cam session added and connected [output] itself.
+    func configure(in session: AVCaptureSession, alreadyAdded: Bool = false) {
+        if !alreadyAdded, session.canAddOutput(output) { session.addOutput(output) }
         output.isHighResolutionCaptureEnabled = true
         // Opt in to the full quality range so per-shot settings can request up to
         // `.quality` (requesting above the output's max throws at capture time).

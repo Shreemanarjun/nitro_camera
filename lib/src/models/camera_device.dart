@@ -57,8 +57,8 @@ enum PhysicalDeviceType {
 }
 
 /// Vendor camera extensions (Android `CameraExtensionCharacteristics`,
-/// API 31+; always absent on iOS). Query-only for now — extension capture
-/// sessions are a planned feature.
+/// API 31+; always absent on iOS). Turn one on with
+/// `CameraController.setExtension`.
 enum CameraExtension {
   auto('auto'),
   faceRetouch('face-retouch'),

@@ -32,6 +32,12 @@ final class MetadataOutput: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         let wanted = detector == "hardwareFace" ? [.face] : Self.codeTypes
         let types = wanted.filter { output.availableMetadataObjectTypes.contains($0) }
         output.metadataObjectTypes = types
+        if !types.isEmpty {
+            // AVCaptureMetadataOutput only calls back once something is in
+            // view, so announce the live detector with an empty result —
+            // listeners can tell "running, nothing seen" from "not started".
+            queue.async { [weak self] in self?.emit([]) }
+        }
         return !types.isEmpty
     }
 
@@ -54,6 +60,10 @@ final class MetadataOutput: NSObject, AVCaptureMetadataOutputObjectsDelegate {
             }
             return item
         }
+        emit(results)
+    }
+
+    private func emit(_ results: [[String: Any]]) {
         let json: [String: Any] = ["detector": detector, "width": 1, "height": 1, "rotation": 90,
                                    "mirrored": mirrored, "results": results]
         if let data = try? JSONSerialization.data(withJSONObject: json),

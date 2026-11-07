@@ -232,6 +232,19 @@ class CameraStore {
   // stays opt-in via the top-bar toggle.
   final previewMode = signal<PreviewMode>(PreviewMode.texture);
 
+  /// Degrees (-90 / 0 / 90 / 180) to turn on-screen controls so they stay
+  /// upright as the phone rotates — the UI itself is portrait-locked.
+  /// vision-camera's `onUIRotationChanged`; fed by [OrientationManager].
+  final uiRotation = signal(0);
+  OrientationManager? _orientation;
+
+  void _startUiRotation() {
+    if (_orientation != null) return;
+    final m = _orientation = OrientationManager();
+    m.uiRotationStream().listen((r) => uiRotation.value = r);
+    unawaited(m.start());
+  }
+
   static const Map<String, String> filters = {
     'NORMAL': '',
     'INVERT':
@@ -423,6 +436,7 @@ class CameraStore {
 
   Future<void> _initImpl() async {
     await Future<void>.value(); // yield once before the heavy init work
+    _startUiRotation();
     unawaited(hydrateGallery());
     try {
       loading.value = true;

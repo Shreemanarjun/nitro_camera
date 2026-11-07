@@ -348,6 +348,56 @@ void main() {
       expect(args[1] as double, inInclusiveRange(0.99, 1.0));
       expect(args[2] as double, inInclusiveRange(0.99, 1.0));
     });
+
+    testWidgets('onTap gets the point; onFocusCompleted fires after the awaited focus scan', (tester) async {
+      final c = await opened();
+      final taps = <Offset>[];
+      final done = <(Offset, bool)>[];
+      fake.focusAtResult = 0; // the scan ended out of focus
+      await tester.pumpWidget(
+        host(
+          TapToFocusDetector(
+            controller: c,
+            onTap: taps.add,
+            onFocusCompleted: (p, focused) => done.add((p, focused)),
+            child: const SizedBox.expand(),
+          ),
+          size: gestureSize,
+        ),
+      );
+      fake.clear();
+
+      await tester.tapAt(const Offset(100, 150));
+      await tester.pump();
+
+      expect(taps, [const Offset(0.25, 0.25)]);
+      expect(fake.argsOf('focusAt'), [7, 0.25, 0.25, 0], reason: 'continuous AF, like the plain tap');
+      expect(done, [(const Offset(0.25, 0.25), false)]);
+      expect(fake.called('setFocusPoint'), isFalse);
+    });
+
+    testWidgets('a camera that cannot focus still meters, and skips onFocusCompleted', (tester) async {
+      final c = await opened();
+      var completed = 0;
+      fake.focusAtError = Exception('device/focus-unsupported');
+      await tester.pumpWidget(
+        host(
+          TapToFocusDetector(
+            controller: c,
+            onFocusCompleted: (_, _) => completed++,
+            child: const SizedBox.expand(),
+          ),
+          size: gestureSize,
+        ),
+      );
+      fake.clear();
+
+      await tester.tapAt(const Offset(100, 150));
+      await tester.pump();
+
+      expect(completed, 0);
+      expect(fake.argsOf('setFocusPoint'), [7, 0.25, 0.25]);
+    });
   });
 
   group('PinchToZoomDetector', () {
@@ -406,6 +456,20 @@ void main() {
 
       await pinch(tester, spread: 2.0);
       expect(c.zoom, closeTo(4.0, 0.01), reason: 'baseZoom is re-read on scale start');
+    });
+
+    testWidgets('onZoomChanged reports each clamped zoom the pinch sets', (tester) async {
+      final c = await opened();
+      final zooms = <double>[];
+      await tester.pumpWidget(
+        host(PinchToZoomDetector(controller: c, maxZoom: 1.5, onZoomChanged: zooms.add, child: surface)),
+      );
+
+      await pinch(tester, spread: 4.0);
+
+      expect(zooms, isNotEmpty);
+      expect(zooms.last, 1.5);
+      expect(zooms.last, c.zoom);
     });
 
     testWidgets('without overrides the zoom clamps to the device range', (tester) async {

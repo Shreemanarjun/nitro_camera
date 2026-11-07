@@ -49,6 +49,13 @@ class SessionState {
   /// records video only. `null` when audio is fine or wasn't requested.
   final String? audioError;
 
+  /// Whether a recording is in progress on this session, including one it
+  /// continued from a previous session (`RecordingOptions.persistent`).
+  final bool recording;
+
+  /// Whether that recording is paused.
+  final bool recordingPaused;
+
   const SessionState({
     required this.running,
     required this.width,
@@ -60,6 +67,8 @@ class SessionState {
     this.colorRange = ColorRange.unknown,
     this.audio = false,
     this.audioError,
+    this.recording = false,
+    this.recordingPaused = false,
   }) : frameWidth = frameWidth ?? width,
        frameHeight = frameHeight ?? height;
 
@@ -80,6 +89,8 @@ class SessionState {
         colorRange: ColorRange.values.asNameMap()[m['colorRange']] ?? ColorRange.unknown,
         audio: m['audio'] == true,
         audioError: m['audioError'] as String?,
+        recording: m['recording'] == true,
+        recordingPaused: m['recordingPaused'] == true,
       );
     } catch (_) {
       return const SessionState(

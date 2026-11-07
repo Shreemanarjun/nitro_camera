@@ -30,19 +30,12 @@ final class OrientationManager {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    guard let self = self else { return }
-                    let degrees: Int64
-                    switch UIDevice.current.orientation {
-                    case .portrait:           degrees = 0
-                    case .landscapeLeft:      degrees = 90
-                    case .portraitUpsideDown: degrees = 180
-                    case .landscapeRight:     degrees = 270
-                    default:                  return // faceUp/faceDown/unknown
-                    }
-                    guard degrees != self.lastOrientationDeg else { return }
-                    self.lastOrientationDeg = degrees
-                    self.onOrientationChanged?(degrees)
+                    self?.emitIfChanged()
                 }
+                // Emit the current orientation now (vision-camera #4150): the
+                // notification only fires on a change, so a new subscriber of
+                // a phone held still would otherwise never learn it.
+                self.emitIfChanged()
             } else {
                 guard let observer = self.observer else { return }
                 NotificationCenter.default.removeObserver(observer)
@@ -51,5 +44,20 @@ final class OrientationManager {
                 self.lastOrientationDeg = -1
             }
         }
+    }
+
+    /// Main queue only. faceUp / faceDown / unknown are skipped.
+    private func emitIfChanged() {
+        let degrees: Int64
+        switch UIDevice.current.orientation {
+        case .portrait:           degrees = 0
+        case .landscapeLeft:      degrees = 90
+        case .portraitUpsideDown: degrees = 180
+        case .landscapeRight:     degrees = 270
+        default:                  return
+        }
+        guard degrees != lastOrientationDeg else { return }
+        lastOrientationDeg = degrees
+        onOrientationChanged?(degrees)
     }
 }

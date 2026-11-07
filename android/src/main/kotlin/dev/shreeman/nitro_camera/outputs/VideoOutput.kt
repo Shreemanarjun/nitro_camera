@@ -51,6 +51,19 @@ class VideoOutput(
     var isRecording = false
         private set
 
+    /// Whether the active recording survives its session (vision-camera's
+    /// `enablePersistentRecorder`) — see [park] / [adoptParked].
+    var isPersistentRecording = false
+        private set
+
+    /// The recorder-owned GL input surface of the active recording (null on
+    /// the persistent-surface path) — handed over with a parked recording.
+    private var recorderSurface: Surface? = null
+
+    /// True while paused by the user (not by a park), so an adopted recording
+    /// stays paused.
+    private var userPaused = false
+
     /// Invoked when MediaRecorder hits a configured maxDuration/maxFileSize limit.
     var onMaxReached: (() -> Unit)? = null
 
@@ -300,6 +313,7 @@ class VideoOutput(
         hasLocation: Boolean = false,
         inputSurface: Surface? = null, // persistent surface (instant start) or null → recorder-owned surface
         portrait: Boolean = false, // GL path: size the surface tall for upright portrait content
+        persistent: Boolean = false, // survive the session (GL path only, see park())
     ): Surface {
         // A persistent-surface recording takes the surface over from the dormant
         // warm-up recorder (under the lock, so a concurrent rearm/release can't
@@ -342,26 +356,7 @@ class VideoOutput(
         if (maxDurationMs > 0) recorder.setMaxDuration(maxDurationMs)
         if (maxFileSizeBytes > 0) recorder.setMaxFileSize(maxFileSizeBytes)
         if (hasLocation) recorder.setLocation(lat.toFloat(), lon.toFloat())
-        if (maxDurationMs > 0 || maxFileSizeBytes > 0) {
-            recorder.setOnInfoListener { _, what, _ ->
-                if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
-                    what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
-                ) {
-                    recordingFinishedReason =
-                        if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) 1L else 2L
-                    onMaxReached?.invoke()
-                }
-            }
-        }
-        // Without a listener, an async recorder error (encoder death,
-        // mediaserver crash) is completely invisible: isRecording stays true
-        // and a later stop() blesses a corrupt file. Mark the recording failed
-        // and let the session auto-stop it.
-        recorder.setOnErrorListener { _, what, extra ->
-            Log.e("NitroCamera", "VideoOutput: MediaRecorder error what=$what extra=$extra")
-            recordingFinishedReason = 3L
-            onRecorderError?.invoke(what, extra)
-        }
+        attachListeners(recorder)
 
         recorder.setOutputFile(outputPath)
         if (inputSurface != null) recorder.setInputSurface(inputSurface)
@@ -384,16 +379,124 @@ class VideoOutput(
         pausedAccumulatedMs = 0L
         pauseStartMs = 0L
         isRecording = true
+        isPersistentRecording = persistent && inputSurface == null
+        userPaused = false
         // getSurface() throws when a persistent input surface is set.
-        return inputSurface ?: recorder.surface
+        val out = inputSurface ?: recorder.surface
+        recorderSurface = if (inputSurface == null) out else null
+        return out
+    }
+
+    /// Routes [recorder]'s limit and error callbacks to THIS output (an
+    /// adopted persistent recording re-points them at the new session).
+    private fun attachListeners(recorder: MediaRecorder) {
+        recorder.setOnInfoListener { _, what, _ ->
+            if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED ||
+                what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED
+            ) {
+                recordingFinishedReason =
+                    if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) 1L else 2L
+                onMaxReached?.invoke()
+            }
+        }
+        // Without a listener, an async recorder error (encoder death,
+        // mediaserver crash) is completely invisible: isRecording stays true
+        // and a later stop() blesses a corrupt file. Mark the recording failed
+        // and let the session auto-stop it.
+        recorder.setOnErrorListener { _, what, extra ->
+            Log.e("NitroCamera", "VideoOutput: MediaRecorder error what=$what extra=$extra")
+            recordingFinishedReason = 3L
+            onRecorderError?.invoke(what, extra)
+        }
     }
 
     fun startVideoRecorder() {
         mediaRecorder?.start()
     }
 
+    /// Whether the active recording is paused (by the user).
+    val isRecordingPaused: Boolean get() = isRecording && userPaused
+
+    /**
+     * Hands an active persistent recording over to [ParkedVideoRecording]
+     * instead of letting [release] destroy it: the recorder is paused (so
+     * the camera switch leaves no gap in the file) and this output forgets
+     * it. The caller must already have detached [recorderSurface] from the
+     * GL renderer. Returns whether a recording was parked.
+     */
+    fun park(): Boolean {
+        val recorder = mediaRecorder ?: return false
+        val surface = recorderSurface
+        if (!isRecording || !isPersistentRecording || isUsingPersistentSurface || surface == null) return false
+        if (!userPaused && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try { recorder.pause() } catch (e: Exception) {
+                Log.w("NitroCamera", "park: pause failed (${e.message})")
+            }
+        }
+        recorder.setOnInfoListener(null)
+        recorder.setOnErrorListener(null)
+        ParkedVideoRecording.park(
+            ParkedVideoRecording(
+                recorder = recorder,
+                surface = surface,
+                outputPath = recordingOutputPath,
+                startMs = recordingStartMs,
+                // The park gap is not recorded media: count it as paused time.
+                pausedAccumulatedMs = pausedAccumulatedMs,
+                pauseStartMs = if (pauseStartMs > 0L) pauseStartMs else System.currentTimeMillis(),
+                userPaused = userPaused,
+                width = recordingWidth,
+                height = recordingHeight,
+                codec = recordingCodec,
+                fileType = recordingFileType,
+            ),
+        )
+        mediaRecorder = null
+        recorderSurface = null
+        isRecording = false
+        isPersistentRecording = false
+        userPaused = false
+        Log.i("NitroCamera", "VideoOutput: persistent recording parked → $recordingOutputPath")
+        return true
+    }
+
+    /**
+     * Takes over a recording parked by a closing session, if one is waiting.
+     * Returns its GL input surface — the caller attaches it to this session's
+     * renderer, then calls [resumeAdopted] — or null when there is none.
+     */
+    fun adoptParked(): Surface? {
+        val p = ParkedVideoRecording.claim() ?: return null
+        mediaRecorder = p.recorder
+        recorderSurface = p.surface
+        recordingOutputPath = p.outputPath
+        recordingStartMs = p.startMs
+        pausedAccumulatedMs = p.pausedAccumulatedMs
+        pauseStartMs = p.pauseStartMs
+        userPaused = p.userPaused
+        recordingWidth = p.width
+        recordingHeight = p.height
+        recordingCodec = p.codec
+        recordingFileType = p.fileType
+        recordingFinishedReason = 0L
+        isUsingPersistentSurface = false
+        isPersistentRecording = true
+        isRecording = true
+        attachListeners(p.recorder)
+        Log.i("NitroCamera", "VideoOutput: adopted persistent recording → ${p.outputPath}")
+        return p.surface
+    }
+
+    /// Resumes an adopted recording once its surface receives frames again
+    /// (unless the user had paused it).
+    fun resumeAdopted() {
+        if (!isRecording || userPaused) return
+        resumeVideoRecording()
+    }
+
     fun pauseVideoRecording() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            userPaused = true
             try {
                 mediaRecorder?.pause()
                 // Open a pause span (ignore a redundant pause while paused).
@@ -406,6 +509,7 @@ class VideoOutput(
 
     fun resumeVideoRecording() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            userPaused = false
             try {
                 mediaRecorder?.resume()
                 // Close the pause span, folding it into the accumulated total.
@@ -441,6 +545,9 @@ class VideoOutput(
         recorder.release()
         mediaRecorder = null
         isRecording = false
+        isPersistentRecording = false
+        recorderSurface = null
+        userPaused = false
         val wasPersistent = isUsingPersistentSurface
         isUsingPersistentSurface = false
 
@@ -505,7 +612,9 @@ class VideoOutput(
     fun release() {
         mediaRecorder?.release()
         mediaRecorder = null
+        recorderSurface = null
         isRecording = false
+        isPersistentRecording = false
         isUsingPersistentSurface = false
         releasePersistentSurface()
     }

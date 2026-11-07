@@ -39,6 +39,11 @@ public class CameraSession: NSObject {
     // MARK: - Private
 
     private let session: AVCaptureSession
+    /// Joined the shared AVCaptureMultiCamSession (MultiCamCoordinator).
+    let isMultiCam: Bool
+    /// This camera's pieces of a shared multi-cam session, removed at close.
+    private var multiCamInputs: [AVCaptureInput] = []
+    private var multiCamOutputs: [AVCaptureOutput] = []
     private var audioOutput: AVCaptureAudioDataOutput?
     private weak var textureRegistry: FlutterTextureRegistry?
 
@@ -77,8 +82,11 @@ public class CameraSession: NSObject {
         self.device          = device
         self.textureRegistry = textureRegistry
 
-        let session      = AVCaptureSession()
-        let sessionQueue = DispatchQueue(label: "dev.shreeman.nitro_camera.session", qos: .userInteractive)
+        let multi = MultiCamCoordinator.shared.isEnabled
+        let session: AVCaptureSession = multi ? try MultiCamCoordinator.shared.join() : AVCaptureSession()
+        let sessionQueue = multi
+            ? MultiCamCoordinator.shared.queue
+            : DispatchQueue(label: "dev.shreeman.nitro_camera.session", qos: .userInteractive)
         let frameQueue   = DispatchQueue(label: "dev.shreeman.nitro_camera.frames",  qos: .userInteractive)
         let frameOutput  = FrameOutput(device: device,
                                        frameQueue: frameQueue,
@@ -95,6 +103,7 @@ public class CameraSession: NSObject {
                                       sessionQueue: sessionQueue)
 
         self.session      = session
+        self.isMultiCam   = multi
         self.sessionQueue = sessionQueue
         self.frameQueue   = frameQueue
         self.frameOutput  = frameOutput
@@ -113,18 +122,36 @@ public class CameraSession: NSObject {
         session.beginConfiguration()
         // We manage formats manually via `device.activeFormat` (vision-camera-style
         // constraint negotiation below), so opt out of preset-based selection.
-        session.sessionPreset = .inputPriority
+        // (A multi-cam session has no presets.)
+        if !multi { session.sessionPreset = .inputPriority }
 
-        // Video input
+        // Video input. In a shared multi-cam session every input/output is
+        // added WITHOUT automatic connections and wired to this camera's own
+        // ports below — automatic wiring would connect the other cameras too.
         let videoInput = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(videoInput) else { throw CameraError.configurationFailed }
-        session.addInput(videoInput)
+        guard session.canAddInput(videoInput) else {
+            session.commitConfiguration()
+            if multi { MultiCamCoordinator.shared.leave(session) }
+            throw multi
+                ? CameraError.coded("MULTICAM_UNSUPPORTED: \(device.localizedName) can't join the multi-cam session")
+                : CameraError.configurationFailed
+        }
+        if multi {
+            session.addInputWithNoConnections(videoInput)
+            multiCamInputs.append(videoInput)
+        } else {
+            session.addInput(videoInput)
+        }
+        let videoPorts = videoInput.ports(for: .video, sourceDeviceType: device.deviceType,
+                                          sourceDevicePosition: device.position)
 
         // Audio input + data output (so recordings can mux audio via AVAssetWriter).
         // The app audio session is configured HERE (vision-camera parity), not
         // by AVFoundation's automatic setup, which silently fails or stops other
         // apps' audio; any failure is reported (`audioProblem`), never swallowed.
-        if enableAudio {
+        if enableAudio, multi, !MultiCamCoordinator.shared.claimAudio(self) {
+            audioProblem = "another multi-cam camera records the microphone"
+        } else if enableAudio {
             session.automaticallyConfiguresApplicationAudioSession = false
             audioProblem = Self.configureAudioSession()
             if audioProblem == nil {
@@ -132,7 +159,21 @@ public class CameraSession: NSObject {
                     do {
                         let audioInput = try AVCaptureDeviceInput(device: mic)
                         let ao = AVCaptureAudioDataOutput()
-                        if session.canAddInput(audioInput), session.canAddOutput(ao) {
+                        if multi, session.canAddInput(audioInput) {
+                            session.addInputWithNoConnections(audioInput)
+                            let ports = audioInput.ports(for: .audio, sourceDeviceType: nil, sourceDevicePosition: .unspecified)
+                            if MultiCamCoordinator.connect(ao, ports: ports, in: session) != nil {
+                                multiCamInputs.append(audioInput)
+                                multiCamOutputs.append(ao)
+                                ao.setSampleBufferDelegate(frameOutput, queue: frameQueue)
+                                audioOutput = ao
+                                frameOutput.audioOutput = ao
+                                recorder.hasAudioOutput = true
+                            } else {
+                                session.removeInput(audioInput)
+                                audioProblem = "the multi-cam session cannot add the microphone"
+                            }
+                        } else if session.canAddInput(audioInput), session.canAddOutput(ao) {
                             session.addInput(audioInput)
                             session.addOutput(ao)
                             ao.setSampleBufferDelegate(frameOutput, queue: frameQueue)
@@ -157,11 +198,28 @@ public class CameraSession: NSObject {
         frameOutput.output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
-        guard session.canAddOutput(frameOutput.output) else { throw CameraError.configurationFailed }
-        session.addOutput(frameOutput.output)
+        if multi {
+            guard MultiCamCoordinator.connect(frameOutput.output, ports: videoPorts, in: session) != nil else {
+                session.commitConfiguration()
+                removeMultiCamParts()
+                MultiCamCoordinator.shared.leave(session)
+                throw CameraError.coded("MULTICAM_UNSUPPORTED: no video connection for \(device.localizedName)")
+            }
+            multiCamOutputs.append(frameOutput.output)
+        } else {
+            guard session.canAddOutput(frameOutput.output) else { throw CameraError.configurationFailed }
+            session.addOutput(frameOutput.output)
+        }
 
         // Photo output
-        photoOutput.configure(in: session)
+        if multi {
+            if MultiCamCoordinator.connect(photoOutput.output, ports: videoPorts, in: session) != nil {
+                multiCamOutputs.append(photoOutput.output)
+            }
+            photoOutput.configure(in: session, alreadyAdded: true)
+        } else {
+            photoOutput.configure(in: session)
+        }
 
         // Format negotiation (vision-camera v5 constraint-penalty port): choose the
         // best `activeFormat` for the requested resolution + fps (with phase-detect
@@ -171,7 +229,8 @@ public class CameraSession: NSObject {
         if let best = ConstraintResolver.bestFormat(for: device,
                                                     targetWidth: width,
                                                     targetHeight: height,
-                                                    targetFps: fps),
+                                                    targetFps: fps,
+                                                    multiCam: multi),
            device.activeFormat != best {
             device.activeFormat = best
         }
@@ -208,6 +267,15 @@ public class CameraSession: NSObject {
         }
 
         session.commitConfiguration()
+
+        // Cameras running together share the ISP / bandwidth budget; above
+        // 1.0 the session can't run at all.
+        if multi, MultiCamCoordinator.shared.hardwareCost > 1.0 {
+            let cost = MultiCamCoordinator.shared.hardwareCost
+            removeMultiCamParts()
+            MultiCamCoordinator.shared.leave(self)
+            throw CameraError.coded(String(format: "MULTICAM_UNSUPPORTED: these cameras exceed the hardware budget together (cost %.2f)", cost))
+        }
 
         // Pre-warm the photo pipeline for a default capture — must run after
         // the output has been added to the session.
@@ -276,17 +344,43 @@ public class CameraSession: NSObject {
 
     public func start() {
         sessionQueue.async { [weak self] in
-            self?.frameOutput.firstFrameLogged = false
-            self?.shouldBeRunning = true
-            self?.session.startRunning()
+            guard let self else { return }
+            self.frameOutput.firstFrameLogged = false
+            self.shouldBeRunning = true
+            if self.isMultiCam { self.setMultiCamConnections(enabled: true) }
+            if !self.session.isRunning { self.session.startRunning() }
         }
     }
 
     public func stop() {
         sessionQueue.async { [weak self] in
-            self?.shouldBeRunning = false
-            self?.session.stopRunning()
+            guard let self else { return }
+            self.shouldBeRunning = false
+            // A shared multi-cam session keeps running for the other cameras:
+            // pause only this camera's connections.
+            if self.isMultiCam {
+                self.setMultiCamConnections(enabled: false)
+            } else {
+                self.session.stopRunning()
+            }
         }
+    }
+
+    /// Enables / disables this camera's connections in the shared session.
+    private func setMultiCamConnections(enabled: Bool) {
+        for output in multiCamOutputs {
+            for connection in output.connections { connection.isEnabled = enabled }
+        }
+    }
+
+    /// Removes this camera's inputs / outputs from the shared session.
+    private func removeMultiCamParts() {
+        session.beginConfiguration()
+        for output in multiCamOutputs { session.removeOutput(output) }
+        for input in multiCamInputs { session.removeInput(input) }
+        session.commitConfiguration()
+        multiCamOutputs.removeAll()
+        multiCamInputs.removeAll()
     }
 
     // MARK: - Audio session
@@ -377,6 +471,13 @@ public class CameraSession: NSObject {
                 self.metadataOutput = nil
             }
             guard !name.isEmpty else { return }
+            if self.isMultiCam {
+                let err = ["detector": name, "error": "Hardware detectors are not available in multi-cam mode"]
+                if let d = try? JSONSerialization.data(withJSONObject: err), let s = String(data: d, encoding: .utf8) {
+                    self.onEvent?(12 /* detection */, s)
+                }
+                return
+            }
             let m = MetadataOutput(detector: name, mirrored: self.device.position == .front)
             m.onJson = { [weak self] in self?.onEvent?(12 /* detection */, $0) }
             self.session.beginConfiguration()
@@ -402,14 +503,40 @@ public class CameraSession: NSObject {
 
     private var depthOutput: DepthOutput?
     var onDepth: ((DepthFrame) -> Void)?
+    private var syncOutput: SyncOutput?
+    var onSynced: ((SyncedFrame) -> Void)?
+
+    /// Starts / stops pairing frames with depth (vision-camera's
+    /// CameraOutputSynchronizer). Enabling turns depth output on first and
+    /// throws its DEPTH_UNSUPPORTED error when the camera has no depth.
+    func setSynchronizedOutput(_ enabled: Bool) throws {
+        if enabled { try setDepthOutput(true) }
+        sessionQueue.sync {
+            if !enabled {
+                syncOutput?.teardown()
+                syncOutput = nil
+                return
+            }
+            guard syncOutput == nil, let d = depthOutput else { return }
+            let s = SyncOutput(frameOutput: frameOutput, depthOutput: d, queue: frameQueue)
+            s.onSynced = { [weak self] in self?.onSynced?($0) }
+            syncOutput = s
+        }
+    }
 
     /// Adds / removes an AVCaptureDepthDataOutput. Throws DEPTH_UNSUPPORTED
     /// when the active format has no depth formats.
     func setDepthOutput(_ enabled: Bool) throws {
+        if enabled && isMultiCam {
+            throw CameraError.coded("DEPTH_UNSUPPORTED: depth is not available in multi-cam mode")
+        }
         var thrown: Error?
         sessionQueue.sync {
             if enabled == (depthOutput != nil) { return }
             if !enabled {
+                // The synchronizer holds the depth output: stop it first.
+                syncOutput?.teardown()
+                syncOutput = nil
                 session.beginConfiguration()
                 if let d = depthOutput { session.removeOutput(d.output) }
                 session.commitConfiguration()
@@ -461,8 +588,15 @@ public class CameraSession: NSObject {
         // session (`AVCaptureSessionWasInterrupted` reason 3, device-in-use)
         // and can starve heavy formats (4K) outright.
         sessionQueue.sync { [weak self] in
-            self?.shouldBeRunning = false
-            self?.session.stopRunning()
+            guard let self else { return }
+            self.shouldBeRunning = false
+            if self.isMultiCam {
+                // Leave the shared session; stop it only when nobody is left.
+                self.removeMultiCamParts()
+                if MultiCamCoordinator.shared.leave(self) { self.session.stopRunning() }
+            } else {
+                self.session.stopRunning()
+            }
         }
         for observer in healthObservers {
             NotificationCenter.default.removeObserver(observer)
@@ -471,6 +605,8 @@ public class CameraSession: NSObject {
         // Drop the sample-buffer delegates and release the held pixel buffer so
         // the capture pool can be torn down (otherwise a reopened session leaks
         // its predecessor's buffers + pool).
+        syncOutput?.teardown()
+        syncOutput = nil
         frameOutput.teardown()
         depthOutput?.teardown()
         depthOutput = nil
@@ -603,7 +739,7 @@ public class CameraSession: NSObject {
         }
         try await recorder.start(to: path, options: RecordingOptions(
             codec: 0, fileType: 0, bitRate: 0, maxDurationMs: 0, maxFileSizeBytes: 0,
-            latitude: 0, longitude: 0, altitude: 0, hasLocation: 0))
+            latitude: 0, longitude: 0, altitude: 0, hasLocation: 0, persistent: 0))
         return true
     }
 

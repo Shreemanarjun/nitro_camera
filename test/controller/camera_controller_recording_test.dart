@@ -26,6 +26,37 @@ void main() {
     isA<RecorderException>().having((e) => e.code, 'code', code),
   );
 
+  group('persistent recording (vision-camera enablePersistentRecorder)', () {
+    test('the persistent flag reaches native', () async {
+      await c.startRecording('/tmp/p.mp4', options: const RecordingOptions(persistent: 1));
+      final opts = fake.argsOf('startVideoRecording')![2] as RecordingOptions;
+      expect(opts.persistent, 1);
+    });
+
+    test('a controller whose session adopted a recording starts out recording', () async {
+      fake.sessionStateJson = '{"running":true,"width":1920,"height":1080,"fps":30,"pixelFormat":0,"recording":true}';
+      final next = CameraController(device: testDevice(), native: fake);
+      await next.initialize();
+      expect(next.isRecording, isTrue);
+      expect(next.isRecordingPaused, isFalse);
+      await next.dispose();
+    });
+
+    test('an adopted paused recording stays paused', () async {
+      fake.sessionStateJson = '{"running":true,"width":1920,"height":1080,"fps":30,"pixelFormat":0,"recording":true,"recordingPaused":true}';
+      final next = CameraController(device: testDevice(), native: fake);
+      await next.initialize();
+      expect(next.isRecording, isTrue);
+      expect(next.isRecordingPaused, isTrue);
+      await next.dispose();
+    });
+
+    test('without an adopted recording a new controller is idle', () async {
+      expect(c.isRecording, isFalse);
+      expect(c.getSessionState().recording, isFalse);
+    });
+  });
+
   group('startRecording', () {
     test('starts with default options and flips isRecording', () async {
       var n = 0;

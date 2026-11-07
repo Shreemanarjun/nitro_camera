@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('device thermal state is published on open', (
+  testApp(tags: 'slow', 'device thermal state is published on open', (
     $,
     modules,
     system,

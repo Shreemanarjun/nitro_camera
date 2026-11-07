@@ -1,7 +1,7 @@
 import '../test_app.dart';
 
 void main() {
-  testApp('video recording from inside SCANNER mode', (
+  testApp(tags: 'slow', 'video recording from inside SCANNER mode', (
     $,
     modules,
     system,

@@ -47,6 +47,56 @@
   (`CameraFrameProcessor.attachDirect`): no UI-isolate hop and no per-frame
   copy. `frames` is ignored in this mode; handlers must not keep
   `FrameData.bytes` past the call.
+* **Gesture listeners** (vision-camera 5.2.4 #4171 / #4172) —
+  `TapToFocusDetector(onTap:, onFocusCompleted:)`: the tapped point (0..1),
+  then the point and whether its focus scan ended sharp, e.g. to fade a focus
+  ring. `PinchToZoomDetector(onZoomChanged:)`: every clamped zoom a pinch
+  sets. Without `onFocusCompleted` a tap focuses exactly as before; with it,
+  a fixed-focus camera still meters exposure and just skips the callback.
+* **UI rotation** (vision-camera 5.2.3 #4147, `onUIRotationChanged`) —
+  `OrientationManager.uiRotationStream()`: the signed degrees (-90 / 0 / 90 /
+  180) to turn controls so they stay upright on a portrait-locked screen as
+  the phone rotates. Helpers: `OrientationManager.uiRotation(...)` (upstream's
+  `getUIRotation`) and `OrientationManager.clockwiseDegrees(...)`, which maps
+  each platform's orientation degrees to one clockwise convention.
+* **Photo container format** (vision-camera 5.2.4 #4170) —
+  `PhotoResult.containerFormat` and `PhotoResult.isRawPhoto`, alongside the
+  existing width / height / orientation / mirroring / timestamp.
+
+* **Persistent recording** (vision-camera `enablePersistentRecorder`) —
+  `startRecording(path, options: RecordingOptions(persistent: 1))` keeps one
+  recording going through a camera switch or reopening configure: the next
+  session that opens continues the same file, the switch gap is cut rather
+  than recorded as frozen video, and `stopRecording()` on the new controller
+  finalises it. A recording no session claims within 10 s is finalised.
+  `SessionState.recording` / `recordingPaused` report it. Android records
+  persistent clips through the GL pipeline (upright frames from any camera).
+* **Synchronized output** (vision-camera CameraOutputSynchronizer) —
+  `setSynchronizedOutput(true)` + `synchronizedFrames`: each video frame
+  paired with the depth map from the same capture (`SyncedFrame`, typed
+  `metres`). iOS AVCaptureDataOutputSynchronizer; Android sensor-timestamp
+  matching. The plain frame / depth streams keep working alongside.
+* **GPU resizer** (vision-camera-resizer) — `setResizer(ResizerOptions(...))`
+  + `resizedFrames`: every frame scaled on the GPU into an ML tensor of the
+  asked size, RGB(A)/BGR(A), uint8 or float32 0..1, cover or contain
+  (`ResizedFrame.float32` / `.uint8`). iOS Core Image on Metal; Android an
+  offscreen GL pass on the camera texture.
+* **Camera overlay** (the vision-camera Skia frame-processor role) —
+  `setOverlay(CameraOverlay()..rect(..)..circle(..)..line(..)..text(..))`
+  draws shapes and text into the preview AND recordings, in normalised
+  upright-frame coordinates; frame processors, the resizer and photos get the
+  frame without it. Implements the previously reserved `updateOverlay`.
+* **Multi-cam** (vision-camera `requiresMultiCam`) —
+  `CameraController.setMultiCamEnabled(true)` before opening cameras runs
+  them simultaneously; on iOS every session then joins one shared
+  AVCaptureMultiCamSession (multi-cam formats, explicit connections, the
+  microphone on the first camera; depth / hardware detectors unavailable).
+  Android already runs concurrent cameras.
+* **Camera extensions** (Android 12+) — `setExtension(CameraExtension.night)`
+  (or hdr / bokeh / faceRetouch / auto, see `CameraDeviceInfo.extensions`)
+  runs a CameraExtensionSession for preview + stills; `setExtension(null)`
+  returns to the regular session. iOS throws
+  `DeviceException('device/extension-unsupported')`.
 
 ### Changed
 
@@ -59,6 +109,16 @@
 
 ### Fixed
 
+* **Orientation on subscribe** (vision-camera 5.2.3 #4150) —
+  `OrientationManager.orientationStream` sends the current orientation to a
+  new listener straight away, and iOS emits it when orientation events are
+  enabled instead of waiting for the phone to rotate.
+* **Several `OrientationManager`s at once** — they share the one native
+  orientation listener: disposing one no longer stops events for the others
+  (only the last dispose turns it off, and `dispose()` without `start()` no
+  longer touches it), and a manager started later replays the orientation the
+  others already know.
+  `CameraDevicesObserver` shares its hot-plug callback the same way.
 * **iOS audio** — the app audio session is now configured by the plugin
   (play-and-record mixing with other apps' audio, Bluetooth, speaker) instead
   of AVFoundation's automatic setup, and a session that asked for audio but

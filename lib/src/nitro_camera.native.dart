@@ -179,6 +179,96 @@ class DepthFrame {
   });
 }
 
+/// One video frame and the depth map captured WITH it, from
+/// [NitroCamera.syncedStream] (vision-camera's CameraOutputSynchronizer):
+/// [pixels] is laid out like [CameraFrame.pixels], [depth] like
+/// [DepthFrame.data] (float32 metres). Both are zero-copy borrows — read them
+/// inside the listener only.
+@HybridStruct(zeroCopy: ['pixels', 'depth'])
+class SyncedFrame {
+  final Uint8List pixels;
+  final int size;
+  final int width;
+  final int height;
+  final int bytesPerRow;
+  final int pixelFormat; // 0 = YUV_420 (plane 0 = luma), 1 = BGRA_8888
+  final int isMirrored; // 0 / 1
+  final Uint8List depth;
+  final int depthSize;
+  final int depthWidth;
+  final int depthHeight;
+  final int depthBytesPerRow;
+  final int timestamp; // ms since epoch, shared by both
+  final int textureId;
+
+  const SyncedFrame({
+    required this.pixels,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.bytesPerRow,
+    required this.pixelFormat,
+    required this.isMirrored,
+    required this.depth,
+    required this.depthSize,
+    required this.depthWidth,
+    required this.depthHeight,
+    required this.depthBytesPerRow,
+    required this.timestamp,
+    required this.textureId,
+  });
+}
+
+/// A camera frame scaled on the GPU into an ML-ready tensor, from
+/// [NitroCamera.resizedStream] (vision-camera-resizer): [data] holds
+/// `height` rows of `width` interleaved pixels of [channels] values each —
+/// uint8 (0..255) or float32 (0..1, little-endian) per [dataType]. Upright,
+/// un-mirrored. Zero-copy: read it inside the listener only.
+@HybridStruct(zeroCopy: ['data'])
+class ResizedFrame {
+  final Uint8List data;
+  final int size;
+  final int width;
+  final int height;
+  final int channels; // 3 (RGB / BGR) or 4 (RGBA / BGRA)
+  final int dataType; // 0 = uint8, 1 = float32
+  final int timestamp; // ms since epoch
+  final int textureId;
+
+  const ResizedFrame({
+    required this.data,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.channels,
+    required this.dataType,
+    required this.timestamp,
+    required this.textureId,
+  });
+}
+
+/// GPU resizer settings for [NitroCamera.setResizer].
+@HybridStruct()
+class ResizerOptions {
+  final int enabled; // 1 = on, 0 = off
+  final int width; // output tensor width in pixels
+  final int height; // output tensor height in pixels
+  final int channels; // 3 = RGB/BGR, 4 = RGBA/BGRA
+  final int dataType; // 0 = uint8 (0..255), 1 = float32 (0..1)
+  final int channelOrder; // 0 = RGB(A), 1 = BGR(A)
+  final int scaleMode; // 0 = cover (crop to fill), 1 = contain (letterbox, black bars)
+
+  const ResizerOptions({
+    this.enabled = 1,
+    this.width = 224,
+    this.height = 224,
+    this.channels = 3,
+    this.dataType = 0,
+    this.channelOrder = 0,
+    this.scaleMode = 0,
+  });
+}
+
 /// Result returned after a photo is captured.
 @hybridRecord
 class PhotoResult {
@@ -381,6 +471,10 @@ class RecordingOptions {
   final double longitude;
   final double altitude;
   final int hasLocation; // 0 / 1
+  // 1 = the recording survives its session (a camera switch or a reopening
+  // configure): the next session that opens continues the same file
+  // (vision-camera's `enablePersistentRecorder`).
+  final int persistent;
 
   const RecordingOptions({
     this.codec = 0,
@@ -392,6 +486,7 @@ class RecordingOptions {
     this.longitude = 0,
     this.altitude = 0,
     this.hasLocation = 0,
+    this.persistent = 0,
   });
 }
 
@@ -705,6 +800,33 @@ abstract class NitroCamera extends HybridObject {
   @nitroNativeAsync
   Future<void> setDepthOutput(int textureId, int enabled);
 
+  /// Pairs each video frame with the depth map captured with it and streams
+  /// the pairs on [syncedStream] (vision-camera's CameraOutputSynchronizer).
+  /// Turns depth output on as needed; throws `DEPTH_UNSUPPORTED:` like
+  /// [setDepthOutput]. [enabled]: 1 = on, 0 = off.
+  @nitroNativeAsync
+  Future<void> setSynchronizedOutput(int textureId, int enabled);
+
+  /// Turns a vendor camera extension on ([name] = `auto`,
+  /// `face-retouch`, `bokeh`, `hdr`, `night`) or off (empty) — Android
+  /// CameraExtensionSession. While one is on, only preview and stills work.
+  /// Throws `EXTENSION_UNSUPPORTED:` (always on iOS), `SESSION_BUSY:` while
+  /// recording.
+  @nitroNativeAsync
+  Future<void> setCameraExtension(int textureId, String name);
+
+  /// 1 = cameras opened from now on run SIMULTANEOUSLY in one shared iOS
+  /// AVCaptureMultiCamSession (vision-camera's `requiresMultiCam`); 0 = each
+  /// camera gets its own session again (iOS then runs one at a time).
+  /// Affects sessions opened afterwards. Android runs concurrent cameras
+  /// natively, so this is a no-op there.
+  void setMultiCamEnabled(int enabled);
+
+  /// Starts / stops / reconfigures the GPU resizer that streams ML-ready
+  /// tensors of every frame on [resizedStream] (vision-camera-resizer).
+  @nitroNativeAsync
+  Future<void> setResizer(int textureId, ResizerOptions options);
+
   /// Attaches the native buffer to frames ([CameraFrame.nativeBuffer]) —
   /// vision-camera's `frame.getNativeBuffer()`, for handing the camera's own
   /// buffer to GPU / ML code without a copy. One buffer is held at a time, so
@@ -763,4 +885,12 @@ abstract class NitroCamera extends HybridObject {
   /// Depth maps from every session with [setDepthOutput] on.
   @NitroStream(backpressure: Backpressure.dropLatest)
   Stream<DepthFrame> get depthStream;
+
+  /// Frame + depth pairs from every session with [setSynchronizedOutput] on.
+  @NitroStream(backpressure: Backpressure.dropLatest)
+  Stream<SyncedFrame> get syncedStream;
+
+  /// GPU-resized tensors from every session with [setResizer] on.
+  @NitroStream(backpressure: Backpressure.dropLatest)
+  Stream<ResizedFrame> get resizedStream;
 }

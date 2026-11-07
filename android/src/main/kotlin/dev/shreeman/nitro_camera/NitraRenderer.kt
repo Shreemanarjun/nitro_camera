@@ -6,6 +6,7 @@ import android.opengl.GLUtils
 import android.util.Log
 import android.view.Surface
 import dev.shreeman.nitro_camera.utils.NitraFrameTransform
+import dev.shreeman.nitro_camera.utils.TensorLayout
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -133,6 +134,183 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         "}\n"
 
     private var fragmentShader = PASSTHROUGH_FS
+
+    // ---- Overlay (CameraOverlay, the Skia-frame-processor analogue) --------
+    // A transparent bitmap of the upright frame, blended over the camera quad
+    // on EVERY surface — preview, recorder, plugin outputs — so drawings are
+    // burned into recordings. Set from any thread; uploaded on the GL thread.
+    @Volatile private var pendingOverlay: android.graphics.Bitmap? = null
+    @Volatile private var overlayChanged = false
+    private var overlayTex = 0
+    private var overlayProgram = 0
+    private var overlayVisible = false
+
+    // ---- GPU resizer (vision-camera-resizer) --------------------------------
+    // Renders the upright camera frame into a small offscreen framebuffer and
+    // reads it back as an ML tensor. Set from any thread; runs on the GL thread
+    // once per frame. Output is upright and un-mirrored, without the overlay.
+    @Volatile private var resizer: nitro.nitro_camera_module.ResizerOptions? = null
+    var onResized: ((nitro.nitro_camera_module.ResizedFrame) -> Unit)? = null
+    var resizerTextureId = 0L
+    private var resizeFbo = 0
+    private var resizeTex = 0
+    private var resizeW = 0
+    private var resizeH = 0
+    private var readBuffer: ByteBuffer? = null
+    private var tensorBuffer: ByteBuffer? = null
+
+    /** Starts / reconfigures (non-null, enabled) or stops the resizer. Any thread. */
+    fun setResizer(options: nitro.nitro_camera_module.ResizerOptions?) {
+        resizer = options?.takeIf { it.enabled != 0L && it.width > 0 && it.height > 0 }
+    }
+
+    /** GL thread, after the frame was consumed: one tensor for this frame. */
+    private fun runResizer(o: nitro.nitro_camera_module.ResizerOptions) {
+        val tw = o.width.toInt()
+        val th = o.height.toInt()
+        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        if (resizeFbo == 0 || resizeW != tw || resizeH != th) {
+            if (resizeFbo != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(resizeFbo), 0)
+            if (resizeTex != 0) GLES20.glDeleteTextures(1, intArrayOf(resizeTex), 0)
+            val t = IntArray(1)
+            GLES20.glGenTextures(1, t, 0)
+            resizeTex = t[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, resizeTex)
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, tw, th, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            val f = IntArray(1)
+            GLES20.glGenFramebuffers(1, f, 0)
+            resizeFbo = f[0]
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, resizeFbo)
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, resizeTex, 0)
+            resizeW = tw
+            resizeH = th
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, resizeFbo)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        val contain = o.scaleMode == 1L
+        if (contain) {
+            // Letterbox: the whole upright frame in the largest fitting viewport.
+            val portrait = isContentPortrait()
+            val cw = if (portrait) minOf(width, height) else maxOf(width, height)
+            val ch = if (portrait) maxOf(width, height) else minOf(width, height)
+            val scale = minOf(tw.toFloat() / cw, th.toFloat() / ch)
+            val vw = (cw * scale).toInt().coerceAtLeast(1)
+            val vh = (ch * scale).toInt().coerceAtLeast(1)
+            GLES20.glViewport((tw - vw) / 2, (th - vh) / 2, vw, vh)
+        } else {
+            GLES20.glViewport(0, 0, tw, th)
+        }
+        val (stMatrix, _, _) = uprightSampling(tw, th, fillWholeSurface = contain, screenMirror = false, surfKind = "resizer")
+        if (program == 0 || phLoc == -1) setupProgram()
+        GLES20.glUseProgram(program)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+        GLES20.glUniformMatrix4fv(mhLoc, 1, false, stMatrix, 0)
+        GLES20.glUniformMatrix4fv(upLoc, 1, false, projectionMatrix, 0)
+        texCoordBuffer.clear()
+        texCoordBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+        texCoordBuffer.position(0)
+        GLES20.glEnableVertexAttribArray(phLoc)
+        GLES20.glVertexAttribPointer(phLoc, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(thLoc)
+        GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+        val rgba = readBuffer?.takeIf { it.capacity() >= tw * th * 4 }
+            ?: ByteBuffer.allocateDirect(tw * th * 4).also { readBuffer = it }
+        rgba.clear()
+        GLES20.glReadPixels(0, 0, tw, th, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, rgba)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+
+        val channels = if (o.channels == 4L) 4 else 3
+        val float32 = o.dataType == 1L
+        val n = tw * th * channels * (if (float32) 4 else 1)
+        val out = tensorBuffer?.takeIf { it.capacity() >= n }
+            ?: ByteBuffer.allocateDirect(n).order(ByteOrder.LITTLE_ENDIAN).also { tensorBuffer = it }
+        out.clear()
+        TensorLayout.fromGlRgba(rgba, tw, th, channels, bgr = o.channelOrder == 1L, float32 = float32, out = out)
+        out.flip()
+        onResized?.invoke(
+            nitro.nitro_camera_module.ResizedFrame(
+                out, n.toLong(), tw.toLong(), th.toLong(), channels.toLong(), if (float32) 1L else 0L,
+                System.currentTimeMillis(), resizerTextureId,
+            ),
+        )
+    }
+
+    /** Replaces the overlay (null clears it). Any thread. */
+    fun setOverlay(bitmap: android.graphics.Bitmap?) {
+        pendingOverlay = bitmap
+        overlayChanged = true
+    }
+
+    private val OVERLAY_VS = "attribute vec4 position;\n" +
+        "attribute vec2 texCoord;\n" +
+        "varying vec2 vTc;\n" +
+        "void main() { gl_Position = position; vTc = texCoord; }\n"
+
+    // uMap = (upright crop x, upright crop y, mirror ±1, 0): the overlay is
+    // sampled through the same centre crop as the camera image, and mirrored
+    // with a mirrored preview, so drawings stay on what they mark.
+    private val OVERLAY_FS = "precision mediump float;\n" +
+        "varying vec2 vTc;\n" +
+        "uniform sampler2D sOverlay;\n" +
+        "uniform vec4 uMap;\n" +
+        "void main() {\n" +
+        "    float x = 0.5 + (vTc.x - 0.5) * uMap.x * uMap.z;\n" +
+        "    float y = 0.5 + (vTc.y - 0.5) * uMap.y;\n" +
+        "    gl_FragColor = texture2D(sOverlay, vec2(x, 1.0 - y));\n" + // bitmap row 0 = top
+        "}\n"
+
+    /** GL thread: uploads a changed overlay. */
+    private fun syncOverlay() {
+        if (!overlayChanged) return
+        overlayChanged = false
+        val bmp = pendingOverlay
+        if (bmp == null) { overlayVisible = false; return }
+        if (overlayProgram == 0) overlayProgram = createProgram(OVERLAY_VS, OVERLAY_FS)
+        if (overlayTex == 0) {
+            val t = IntArray(1)
+            GLES20.glGenTextures(1, t, 0)
+            overlayTex = t[0]
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTex)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
+        overlayVisible = overlayProgram != 0
+    }
+
+    /** GL thread: blends the overlay over the current surface. */
+    private fun drawOverlay(uprightCropX: Float, uprightCropY: Float, mirrored: Boolean) {
+        if (!overlayVisible) return
+        GLES20.glUseProgram(overlayProgram)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        // Android bitmaps are premultiplied.
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTex)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(overlayProgram, "sOverlay"), 1)
+        GLES20.glUniform4f(GLES20.glGetUniformLocation(overlayProgram, "uMap"),
+            uprightCropX, uprightCropY, if (mirrored) -1f else 1f, 0f)
+        val pos = GLES20.glGetAttribLocation(overlayProgram, "position")
+        val tc = GLES20.glGetAttribLocation(overlayProgram, "texCoord")
+        texCoordBuffer.clear()
+        texCoordBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+        texCoordBuffer.position(0)
+        GLES20.glEnableVertexAttribArray(pos)
+        GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 8, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(tc)
+        GLES20.glVertexAttribPointer(tc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    }
 
     init {
         val vords = floatArrayOf(
@@ -408,6 +586,11 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 renderToSurface(recorderEglSurface)
             }
 
+            // 3b. GPU resizer (ML tensors).
+            resizer?.let { o ->
+                try { runResizer(o) } catch (e: Exception) { Log.w("NitroCamera", "resizer: ${e.message}") }
+            }
+
             // 4. Plugin outputs (NitroCameraOutputs) — un-mirrored like the recorder unless asked.
             val wanted = externalWanted
             reconcileExternal(wanted)
@@ -423,6 +606,99 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         } catch (e: Exception) {
             Log.e("NitroCamera", "NitraRenderer: Draw internal error: ${e.message}")
         }
+    }
+
+    /**
+     * The OES sampling matrix that shows the camera frame upright on a
+     * [sw]×[sh] target — sensor + display rotation, the residual after any
+     * HAL pre-rotation in the OES matrix, centre-crop (unless
+     * [fillWholeSurface]) and the selfie mirror. Returns the matrix, the crop
+     * factors (sampling space) and the residual rotation. Shared by the
+     * visible surfaces and the resizer's offscreen target.
+     */
+    private fun uprightSampling(sw: Int, sh: Int, fillWholeSurface: Boolean, screenMirror: Boolean, surfKind: String): Triple<FloatArray, FloatArray, Int> {
+        // --- ROTATION + CENTER-CROP (applied AFTER the camera OES transform) ---
+        // The sensor buffer is landscape; we rotate it upright + cover-crop it. The
+        // rotation must be composed AFTER the device's getTransformMatrix (which
+        // includes a V-flip) — composing before it flips the rotation direction and
+        // leaves the preview 90° off (verified vs the OnePlus stock camera).
+        android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
+        // Effective rotation accounts for BOTH the sensor mount AND the current
+        // device/display rotation, so the preview stays upright in every device
+        // orientation (matches the stock camera). back: sensor - display;
+        // front: sensor + display (then mirrored below).
+        val effectiveOrientation = if (isFrontCamera) {
+            (sensorOrientation + displayRotationDegrees) % 360
+        } else {
+            (sensorOrientation - displayRotationDegrees + 360) % 360
+        }
+        // The OES matrix may ALREADY contain a rotation: when the producer surface
+        // carries a display transform hint, the HAL pre-rotates the buffer and
+        // encodes it in getTransformMatrix (observed on OnePlus: oes = V-flip∘R90).
+        // Decompose it (R = F·L, F = plain V-flip) and only apply the DIFFERENCE —
+        // otherwise we double-rotate. Plain V-flip matrices give 0 → unchanged.
+        val oesRotation = run {
+            val r00 = transformMatrix[0]
+            val r10 = -transformMatrix[1]
+            val deg = Math.toDegrees(Math.atan2(r10.toDouble(), r00.toDouble()))
+            ((Math.round(deg / 90.0) * 90).toInt() % 360 + 360) % 360
+        }
+        val extraRotation = ((effectiveOrientation - oesRotation) % 360 + 360) % 360
+
+        // Cover-crop for the effective (post-rotation) content aspect.
+        // EXCEPTION — the Flutter Texture surface renders the FULL upright frame
+        // (no crop): the producer surface's size is timing-dependent (Impeller
+        // sometimes resizes it to layout, sometimes keeps setSize dims), so any
+        // GL-side aspect fit would be wrong half the time. Instead Dart wraps the
+        // Texture in a FittedBox declaring the true content aspect — the buffer's
+        // arbitrary aspect cancels out exactly (same contract as the iOS path).
+        val crop = if (fillWholeSurface) floatArrayOf(1f, 1f)
+            else NitraFrameTransform.coverCrop(
+                effectiveOrientation, width, height, sw, sh)
+        val cropX = crop[0]
+        val cropY = crop[1]
+        val dimKey = "$surfKind:${sw}x${sh}:$effectiveOrientation:$oesRotation:$sensorOrientation:$isFrontCamera:$displayRotationDegrees"
+        if (dimKey != lastDimLog) {
+            lastDimLog = dimKey
+            val m = transformMatrix
+            Log.i("NitroCamera", "renderToSurface[$surfKind] surface=${sw}x${sh} " +
+                "content=${width}x$height sensor=$sensorOrientation front=$isFrontCamera " +
+                "display=$displayRotationDegrees effOrient=$effectiveOrientation " +
+                "oesRot=$oesRotation extra=$extraRotation crop=($cropX,$cropY) " +
+                "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}] " +
+                "screenMirror=$screenMirror")
+        }
+        val texM = FloatArray(16)
+        android.opengl.Matrix.setIdentityM(texM, 0)
+        android.opengl.Matrix.translateM(texM, 0, 0.5f, 0.5f, 0f)
+        android.opengl.Matrix.scaleM(texM, 0, if (isFrontCamera) -cropX else cropX, cropY, 1f)
+        android.opengl.Matrix.rotateM(texM, 0, -extraRotation.toFloat(), 0f, 0f, 1f)
+        android.opengl.Matrix.translateM(texM, 0, -0.5f, -0.5f, 0f)
+        // combined = texM * cameraTransform  → rotation applied to the OES-mapped coords.
+        // Keep `transformMatrix` as the RAW OES matrix (only refreshed on the first
+        // surface via getTransformMatrix); each surface — Flutter texture, platform
+        // SurfaceView, recorder — re-derives its own crop into this LOCAL matrix.
+        // Overwriting the shared field double-transformed the 2nd+ surface (broke
+        // platform-view mode).
+        val stMatrix = FloatArray(16)
+        android.opengl.Matrix.multiplyMM(stMatrix, 0, texM, 0, transformMatrix, 0)
+        // The ±cropX above flips the TEXTURE axis inside the rotated sampling
+        // space, which after the front sensor's 270° turn leaves the preview
+        // upright but un-mirrored (opposite the stock OnePlus selfie preview and
+        // the direct preview). Mirror the preview OUTPUT horizontally — screen
+        // space, after rotation. The recorder keeps its existing (un-mirrored)
+        // output.
+        if (screenMirror) {
+            val flipX = FloatArray(16)
+            android.opengl.Matrix.setIdentityM(flipX, 0)
+            android.opengl.Matrix.translateM(flipX, 0, 0.5f, 0.5f, 0f)
+            android.opengl.Matrix.scaleM(flipX, 0, -1f, 1f, 1f)
+            android.opengl.Matrix.translateM(flipX, 0, -0.5f, -0.5f, 0f)
+            val mirrored = FloatArray(16)
+            android.opengl.Matrix.multiplyMM(mirrored, 0, stMatrix, 0, flipX, 0)
+            System.arraycopy(mirrored, 0, stMatrix, 0, 16)
+        }
+        return Triple(stMatrix, floatArrayOf(cropX, cropY), extraRotation)
     }
 
     /**
@@ -472,94 +748,17 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        // --- ROTATION + CENTER-CROP (applied AFTER the camera OES transform) ---
-        // The sensor buffer is landscape; we rotate it upright + cover-crop it. The
-        // rotation must be composed AFTER the device's getTransformMatrix (which
-        // includes a V-flip) — composing before it flips the rotation direction and
-        // leaves the preview 90° off (verified vs the OnePlus stock camera).
-        android.opengl.Matrix.setIdentityM(projectionMatrix, 0)
-        // Effective rotation accounts for BOTH the sensor mount AND the current
-        // device/display rotation, so the preview stays upright in every device
-        // orientation (matches the stock camera). back: sensor - display;
-        // front: sensor + display (then mirrored below).
-        val effectiveOrientation = if (isFrontCamera) {
-            (sensorOrientation + displayRotationDegrees) % 360
-        } else {
-            (sensorOrientation - displayRotationDegrees + 360) % 360
-        }
-        // The OES matrix may ALREADY contain a rotation: when the producer surface
-        // carries a display transform hint, the HAL pre-rotates the buffer and
-        // encodes it in getTransformMatrix (observed on OnePlus: oes = V-flip∘R90).
-        // Decompose it (R = F·L, F = plain V-flip) and only apply the DIFFERENCE —
-        // otherwise we double-rotate. Plain V-flip matrices give 0 → unchanged.
-        val oesRotation = run {
-            val r00 = transformMatrix[0]
-            val r10 = -transformMatrix[1]
-            val deg = Math.toDegrees(Math.atan2(r10.toDouble(), r00.toDouble()))
-            ((Math.round(deg / 90.0) * 90).toInt() % 360 + 360) % 360
-        }
-        val extraRotation = ((effectiveOrientation - oesRotation) % 360 + 360) % 360
-
-        // Cover-crop for the effective (post-rotation) content aspect.
-        // EXCEPTION — the Flutter Texture surface renders the FULL upright frame
-        // (no crop): the producer surface's size is timing-dependent (Impeller
-        // sometimes resizes it to layout, sometimes keeps setSize dims), so any
-        // GL-side aspect fit would be wrong half the time. Instead Dart wraps the
-        // Texture in a FittedBox declaring the true content aspect — the buffer's
-        // arbitrary aspect cancels out exactly (same contract as the iOS path).
-        val fillWholeSurface = surface == eglSurface
-        val crop = if (fillWholeSurface) floatArrayOf(1f, 1f)
-            else NitraFrameTransform.coverCrop(
-                effectiveOrientation, width, height, sw.toInt(), sh.toInt())
-        val cropX = crop[0]
-        val cropY = crop[1]
-        val surfKind = when (surface) {
-            eglSurface -> "texture"
-            platformEglSurface -> "platformView"
-            recorderEglSurface -> "recorder"
-            else -> "external"
-        }
-        val dimKey = "$surfKind:${sw.toInt()}x${sh.toInt()}:$effectiveOrientation:$oesRotation:$sensorOrientation:$isFrontCamera:$displayRotationDegrees"
-        if (dimKey != lastDimLog) {
-            lastDimLog = dimKey
-            val m = transformMatrix
-            Log.i("NitroCamera", "renderToSurface[$surfKind] surface=${sw.toInt()}x${sh.toInt()} " +
-                "content=${width}x$height sensor=$sensorOrientation front=$isFrontCamera " +
-                "display=$displayRotationDegrees effOrient=$effectiveOrientation " +
-                "oesRot=$oesRotation extra=$extraRotation crop=($cropX,$cropY) " +
-                "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}] " +
-                "screenMirror=$screenMirror")
-        }
-        val texM = FloatArray(16)
-        android.opengl.Matrix.setIdentityM(texM, 0)
-        android.opengl.Matrix.translateM(texM, 0, 0.5f, 0.5f, 0f)
-        android.opengl.Matrix.scaleM(texM, 0, if (isFrontCamera) -cropX else cropX, cropY, 1f)
-        android.opengl.Matrix.rotateM(texM, 0, -extraRotation.toFloat(), 0f, 0f, 1f)
-        android.opengl.Matrix.translateM(texM, 0, -0.5f, -0.5f, 0f)
-        // combined = texM * cameraTransform  → rotation applied to the OES-mapped coords.
-        // Keep `transformMatrix` as the RAW OES matrix (only refreshed on the first
-        // surface via getTransformMatrix); each surface — Flutter texture, platform
-        // SurfaceView, recorder — re-derives its own crop into this LOCAL matrix.
-        // Overwriting the shared field double-transformed the 2nd+ surface (broke
-        // platform-view mode).
-        val stMatrix = FloatArray(16)
-        android.opengl.Matrix.multiplyMM(stMatrix, 0, texM, 0, transformMatrix, 0)
-        // The ±cropX above flips the TEXTURE axis inside the rotated sampling
-        // space, which after the front sensor's 270° turn leaves the preview
-        // upright but un-mirrored (opposite the stock OnePlus selfie preview and
-        // the direct preview). Mirror the preview OUTPUT horizontally — screen
-        // space, after rotation. The recorder keeps its existing (un-mirrored)
-        // output.
-        if (screenMirror) {
-            val flipX = FloatArray(16)
-            android.opengl.Matrix.setIdentityM(flipX, 0)
-            android.opengl.Matrix.translateM(flipX, 0, 0.5f, 0.5f, 0f)
-            android.opengl.Matrix.scaleM(flipX, 0, -1f, 1f, 1f)
-            android.opengl.Matrix.translateM(flipX, 0, -0.5f, -0.5f, 0f)
-            val mirrored = FloatArray(16)
-            android.opengl.Matrix.multiplyMM(mirrored, 0, stMatrix, 0, flipX, 0)
-            System.arraycopy(mirrored, 0, stMatrix, 0, 16)
-        }
+        val (stMatrix, crops, extraRotation) = uprightSampling(
+            sw.toInt(), sh.toInt(), fillWholeSurface = surface == eglSurface, screenMirror = screenMirror,
+            surfKind = when (surface) {
+                eglSurface -> "texture"
+                platformEglSurface -> "platformView"
+                recorderEglSurface -> "recorder"
+                else -> "external"
+            },
+        )
+        val cropX = crops[0]
+        val cropY = crops[1]
         // Base texcoords (rotation now lives in uSTMatrix).
         texCoordBuffer.clear()
         texCoordBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
@@ -587,6 +786,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glEnableVertexAttribArray(thLoc)
         GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+        // The crop was applied in the rotated sampling space; in upright
+        // (screen) space the axes swap for a quarter-turn.
+        syncOverlay()
+        if (extraRotation % 180 == 90) drawOverlay(cropY, cropX, screenMirror)
+        else drawOverlay(cropX, cropY, screenMirror)
 
         if (surface == recorderEglSurface || external) {
              // Sync timestamps for recorder / encoder smooth playback
@@ -618,6 +823,16 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
             // Delete GL resources before destroying context
             if (program != 0) GLES20.glDeleteProgram(program)
+            if (overlayProgram != 0) GLES20.glDeleteProgram(overlayProgram)
+            if (resizeFbo != 0) GLES20.glDeleteFramebuffers(1, intArrayOf(resizeFbo), 0)
+            if (resizeTex != 0) GLES20.glDeleteTextures(1, intArrayOf(resizeTex), 0)
+            resizeFbo = 0
+            resizeTex = 0
+            if (overlayTex != 0) GLES20.glDeleteTextures(1, intArrayOf(overlayTex), 0)
+            overlayProgram = 0
+            overlayTex = 0
+            overlayVisible = false
+            overlayChanged = pendingOverlay != null // re-upload on a fresh context
             externalEgl.values.forEach { EGL14.eglDestroySurface(eglDisplay, it) }
             externalEgl.clear()
             if (textureId != -1) {

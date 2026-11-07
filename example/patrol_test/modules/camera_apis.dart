@@ -1,6 +1,11 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' show Color, Rect;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get_thumbnail_video/index.dart';
+import 'package:get_thumbnail_video/video_thumbnail.dart';
+import 'package:image/image.dart' as img;
 import 'package:nitro_camera/nitro_camera.dart';
 import 'package:nitro_camera/native.dart'
     show NitroCamera, EncodedOutputStats, DepthFrame;
@@ -648,6 +653,206 @@ final class CameraApis extends Module {
   /// Depth output: on a camera without depth the call throws
   /// device/depth-unsupported and changes nothing; with depth, metres arrive,
   /// stop when disabled, and on/off are idempotent.
+  /// Frame + depth pairs (vision-camera's CameraOutputSynchronizer): every
+  /// pair carries both halves from one capture, and the plain frame and depth
+  /// streams keep flowing while pairing is on. Falls back to the front
+  /// (TrueDepth) camera when the active one has no depth; returns false when
+  /// no camera has depth.
+  Future<bool> verifySynchronizedOutput() async {
+    final startDevice = cameraStore.currentDevice.value;
+    Future<bool> enableOn(CameraController c) async {
+      try {
+        await c.setSynchronizedOutput(true);
+        return true;
+      } on DeviceException catch (e) {
+        expect(e.code, 'device/depth-unsupported');
+        return false;
+      }
+    }
+
+    var c = _ctrl;
+    var switched = false;
+    if (!await enableOn(c)) {
+      final front = cameraStore.devices.value.where((d) => d.position == CameraPosition.front).firstOrNull;
+      if (front == null || front.id == c.device.id) return false;
+      final before = cameraStore.activeTextureId.value;
+      await cameraStore.selectDevice(front);
+      await pumpUntil(
+        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before && (cameraStore.activeController.value?.isInitialized ?? false),
+        reason: 'switched to the front camera for depth',
+        timeout: const Duration(seconds: 25),
+      );
+      switched = true;
+      c = _ctrl;
+      if (!await enableOn(c)) {
+        await cameraStore.selectDevice(startDevice!);
+        return false;
+      }
+    }
+
+    final pairs = <(int, int, int, int, double)>[];
+    var plainDepth = 0;
+    var plainFrames = 0;
+    final s1 = c.synchronizedFrames.listen((p) {
+      final m = p.metres;
+      var valid = 0;
+      for (var i = 0; i < m.length; i += 7) {
+        if (m[i].isFinite && m[i] > 0 && m[i] < 20) valid++;
+      }
+      expect(p.size, greaterThan(0), reason: 'the pair carries video pixels');
+      expect(p.textureId, c.textureId);
+      pairs.add((p.width, p.height, p.depthWidth, p.depthHeight, valid / (m.length / 7)));
+    });
+    final s2 = c.depthStream.listen((_) => plainDepth++);
+    final s3 = c.frameStream.listen((_) => plainFrames++);
+    c.setFrameProcessing(enabled: true);
+
+    await pumpUntil(() => pairs.length >= 5, reason: 'synchronized pairs arrive', timeout: const Duration(seconds: 15));
+    await pumpUntil(() => plainDepth >= 3 && plainFrames >= 3, reason: 'the plain depth and frame streams keep flowing while pairing');
+    final (w, h, dw, dh, validFrac) = pairs.last;
+    // ignore: avoid_print
+    print('synced: video ${w}x$h + depth ${dw}x$dh valid=${(validFrac * 100).toStringAsFixed(0)}% after ${pairs.length} pairs (plain depth $plainDepth, frames $plainFrames)');
+    expect(w * h, greaterThan(0));
+    expect(dw * dh, greaterThan(0));
+    expect(validFrac, greaterThan(0.05), reason: 'the depth half carries plausible distances');
+
+    await c.setSynchronizedOutput(false);
+    await pumpFor(const Duration(milliseconds: 600));
+    final n = pairs.length;
+    await pumpFor(const Duration(milliseconds: 800));
+    expect(pairs.length, n, reason: 'no pairs after disabling');
+    c.setFrameProcessing(enabled: false);
+    await s1.cancel();
+    await s2.cancel();
+    await s3.cancel();
+    await c.setDepthOutput(false);
+    expect(cameraStore.status.value, CameraStatus.running);
+
+    if (switched && startDevice != null) {
+      final before = cameraStore.activeTextureId.value;
+      await cameraStore.selectDevice(startDevice);
+      await pumpUntil(
+        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before,
+        reason: 'restored the original camera',
+        timeout: const Duration(seconds: 25),
+      );
+    }
+    return true;
+  }
+
+  /// CameraOverlay (the Skia-frame-processor analogue) is burned into
+  /// recordings: a filled red box in the top-left of the overlay shows up red
+  /// in that corner of a frame pulled from the recorded clip.
+  Future<void> verifyOverlayInRecording() async {
+    final c = _ctrl;
+    c.setOverlay(CameraOverlay()..rect(const Rect.fromLTWH(0, 0, 0.35, 0.35), color: const Color(0xFFFF0000), strokeWidth: 0));
+    await pumpFor(const Duration(milliseconds: 500));
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/patrol_overlay_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    await c.startRecording(path);
+    await pumpFor(const Duration(seconds: 2));
+    final rec = await c.stopRecording();
+    c.setOverlay(null);
+
+    final jpeg = await VideoThumbnail.thumbnailData(video: rec.path, imageFormat: ImageFormat.JPEG, maxWidth: 240, quality: 95, timeMs: 1000);
+    final frame = img.decodeJpg(jpeg)!;
+    final corner = frame.getPixel((frame.width * 0.12).round(), (frame.height * 0.12).round());
+    final centre = frame.getPixel((frame.width * 0.7).round(), (frame.height * 0.7).round());
+    // ignore: avoid_print
+    print('overlay: ${frame.width}x${frame.height} corner=(${corner.r},${corner.g},${corner.b}) centre=(${centre.r},${centre.g},${centre.b})');
+    expect(corner.r, greaterThan(180), reason: 'the overlay box is red in the recording');
+    expect(corner.g, lessThan(90));
+    expect(corner.b, lessThan(90));
+    expect(centre.r - math.max(centre.g, centre.b), lessThan(150), reason: 'outside the box is the camera image, not overlay red');
+    File(rec.path).deleteSync();
+  }
+
+  /// The GPU resizer (vision-camera-resizer) streams tensors of the asked
+  /// size, channel count and type, with real image content, then stops.
+  Future<void> verifyGpuResizer() async {
+    final c = _ctrl;
+    final f32 = <ResizedFrame>[];
+    final values = <List<double>>[];
+    final sub = c.resizedFrames.listen((t) {
+      if (t.dataType == 1) {
+        f32.add(t);
+        values.add(t.float32.toList());
+      }
+    });
+    await c.setResizer(const ResizerOptions(width: 64, height: 48, channels: 3, dataType: 1, scaleMode: 0));
+    await pumpUntil(() => f32.length >= 5, reason: 'float32 tensors arrive');
+    final t = f32.last;
+    expect((t.width, t.height, t.channels, t.size), (64, 48, 3, 64 * 48 * 3 * 4));
+    final v = values.last;
+    expect(v.length, 64 * 48 * 3);
+    expect(v.every((x) => x >= 0 && x <= 1), isTrue, reason: 'float32 values are normalised to 0..1');
+    final mean = v.reduce((a, b) => a + b) / v.length;
+    final variance = v.map((x) => (x - mean) * (x - mean)).reduce((a, b) => a + b) / v.length;
+    // ignore: avoid_print
+    print('resizer: 64x48x3 f32 mean=${mean.toStringAsFixed(3)} sd=${math.sqrt(variance).toStringAsFixed(3)}');
+    expect(math.sqrt(variance), greaterThan(0.005), reason: 'the tensor carries the camera image, not a flat fill');
+
+    // Reconfigure: uint8 BGRA, letterboxed.
+    final u8 = <(int, int, int, int)>[];
+    final sub2 = c.resizedFrames.listen((t) {
+      if (t.dataType == 0) {
+        final d = t.uint8;
+        var opaque = true;
+        for (var i = 3; i < d.length; i += 4) {
+          if (d[i] != 255) opaque = false;
+        }
+        u8.add((t.width, t.height, t.channels, opaque ? 1 : 0));
+      }
+    });
+    await c.setResizer(const ResizerOptions(width: 32, height: 32, channels: 4, dataType: 0, channelOrder: 1, scaleMode: 1));
+    await pumpUntil(() => u8.length >= 3, reason: 'uint8 tensors arrive after reconfiguring');
+    expect(u8.last, (32, 32, 4, 1));
+
+    await c.stopResizer();
+    await pumpFor(const Duration(milliseconds: 500));
+    final n = f32.length + u8.length;
+    await pumpFor(const Duration(milliseconds: 800));
+    expect(f32.length + u8.length, n, reason: 'no tensors after stopResizer');
+    await sub.cancel();
+    await sub2.cancel();
+    expect(cameraStore.status.value, CameraStatus.running);
+  }
+
+  /// Camera extensions: on iOS (no extension sessions) turning one on fails
+  /// with the typed error and off is a no-op; on Android a supported
+  /// extension takes a still, and recording works again once it is off.
+  Future<void> verifyCameraExtensions() async {
+    final c = _ctrl;
+    if (Platform.isIOS) {
+      await expectLater(
+        c.setExtension(CameraExtension.night),
+        throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/extension-unsupported')),
+      );
+      await c.setExtension(null);
+      expect(cameraStore.status.value, CameraStatus.running);
+      return;
+    }
+    final ext = c.device.extensions.firstOrNull;
+    if (ext == null) {
+      await expectLater(c.setExtension(CameraExtension.night), throwsA(isA<DeviceException>()));
+      return;
+    }
+    await c.setExtension(ext);
+    await pumpFor(const Duration(seconds: 1));
+    final photo = await c.takePhoto();
+    expect(File(photo.path).existsSync(), isTrue);
+    expect(photo.width * photo.height, greaterThan(0));
+    await c.setExtension(null);
+    await pumpFor(const Duration(seconds: 1));
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/patrol_after_ext_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    await c.startRecording(path);
+    await pumpFor(const Duration(seconds: 1));
+    final rec = await c.stopRecording();
+    expect(rec.fileSize, greaterThan(0), reason: 'the regular session is back after the extension');
+    File(rec.path).deleteSync();
+  }
+
   Future<bool> verifyDepthOutput() async {
     final c = _ctrl;
     final advertised = c.device.formats.any((f) => f.supportsDepthCapture);
@@ -1124,6 +1329,73 @@ final class CameraApis extends Module {
   /// containing the ACTIVE device (returns false → caller skips). Opens the
   /// partner as a second controller and proves the per-session frameStream
   /// separation for real.
+  /// True simultaneous capture (vision-camera's `requiresMultiCam`): with
+  /// multi-cam on, two cameras of a supported pair stream AT THE SAME TIME —
+  /// on iOS through one shared AVCaptureMultiCamSession — and closing one
+  /// leaves the other running. Returns false when no pair is supported.
+  Future<bool> verifyTrueMulticam() async {
+    final combo = CameraController.getConcurrentCameraIds().where((ids) => ids.length >= 2).firstOrNull;
+    if (combo == null) return false;
+    final devices = await CameraController.getAvailableCameraDevices();
+    CameraDeviceInfo? byId(String id) => devices.where((d) => d.id == id).firstOrNull;
+    final original = cameraStore.currentDevice.value!;
+    // The app's camera must (re)open AFTER multi-cam is on to join it.
+    final appId = cameraStore.currentDevice.value?.id == combo[0] ? combo[1] : combo[0];
+    final partnerId = combo.firstWhere((id) => id != appId);
+    final appDevice = byId(appId), partner = byId(partnerId);
+    if (appDevice == null || partner == null) return false;
+
+    CameraController.setMultiCamEnabled(true);
+    try {
+      final before = cameraStore.activeTextureId.value;
+      await cameraStore.selectDevice(appDevice);
+      await pumpUntil(
+        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before && (cameraStore.activeController.value?.isInitialized ?? false),
+        reason: 'the app camera reopened inside the multi-cam session',
+        timeout: const Duration(seconds: 25),
+      );
+      final first = _ctrl;
+      final second = CameraController(device: partner);
+      await second.initialize();
+      try {
+        var firstFrames = 0, secondFrames = 0;
+        final s1 = first.frameStream.listen((_) => firstFrames++);
+        final s2 = second.frameStream.listen((_) => secondFrames++);
+        first.setFrameProcessing(enabled: true);
+        second.setFrameProcessing(enabled: true);
+        await pumpFor(const Duration(milliseconds: 600)); // both settle
+        firstFrames = 0;
+        secondFrames = 0;
+        await pumpFor(const Duration(seconds: 2));
+        // ignore: avoid_print
+        print('multicam: ${appDevice.name} $firstFrames frames + ${partner.name} $secondFrames frames in 2 s');
+        expect(firstFrames, greaterThan(10), reason: 'the first camera kept streaming while the second ran');
+        expect(secondFrames, greaterThan(10), reason: 'the second camera streamed at the same time');
+        await s2.cancel();
+        second.setFrameProcessing(enabled: false);
+        await second.dispose();
+
+        firstFrames = 0;
+        await pumpFor(const Duration(seconds: 1));
+        expect(firstFrames, greaterThan(5), reason: 'closing one camera left the other running');
+        await s1.cancel();
+        first.setFrameProcessing(enabled: false);
+      } finally {
+        if (second.isInitialized) await second.dispose();
+      }
+    } finally {
+      CameraController.setMultiCamEnabled(false);
+      final before = cameraStore.activeTextureId.value;
+      await cameraStore.selectDevice(original);
+      await pumpUntil(
+        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before,
+        reason: 'restored the original camera outside multi-cam',
+        timeout: const Duration(seconds: 25),
+      );
+    }
+    return true;
+  }
+
   Future<bool> verifyMulticamConcurrent() async {
     final c = _ctrl;
     final combos = CameraController.getConcurrentCameraIds();

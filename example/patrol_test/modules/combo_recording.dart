@@ -468,6 +468,68 @@ final class ComboRecording extends Module {
   ///
   /// Returns false when the device exposes fewer than 2 cameras (caller
   /// skips).
+  /// A persistent recording (vision-camera's `enablePersistentRecorder`)
+  /// keeps going through a camera switch: the new session adopts it, stopping
+  /// there gives ONE playable file covering both cameras, and the switch gap
+  /// is not recorded as frozen video. Returns false with fewer than 2 cameras.
+  Future<bool> persistentRecordingAcrossLensSwitch() async {
+    if (cameraStore.devices.value.length < 2) return false;
+
+    final original = _ctrl;
+    final path = await _tempPath('persistent');
+    final beforeTid = cameraStore.activeTextureId.value;
+    final wall = Stopwatch()..start();
+
+    await original.startRecording(path, options: const RecordingOptions(persistent: 1));
+    expect(original.isRecording, isTrue, reason: 'startRecording() did not arm');
+    await pumpFor(const Duration(seconds: 2));
+
+    final switchWatch = Stopwatch()..start();
+    cameraStore.toggleCamera();
+    final switched = await _pumpWhile(
+      () =>
+          cameraStore.status.value == CameraStatus.running &&
+          cameraStore.activeTextureId.value != beforeTid &&
+          (cameraStore.activeController.value?.isInitialized ?? false),
+      timeout: const Duration(seconds: 25),
+    );
+    switchWatch.stop();
+    expect(switched, isTrue, reason: 'the camera switch never completed');
+
+    final next = _ctrl;
+    expect(next.isRecording, isTrue, reason: 'the new session did not adopt the persistent recording');
+    expect(next.getSessionState().recording, isTrue);
+
+    await pumpFor(const Duration(seconds: 2));
+    final result = await next.stopRecording();
+    wall.stop();
+    expect(next.isRecording, isFalse);
+    expect(result.path, path, reason: 'stopping on the new session must finalise the SAME file');
+
+    final file = File(path);
+    expect(file.existsSync(), isTrue);
+    final info = probeMp4(file);
+    expect(info.isPlayable, isTrue, reason: 'the continued clip is not playable ($info)');
+    final ms = info.durationMs ?? result.durationMs;
+    // ~2 s before the switch + ~2 s after. The switch itself (camera close +
+    // open) must not appear in the media as frozen video.
+    expect(ms, greaterThan(3000), reason: 'the clip lost one of its halves ($ms ms)');
+    expect(
+      ms,
+      lessThan(wall.elapsedMilliseconds - switchWatch.elapsedMilliseconds ~/ 2),
+      reason: 'the switch gap (${switchWatch.elapsedMilliseconds} ms) was recorded as frozen video ($ms ms of ${wall.elapsedMilliseconds} ms)',
+    );
+    file.deleteSync();
+
+    // Restore the original camera for the following tests.
+    cameraStore.toggleCamera();
+    await _pumpWhile(
+      () => cameraStore.status.value == CameraStatus.running && (cameraStore.activeController.value?.isInitialized ?? false),
+      timeout: const Duration(seconds: 25),
+    );
+    return true;
+  }
+
   Future<bool> lensSwitchDuringRecording() async {
     if (cameraStore.devices.value.length < 2) return false;
 
