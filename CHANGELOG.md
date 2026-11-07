@@ -109,6 +109,15 @@
 
 ### Fixed
 
+* **iOS: crash in a frame processor during a session change.** The zero-copy
+  frame buffer was freed as soon as it grew or its session closed, while a
+  frame still queued for a worker isolate pointed into it (`EXC_BAD_ACCESS`
+  in the worker's copy, e.g. starting a recording in scanner mode). Replaced
+  buffers are now freed after a short grace period. Same for the depth,
+  synchronized and resized streams.
+* **iOS: hardware code detectors report as soon as they start.** They now emit
+  one empty result on activation instead of staying silent until a code is in
+  view.
 * **Orientation on subscribe** (vision-camera 5.2.3 #4150) —
   `OrientationManager.orientationStream` sends the current orientation to a
   new listener straight away, and iOS emits it when orientation events are

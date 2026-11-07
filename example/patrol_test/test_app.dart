@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:patrol/patrol.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../integration_test/support/harness.dart'
     show installSemanticsFlakeFilter;
@@ -24,6 +27,27 @@ void testApp(String description, TestAppCallback body, {Object? tags}) {
   // binding runs the identical end-of-test verifier. Idempotent.
   installSemanticsFlakeFilter();
   patrolTest(description, tags: tags, ($) async {
-    await body($, Modules($), System($), ApiClients());
+    try {
+      await body($, Modules($), System($), ApiClients());
+    } finally {
+      await _logPeakMemory(description);
+    }
   });
+}
+
+/// Appends this test's peak RSS to Documents/patrol_memory.log (pull it with
+/// `xcrun devicectl device copy from --domain-type appDataContainer`), so a
+/// memory-limit kill can be traced to the test that grew.
+Future<void> _logPeakMemory(String description) async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    final mb = ProcessInfo.maxRss >> 20;
+    await File('${dir.path}/patrol_memory.log').writeAsString(
+      '${DateTime.now().toIso8601String()} ${mb}MB $description\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } on Object {
+    // Diagnostics only — never fail a test over it.
+  }
 }

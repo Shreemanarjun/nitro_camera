@@ -244,8 +244,13 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     /** Replaces the overlay (null clears it). Any thread. */
     fun setOverlay(bitmap: android.graphics.Bitmap?) {
         pendingOverlay = bitmap
+        hasOverlay = bitmap != null
         overlayChanged = true
     }
+
+    /** Whether an overlay is set — recordings must then take the GL path. */
+    @Volatile var hasOverlay = false
+        private set
 
     private val OVERLAY_VS = "attribute vec4 position;\n" +
         "attribute vec2 texCoord;\n" +

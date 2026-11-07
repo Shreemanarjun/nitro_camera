@@ -139,7 +139,14 @@ class _FrameWire {
   final bool isMirrored;
   final int nativeBuffer;
   const _FrameWire(this.bytes, this.width, this.height, this.format, this.timestamp, this.orientation, this.bytesPerRow, this.isMirrored, [this.nativeBuffer = 0]);
+
+  _FrameWire withBytes(TransferableTypedData b) =>
+      _FrameWire(b, width, height, format, timestamp, orientation, bytesPerRow, isMirrored, nativeBuffer);
 }
+
+/// Marks a pending wire whose pixels still sit in the processor's scratch
+/// buffer (never sent).
+final _deferredBytes = TransferableTypedData.fromList(const <TypedData>[]);
 
 /// Runs a [FrameHandler] on a dedicated background [Isolate], keeping heavy
 /// per-frame work off the UI isolate.
@@ -175,6 +182,10 @@ class CameraFrameProcessor<R> {
 
   bool _busy = false;
   _FrameWire? _pending;
+  // The pending frame's pixels while the worker is busy: one reused buffer,
+  // so drop-latest replaces frames without allocating a copy per frame.
+  Uint8List _scratch = Uint8List(0);
+  int _scratchLen = 0;
   int _inFlightBuffer = 0; // native buffer of the frame the worker is on
   bool _disposed = false;
 
@@ -249,6 +260,30 @@ class CameraFrameProcessor<R> {
   StreamSubscription<CameraFrame> attach(Stream<CameraFrame> frames) {
     return frames.listen((f) {
       if (_disposed || !_ready.isCompleted) return _releaseBuffer(f.nativeBuffer);
+      if (_busy) {
+        // Worker busy: this frame only becomes the pending one, so park its
+        // pixels in the reused scratch buffer. A fresh transferable copy per
+        // frame here was hundreds of MB/s of garbage, and a lagging GC let
+        // that reach the iOS memory limit (jetsam kill).
+        final px = f.pixels;
+        if (_scratch.length < px.length) _scratch = Uint8List(px.length);
+        _scratch.setRange(0, px.length, px);
+        _scratchLen = px.length;
+        _enqueue(
+          _FrameWire(
+            _deferredBytes,
+            f.width,
+            f.height,
+            f.pixelFormat,
+            f.timestamp,
+            f.orientation,
+            f.bytesPerRow,
+            f.isMirrored != 0,
+            f.nativeBuffer,
+          ),
+        );
+        return;
+      }
       // fromList copies the native view out *now* (while it is valid); the send
       // then transfers ownership without a second copy.
       _enqueue(
@@ -295,6 +330,11 @@ class CameraFrameProcessor<R> {
   }
 
   void _dispatch(_FrameWire wire) {
+    if (identical(wire.bytes, _deferredBytes)) {
+      wire = wire.withBytes(
+        TransferableTypedData.fromList([Uint8List.sublistView(_scratch, 0, _scratchLen)]),
+      );
+    }
     _busy = true;
     _inFlightBuffer = wire.nativeBuffer;
     _toWorker!.send(wire);

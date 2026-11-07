@@ -1759,9 +1759,11 @@ class CameraSession(
                     // input surface before start() are discarded by the encoder, so
                     // target-then-start is safe.)
                     val session = captureSession
-                    // A recording that must survive this session takes the GL
-                    // path (see adoptParkedRecording).
-                    val persistent = if (options.persistent == 0L && persistentSurfaceInSession && !persistentSurfaceUnusable) {
+                    // A recording that must survive this session, or carry an
+                    // overlay, takes the GL path (raw buffers here skip the
+                    // renderer; see adoptParkedRecording / setOverlay).
+                    val persistent = if (options.persistent == 0L && !renderer.hasOverlay &&
+                        persistentSurfaceInSession && !persistentSurfaceUnusable) {
                         videoOutput.persistentRecorderSurfaceOrNull
                     } else null
                     if (session != null && persistent != null) {
