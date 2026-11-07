@@ -32,6 +32,11 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         frameSubject.eraseToAnyPublisher()
     }
 
+    private let depthSubject = PassthroughSubject<DepthFrame, Never>()
+    public var depthStream: AnyPublisher<DepthFrame, Never> {
+        depthSubject.eraseToAnyPublisher()
+    }
+
     // Session lifecycle / error / interruption event stream.
     private let eventSubject = PassthroughSubject<CameraEvent, Never>()
     public var eventStream: AnyPublisher<CameraEvent, Never> {
@@ -235,6 +240,7 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         realSession.frameOutput.onFrame = { [weak self] frame in
             self?.frameSubject.send(frame)
         }
+        realSession.onDepth = { [weak self] in self?.depthSubject.send($0) }
         realSession.onEvent = { [weak self] type, message in
             self?.emitEvent(type, textureId: textureId, message: message)
         }
@@ -242,6 +248,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
         sessionsLock.lock()
         sessions[textureId] = realSession
         sessionsLock.unlock()
+        if let problem = realSession.audioProblem {
+            emitEvent(2 /* error */, textureId: textureId, message: "AUDIO_UNAVAILABLE: \(problem)")
+        }
 
         realSession.start()
         emitEvent(0 /* started */, textureId: textureId)
@@ -352,7 +361,34 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     }
 
     public func setNativeDetector(textureId: Int64, detector: String) {
-        session(for: textureId)?.frameOutput.setNativeDetector(detector)
+        guard let s = session(for: textureId) else { return }
+        let hardware = detector == "hardwareFace" || detector == "hardwareCode"
+        s.setHardwareDetector(hardware ? detector : "")
+        s.frameOutput.setNativeDetector(hardware ? "" : detector)
+    }
+
+    public func focusAt(textureId: Int64, x: Double, y: Double, locked: Int64) async throws -> Int64 {
+        guard let s = session(for: textureId) else {
+            throw CameraError.coded("SESSION_NOT_RUNNING: no session \(textureId)")
+        }
+        return try await s.focusAt(x: x, y: y, locked: locked != 0) ? 1 : 0
+    }
+
+    public func setDepthOutput(textureId: Int64, enabled: Int64) async throws {
+        guard let s = session(for: textureId) else {
+            throw CameraError.coded("SESSION_NOT_RUNNING: no session \(textureId)")
+        }
+        try s.setDepthOutput(enabled != 0)
+    }
+
+    public func setNativeBuffers(textureId: Int64, enabled: Int64) {
+        guard let s = session(for: textureId) else { return }
+        s.frameOutput.nativeBuffers = enabled != 0
+        if enabled == 0 { NativeBuffers.releaseAll(textureId) }
+    }
+
+    public func releaseNativeBuffer(handle: Int64) {
+        NativeBuffers.release(handle)
     }
 
     public func startEncodedOutput(textureId: Int64, width: Int64, height: Int64, bitRate: Int64) {
@@ -520,13 +556,16 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     public func getSessionStateJson(textureId: Int64) -> String {
         guard let s = session(for: textureId) else { return "{\"running\":false}" }
-        let dict: [String: Any] = [
+        var dict: [String: Any] = [
             "running":     s.isRunning,
             "width":       s.streamWidth,
             "height":      s.streamHeight,
             "fps":         s.activeFps,
             "pixelFormat": s.frameOutput.pixelFormat,
+            "colorRange":  s.frameOutput.colorRange,
+            "audio":       s.hasAudio,
         ]
+        if let problem = s.audioProblem { dict["audioError"] = problem }
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let json = String(data: data, encoding: .utf8) else { return "{}" }
         return json

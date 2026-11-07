@@ -18,6 +18,7 @@ import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
 import dev.shreeman.nitro_camera.extensions.hasFlashUnit
 import dev.shreeman.nitro_camera.extensions.isFrontFacing
 import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
+import dev.shreeman.nitro_camera.outputs.DepthOutput
 import dev.shreeman.nitro_camera.outputs.FrameOutput
 import dev.shreeman.nitro_camera.outputs.PhotoOutput
 import dev.shreeman.nitro_camera.outputs.VideoOutput
@@ -61,7 +62,7 @@ class CameraSession(
     internal val width: Int,
     internal val height: Int,
     private val requestedFps: Int,
-    enableAudio: Boolean,
+    val enableAudio: Boolean,
     // Frame-processor stream size, independent of the preview (vision-camera's
     // frame-output targetResolution) — a sharp preview over small analysis frames.
     frameWidth: Int = width,
@@ -196,6 +197,16 @@ class CameraSession(
     private var afLocked: Boolean = false
     // Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near).
     private var manualFocusDistance: Double = -1.0
+    // focusAt: the metering region kept on the repeating request, AF_MODE_AUTO
+    // while a scan runs or after a LOCKED focus (the lens then holds), and the
+    // AF-state watcher of the running scan.
+    @Volatile private var focusRegion: MeteringRectangle? = null
+    @Volatile private var focusAuto = false
+    @Volatile private var afWatcher: ((Int) -> Unit)? = null
+    private var focusGen = 0 // camera thread; the latest focusAt owns the cleanup
+    // Depth stream (setDepthOutput) and its sink.
+    @Volatile private var depthOutput: DepthOutput? = null
+    var onDepth: ((DepthFrame) -> Unit)? = null
     // Manual exposure: iso/nanos <= 0 = auto (AE on).
     private var manualIso: Double = -1.0
     private var manualExposureNanos: Double = -1.0
@@ -539,6 +550,7 @@ class CameraSession(
 
         val surfaces = mutableListOf(pSurface, frameOutput.surface)
         if (enablePhoto) surfaces.add(photoOutput.photoReader.surface)
+        depthOutput?.let { surfaces.add(it.surface) }
         // Pre-wire the persistent recorder surface into the session so recordings
         // start instantly (no session reconfiguration at record time). It is NOT
         // added as a repeating-request target until a recording actually starts —
@@ -551,7 +563,7 @@ class CameraSession(
         // HALs (see the mutual-exclusion note in sendPreviewRequest). Skipping
         // it here avoids an immediate reconfigure right after bring-up.
         val recorderSurface =
-            if (persistentSurfaceUnusable || !canPreWireRecorderSurface ||
+            if (persistentSurfaceUnusable || !canPreWireRecorderSurface || depthOutput != null ||
                 frameProcessingEnabled || nativeDetector.isNotEmpty()) null
             else videoOutput.acquirePersistentRecorderSurface()
         if (recorderSurface != null) surfaces.add(recorderSurface)
@@ -669,9 +681,10 @@ class CameraSession(
             if (frameProcessingEnabled || nativeDetector.isNotEmpty()) {
                 builder.addTarget(frameOutput.surface)
             }
+            depthOutput?.let { builder.addTarget(it.surface) }
             currentRequestBuilder = builder
             applySessionSettings(builder)
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), repeatingCallbackIfNeeded(), cameraHandler)
             Log.d("NitroCamera", "repeatingRequest[$textureId]: preview" +
                 (if (recordSurface != null) "+recorder" else "") +
                 (if (wantsFrames) "+frameReader" else "") +
@@ -734,11 +747,19 @@ class CameraSession(
         val af = when {
             manualFocus   -> CaptureRequest.CONTROL_AF_MODE_OFF
             afLocked      -> CaptureRequest.CONTROL_AF_MODE_OFF
+            focusAuto     -> CaptureRequest.CONTROL_AF_MODE_AUTO
             afMode == 0L  -> CaptureRequest.CONTROL_AF_MODE_OFF
             afMode == 2L  -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
             else          -> CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
         }
         builder.set(CaptureRequest.CONTROL_AF_MODE, af)
+        builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE,
+            if (hardwareDetector == "hardwareFace") hardwareFaceMode() ?: CameraMetadata.STATISTICS_FACE_DETECT_MODE_OFF
+            else CameraMetadata.STATISTICS_FACE_DETECT_MODE_OFF)
+        focusRegion?.takeIf { !manualFocus }?.let {
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(it))
+            builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(it))
+        }
         if (manualFocus) {
             builder.set(CaptureRequest.LENS_FOCUS_DISTANCE,
                 dev.shreeman.nitro_camera.utils.FocusMath.diopters(manualFocusDistance, minFocusDiopters))
@@ -921,6 +942,9 @@ class CameraSession(
             // (c) Detector + media (recorder / persistent surface / photo reader).
             val media = async(Dispatchers.IO) {
                 try { NitraDetectors.stop(textureId) } catch (_: Exception) {}
+                try { depthOutput?.close() } catch (_: Exception) {}
+                depthOutput = null
+                afWatcher?.invoke(-1)
                 try { videoOutput.release() } catch (_: Exception) {}
                 try { photoOutput.release() } catch (_: Exception) {}
             }
@@ -966,9 +990,120 @@ class CameraSession(
     fun setManualExposure(iso: Double, exposureNanos: Double) {
         manualIso = iso; manualExposureNanos = exposureNanos; triggerUpdate()
     }
-    fun setAutoFocus(mode: Long) { afMode = mode; triggerUpdate() }
+    /// Per-frame results are only read during a focusAt scan or for the
+    /// hardware face detector; otherwise no callback (no per-frame overhead).
+    private fun repeatingCallbackIfNeeded() =
+        if (afWatcher != null || hardwareDetector.isNotEmpty()) repeatingCallback else null
+
+    private val repeatingCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
+            if (hardwareDetector == "hardwareFace") emitHardwareFaces(result)
+            val w = afWatcher ?: return
+            result.get(CaptureResult.CONTROL_AF_STATE)?.let(w)
+        }
+    }
+
+    /// Focus + meter at an upright-preview point and wait for the AF scan
+    /// (vision-camera `focus(point, {adaptiveness})`). Returns whether the
+    /// scan ended sharp. [locked] keeps the lens there (AF_MODE_AUTO holds
+    /// after the scan); otherwise continuous AF resumes on the same region.
+    suspend fun focusAt(x: Double, y: Double, locked: Boolean): Boolean {
+        if (!(x in 0.0..1.0) || !(y in 0.0..1.0))
+            throw IllegalArgumentException("INVALID_ARGUMENT: focus point ($x, $y) is outside 0..1")
+        val afModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+        if (!afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO))
+            throw UnsupportedOperationException("FOCUS_UNSUPPORTED: camera $deviceId is fixed-focus")
+        val session = captureSession
+            ?: throw IllegalStateException("SESSION_NOT_RUNNING: camera $deviceId has no running session")
+        val region = meteringRegion(x, y)
+        var gen = 0
+        val focused = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+            suspendCancellableCoroutine { cont ->
+                cameraHandler.post {
+                    if (isClosed || captureSession !== session) { if (cont.isActive) cont.resume(false); return@post }
+                    afWatcher?.invoke(-1) // supersede a scan still running
+                    gen = ++focusGen
+                    focusRegion = region
+                    focusAuto = true
+                    manualFocusDistance = -1.0
+                    afLocked = false
+                    var triggered = false
+                    afWatcher = { state ->
+                        if (state == -1) { afWatcher = null; if (cont.isActive) cont.resume(false) }
+                        else if (triggered && (state == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
+                                state == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED)) {
+                            afWatcher = null
+                            if (cont.isActive) cont.resume(state == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED)
+                        }
+                    }
+                    try {
+                        sendPreviewRequest(session)
+                        val trigger = cameraDevice.createCaptureRequest(AndroidCameraDevice.TEMPLATE_PREVIEW)
+                        previewSurface?.let { trigger.addTarget(it) }
+                        applySessionSettings(trigger)
+                        trigger.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                        session.capture(trigger.build(), null, cameraHandler)
+                        triggered = true
+                    } catch (e: Exception) {
+                        afWatcher = null
+                        if (cont.isActive) cont.resume(false)
+                    }
+                }
+            }
+        } ?: false
+        cameraHandler.post {
+            if (gen != focusGen) return@post // a newer focusAt owns the state
+            afWatcher = null
+            if (!locked) focusAuto = false // continuous AF resumes on the region
+            captureSession?.let { if (!isClosed) sendPreviewRequest(it) }
+        }
+        return focused
+    }
+
+    /// Upright-preview point (0..1) → a sensor-space metering rectangle.
+    private fun meteringRegion(x: Double, y: Double): MeteringRectangle {
+        val rect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            ?: Rect(0, 0, 1000, 1000)
+        var fx = if (characteristics.isFrontFacing) 1.0 - x else x
+        var fy = y
+        when (characteristics.sensorOrientationDegrees(90)) {
+            90 -> { val t = fx; fx = fy; fy = 1.0 - t }
+            270 -> { val t = fx; fx = 1.0 - fy; fy = t }
+            180 -> { fx = 1.0 - fx; fy = 1.0 - fy }
+        }
+        val half = (minOf(rect.width(), rect.height()) / 20).coerceAtLeast(1)
+        val cx = (fx * rect.width()).toInt().coerceIn(half, rect.width() - half)
+        val cy = (fy * rect.height()).toInt().coerceIn(half, rect.height() - half)
+        return MeteringRectangle(Rect(cx - half, cy - half, cx + half, cy + half), MeteringRectangle.METERING_WEIGHT_MAX)
+    }
+
+    /// Adds / removes the DEPTH16 stream. Rebuilds the capture session (a new
+    /// stream needs a reconfigure, like vision-camera adding an output).
+    fun setDepthOutput(enabled: Boolean) {
+        if (enabled == (depthOutput != null)) return
+        // A new stream means a session rebuild, which would cut a recording.
+        if (videoOutput.isRecording)
+            throw IllegalStateException("SESSION_BUSY: stop the recording before changing the depth output")
+        if (enabled) {
+            val size = DepthOutput.sizeFor(characteristics)
+                ?: throw UnsupportedOperationException("DEPTH_UNSUPPORTED: camera $deviceId has no depth output")
+            depthOutput = DepthOutput(size, textureId, cameraHandler) { onDepth?.invoke(it) }
+        }
+        cameraHandler.post {
+            if (isClosed) return@post
+            val old = captureSession
+            captureSession = null
+            currentRequestBuilder = null
+            try { old?.stopRepeating() } catch (_: Exception) {}
+            try { old?.close() } catch (_: Exception) {}
+            if (!enabled) { depthOutput?.close(); depthOutput = null }
+            startPreview()
+        }
+    }
+
+    fun setAutoFocus(mode: Long) { afMode = mode; focusAuto = false; focusRegion = null; triggerUpdate() }
     /** Manual focus distance: -1 = auto, else 0.0 (far) .. 1.0 (near). */
-    fun setFocusDistance(distance: Double) { manualFocusDistance = distance; triggerUpdate() }
+    fun setFocusDistance(distance: Double) { manualFocusDistance = distance; focusAuto = false; triggerUpdate() }
 
     internal fun triggerUpdate() {
         if (isClosed) return
@@ -979,7 +1114,7 @@ class CameraSession(
             try {
                 // Reuse cached builder to avoid expensive createCaptureRequest overhead
                 applySessionSettings(builder)
-                session.setRepeatingRequest(builder.build(), null, cameraHandler)
+                session.setRepeatingRequest(builder.build(), repeatingCallbackIfNeeded(), cameraHandler)
             } catch (e: Exception) { Log.w("NitroCamera", "Update failed: ${e.message}") }
         }
     }
@@ -1059,7 +1194,60 @@ class CameraSession(
     /// Activates a native ML detector ("barcode" / "face"; "" = off). Frames
     /// start flowing to the frame reader if they weren't already, and results
     /// are emitted as DETECTION events (JSON payload).
+    /// Hardware (frame-free) detector — vision-camera's object output: Camera2
+    /// face statistics for "hardwareFace". "" = off.
+    @Volatile private var hardwareDetector = ""
+    private var lastHwEmitMs = 0L
+    private var lastHwEmptyMs = 0L
+
+    private fun hardwareFaceMode(): Int? {
+        val modes = characteristics.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES) ?: return null
+        return when {
+            modes.contains(CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE) -> CameraMetadata.STATISTICS_FACE_DETECT_MODE_SIMPLE
+            modes.contains(CameraMetadata.STATISTICS_FACE_DETECT_MODE_FULL) -> CameraMetadata.STATISTICS_FACE_DETECT_MODE_FULL
+            else -> null
+        }
+    }
+
+    private fun emitHardwareFaces(result: TotalCaptureResult) {
+        val faces = result.get(CaptureResult.STATISTICS_FACES) ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastHwEmitMs < 100) return
+        if (faces.isEmpty()) { if (now - lastHwEmptyMs < 500) return; lastHwEmptyMs = now }
+        lastHwEmitMs = now
+        val area = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        val results = org.json.JSONArray()
+        for (f in faces) {
+            val b = f.bounds
+            val item = org.json.JSONObject()
+                .put("bounds", org.json.JSONArray().put(b.left - area.left).put(b.top - area.top)
+                    .put(b.right - area.left).put(b.bottom - area.top))
+                .put("score", f.score)
+            if (f.id != android.hardware.camera2.params.Face.ID_UNSUPPORTED) item.put("trackingId", f.id)
+            results.put(item)
+        }
+        onEvent?.invoke(CameraEventType.DETECTION, InterruptionReason.NONE, org.json.JSONObject()
+            .put("detector", "hardwareFace").put("width", area.width()).put("height", area.height())
+            .put("rotation", characteristics.sensorOrientationDegrees(90)).put("results", results).toString())
+    }
+
     fun setNativeDetector(name: String) {
+        if (name == "hardwareFace" || name == "hardwareCode") {
+            val supported = name == "hardwareFace" && hardwareFaceMode() != null
+            if (!supported) {
+                // From the camera thread, like every other detection payload.
+                cameraHandler.post {
+                    onEvent?.invoke(CameraEventType.DETECTION, InterruptionReason.NONE, org.json.JSONObject()
+                        .put("detector", name).put("error", "Detector '$name' is not supported by camera $deviceId").toString())
+                }
+                return
+            }
+            if (nativeDetector.isNotEmpty()) setNativeDetector("")
+            hardwareDetector = name
+            triggerUpdate()
+            return
+        }
+        if (hardwareDetector.isNotEmpty()) { hardwareDetector = ""; triggerUpdate() }
         val wasActive = nativeDetector.isNotEmpty()
         nativeDetector = name
         if (name.isEmpty()) NitraDetectors.stop(textureId)

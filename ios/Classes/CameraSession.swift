@@ -121,16 +121,32 @@ public class CameraSession: NSObject {
         session.addInput(videoInput)
 
         // Audio input + data output (so recordings can mux audio via AVAssetWriter).
-        if enableAudio, let mic = AVCaptureDevice.default(for: .audio) {
-            if let audioInput = try? AVCaptureDeviceInput(device: mic), session.canAddInput(audioInput) {
-                session.addInput(audioInput)
-                let ao = AVCaptureAudioDataOutput()
-                if session.canAddOutput(ao) {
-                    session.addOutput(ao)
-                    ao.setSampleBufferDelegate(frameOutput, queue: frameQueue)
-                    audioOutput = ao
-                    frameOutput.audioOutput = ao
-                    recorder.hasAudioOutput = true
+        // The app audio session is configured HERE (vision-camera parity), not
+        // by AVFoundation's automatic setup, which silently fails or stops other
+        // apps' audio; any failure is reported (`audioProblem`), never swallowed.
+        if enableAudio {
+            session.automaticallyConfiguresApplicationAudioSession = false
+            audioProblem = Self.configureAudioSession()
+            if audioProblem == nil {
+                if let mic = AVCaptureDevice.default(for: .audio) {
+                    do {
+                        let audioInput = try AVCaptureDeviceInput(device: mic)
+                        let ao = AVCaptureAudioDataOutput()
+                        if session.canAddInput(audioInput), session.canAddOutput(ao) {
+                            session.addInput(audioInput)
+                            session.addOutput(ao)
+                            ao.setSampleBufferDelegate(frameOutput, queue: frameQueue)
+                            audioOutput = ao
+                            frameOutput.audioOutput = ao
+                            recorder.hasAudioOutput = true
+                        } else {
+                            audioProblem = "the capture session cannot add the microphone"
+                        }
+                    } catch {
+                        audioProblem = "microphone unavailable: \(error.localizedDescription)"
+                    }
+                } else {
+                    audioProblem = "no microphone on this device"
                 }
             }
         }
@@ -273,6 +289,170 @@ public class CameraSession: NSObject {
         }
     }
 
+    // MARK: - Audio session
+
+    /// Why audio was requested but isn't recorded (nil = audio OK or not
+    /// requested). Reported as an `AUDIO_UNAVAILABLE:` error event on open.
+    private(set) var audioProblem: String?
+    var hasAudio: Bool { audioOutput != nil }
+
+    /// playAndRecord that mixes with other apps' audio, keeps Bluetooth and
+    /// the speaker — the camera must not silence the user's music. Returns
+    /// the failure reason, if any.
+    private static func configureAudioSession() -> String? {
+        let audio = AVAudioSession.sharedInstance()
+        if audio.recordPermission == .denied {
+            return "microphone permission denied"
+        }
+        do {
+            try audio.setCategory(.playAndRecord, mode: .videoRecording,
+                                  options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker])
+            try audio.setActive(true)
+            return nil
+        } catch {
+            return "audio session: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Focus at point (vision-camera focus(point, {adaptiveness}))
+
+    /// Focuses + meters at an upright-preview point and waits for the scan
+    /// (`isAdjustingFocus` rising then falling, ≤ 3 s). `locked` keeps the lens
+    /// there; otherwise continuous AF resumes around the point. iOS does not
+    /// report sharpness, so a completed scan counts as focused.
+    func focusAt(x: Double, y: Double, locked: Bool) async throws -> Bool {
+        guard (0...1).contains(x), (0...1).contains(y) else {
+            throw CameraError.coded("INVALID_ARGUMENT: focus point (\(x), \(y)) is outside 0..1")
+        }
+        guard device.isFocusPointOfInterestSupported, device.isFocusModeSupported(.autoFocus) else {
+            throw CameraError.coded("FOCUS_UNSUPPORTED: \(device.localizedName) is fixed-focus")
+        }
+        // Buffers are portrait; the device's point of interest is in landscape
+        // sensor space (0,0 = top-left with the home button on the right).
+        let px = device.position == .front ? 1 - x : x
+        let poi = CGPoint(x: y, y: 1 - px)
+        try device.lockForConfiguration()
+        device.focusPointOfInterest = poi
+        device.focusMode = .autoFocus
+        if device.isExposurePointOfInterestSupported {
+            device.exposurePointOfInterest = poi
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+        }
+        device.unlockForConfiguration()
+
+        let start = CACurrentMediaTime()
+        var sawScan = false
+        var completed = false
+        while CACurrentMediaTime() - start < 3 {
+            if device.isAdjustingFocus { sawScan = true }
+            else if sawScan || CACurrentMediaTime() - start > 0.5 { completed = true; break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        if !locked, device.isFocusModeSupported(.continuousAutoFocus) {
+            try device.lockForConfiguration()
+            device.focusMode = .continuousAutoFocus
+            device.unlockForConfiguration()
+        }
+        return completed
+    }
+
+    // MARK: - Hardware (metadata) detectors
+
+    private var metadataOutput: MetadataOutput?
+
+    /// "hardwareFace" / "hardwareCode" via AVCaptureMetadataOutput, "" = off.
+    /// An unsupported name emits a detection error payload (same contract as
+    /// an unknown frame detector).
+    func setHardwareDetector(_ name: String) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if self.metadataOutput?.detector == name { return }
+            if let old = self.metadataOutput {
+                self.session.beginConfiguration()
+                self.session.removeOutput(old.output)
+                self.session.commitConfiguration()
+                old.teardown()
+                self.metadataOutput = nil
+            }
+            guard !name.isEmpty else { return }
+            let m = MetadataOutput(detector: name, mirrored: self.device.position == .front)
+            m.onJson = { [weak self] in self?.onEvent?(12 /* detection */, $0) }
+            self.session.beginConfiguration()
+            let added = self.session.canAddOutput(m.output)
+            if added { self.session.addOutput(m.output) }
+            self.session.commitConfiguration()
+            if added && m.activate() {
+                self.metadataOutput = m
+            } else {
+                if added {
+                    self.session.beginConfiguration(); self.session.removeOutput(m.output); self.session.commitConfiguration()
+                }
+                m.teardown()
+                let err = ["detector": name, "error": "Detector '\(name)' is not supported by \(self.device.localizedName)"]
+                if let d = try? JSONSerialization.data(withJSONObject: err), let s = String(data: d, encoding: .utf8) {
+                    self.onEvent?(12 /* detection */, s)
+                }
+            }
+        }
+    }
+
+    // MARK: - Depth output
+
+    private var depthOutput: DepthOutput?
+    var onDepth: ((DepthFrame) -> Void)?
+
+    /// Adds / removes an AVCaptureDepthDataOutput. Throws DEPTH_UNSUPPORTED
+    /// when the active format has no depth formats.
+    func setDepthOutput(_ enabled: Bool) throws {
+        var thrown: Error?
+        sessionQueue.sync {
+            if enabled == (depthOutput != nil) { return }
+            if !enabled {
+                session.beginConfiguration()
+                if let d = depthOutput { session.removeOutput(d.output) }
+                session.commitConfiguration()
+                depthOutput?.teardown()
+                depthOutput = nil
+                return
+            }
+            guard let format = DepthOutput.selectDepthFormat(device) else {
+                thrown = CameraError.coded("DEPTH_UNSUPPORTED: \(device.localizedName) has no depth in its active format")
+                return
+            }
+            let d = DepthOutput(textureId: frameOutput.textureId)
+            d.onFrame = { [weak self] in self?.onDepth?($0) }
+            session.beginConfiguration()
+            guard session.canAddOutput(d.output) else {
+                session.commitConfiguration()
+                thrown = CameraError.coded("DEPTH_UNSUPPORTED: the session cannot add a depth output")
+                return
+            }
+            session.addOutput(d.output)
+            do {
+                try device.lockForConfiguration()
+                device.activeDepthDataFormat = format
+                device.unlockForConfiguration()
+            } catch { thrown = error }
+            if let conn = d.output.connection(with: .depthData) {
+                if conn.isVideoOrientationSupported { conn.videoOrientation = .portrait }
+                if device.position == .front, conn.isVideoMirroringSupported {
+                    conn.automaticallyAdjustsVideoMirroring = false
+                    conn.isVideoMirrored = true
+                }
+            }
+            session.commitConfiguration()
+            if thrown != nil {
+                session.beginConfiguration(); session.removeOutput(d.output); session.commitConfiguration()
+                d.teardown()
+            } else {
+                depthOutput = d
+            }
+        }
+        if let thrown { throw thrown }
+    }
+
     public func close() {
         isClosing = true
         // Stop SYNCHRONOUSLY (unlike stop()): a teardown-then-reopen flow
@@ -292,6 +472,10 @@ public class CameraSession: NSObject {
         // the capture pool can be torn down (otherwise a reopened session leaks
         // its predecessor's buffers + pool).
         frameOutput.teardown()
+        depthOutput?.teardown()
+        depthOutput = nil
+        metadataOutput?.teardown()
+        metadataOutput = nil
         // Drain the serial frame queue so any in-flight captureOutput has
         // finished BEFORE we unregister the texture below. teardown() detaches
         // the delegate + latches `closed`, but a frame already dispatched here

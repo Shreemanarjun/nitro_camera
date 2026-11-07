@@ -93,4 +93,74 @@ void main() {
       expect(FrameDropReason.fromMessage('garbage'), FrameDropReason.unknown);
     });
   });
+
+  group('hardware detectors', () {
+    test('hardwareFace payload parses into faces', () {
+      final r = DetectionResult.fromJson({
+        'detector': 'hardwareFace',
+        'width': 4000,
+        'height': 3000,
+        'rotation': 90,
+        'results': [
+          {
+            'bounds': [10, 20, 110, 220],
+            'trackingId': 3,
+            'score': 90,
+          },
+        ],
+      })!;
+      expect(r.detector, NativeDetector.hardwareFace);
+      expect(r.faces.single.bounds!.width, 100);
+      expect(r.faces.single.trackingId, 3);
+      expect(r.barcodes, isEmpty);
+    });
+
+    test('hardwareCode payload with normalised bounds + a string format', () {
+      final r = DetectionResult.fromJson({
+        'detector': 'hardwareCode',
+        'width': 1,
+        'height': 1,
+        'rotation': 90,
+        'results': [
+          {
+            'text': 'hello',
+            'format': 'org.iso.QRCode',
+            'bounds': [0.1, 0.2, 0.3, 0.4],
+          },
+        ],
+      })!;
+      final code = r.barcodes.single;
+      expect((code.text, code.format, code.formatName), ('hello', 0, 'org.iso.QRCode'));
+      expect(code.bounds!.normalized(1, 1).right, 0.3);
+    });
+
+    test('iOS Vision barcode (string symbology) no longer throws', () {
+      final r = DetectionResult.fromJson({
+        'detector': 'barcode',
+        'results': [
+          {'text': 'x', 'format': 'VNBarcodeSymbologyQR'},
+        ],
+      })!;
+      expect(r.barcodes.single.formatName, 'VNBarcodeSymbologyQR');
+    });
+
+    test('numeric formats keep their value and no name', () {
+      final r = DetectionResult.fromJson({
+        'detector': 'barcode',
+        'results': [
+          {'text': 'x', 'format': 256},
+        ],
+      })!;
+      expect((r.barcodes.single.format, r.barcodes.single.formatName), (256, null));
+    });
+
+    test('an unsupported-detector error payload yields null', () {
+      expect(DetectionResult.fromJson({'detector': 'hardwareCode', 'error': 'not supported'}), isNull);
+    });
+
+    test('wire names round-trip', () {
+      expect(NativeDetector.hardwareFace.wire, 'hardwareFace');
+      expect(NativeDetector.hardwareCode.wire, 'hardwareCode');
+    });
+  });
 }

@@ -119,6 +119,9 @@ class NitroCameraImpl(
     private val sessions = ConcurrentHashMap<Long, CameraSession>()
     private val encodedOutputs = ConcurrentHashMap<Long, dev.shreeman.nitro_camera.outputs.EncodedOutput>()
     private val sessionsLock = Any()
+    // Why a session that asked for audio records without it (vision-camera
+    // parity with the iOS audio-session reporting): video-only, never a crash.
+    private val audioErrors = ConcurrentHashMap<Long, String>()
 
     /// Device JSON / characteristics reading (vision-camera's HybridCameraDevice).
     private val deviceDetails = CameraDeviceDetails(cameraManager, ::getCharacteristics)
@@ -140,6 +143,9 @@ class NitroCameraImpl(
             Log.d(TAG, "frameEmit[$textureId]: ok=$_emitOk subscribers=${_frameFlow.subscriptionCount}")
         }
     }
+
+    private val _depthFlow = DirectFlow<DepthFrame>()
+    override val depthStream: Flow<DepthFrame> = _depthFlow
 
     private val _eventFlow = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 32)
     override val eventStream: SharedFlow<CameraEvent> = _eventFlow
@@ -487,6 +493,7 @@ class NitroCameraImpl(
                     awaitOpen()
                 }
 
+                val audioOk = enableAudio != 0L && getMicrophonePermissionStatus() == 1L
                 val session = CameraSession(
                     context      = context,
                     textureId    = textureId,
@@ -498,7 +505,7 @@ class NitroCameraImpl(
                     width        = width.toInt(),
                     height       = height.toInt(),
                     requestedFps = fps.toInt(),
-                    enableAudio  = enableAudio != 0L,
+                    enableAudio  = audioOk,
                     // 0 = frames at the preview size (the pre-split behaviour).
                     frameWidth   = (if (frameWidth > 0) frameWidth else width).toInt(),
                     frameHeight  = (if (frameHeight > 0) frameHeight else height).toInt(),
@@ -509,6 +516,8 @@ class NitroCameraImpl(
                     _frameFlow.emit(frame)
                     frameEmitStats(textureId)
                 }
+                if (enableAudio != 0L && !audioOk) audioErrors[textureId] = "microphone permission denied"
+                session.onDepth = { _depthFlow.emit(it) }
                 session.onEvent = { type, reason, message ->
                     _eventFlow.tryEmit(CameraEvent(type.nativeValue, textureId, reason.nativeValue, message))
                 }
@@ -559,6 +568,7 @@ class NitroCameraImpl(
 
     override suspend fun closeCamera(textureId: Long) {
         encodedOutputs.remove(textureId)?.stop()
+        audioErrors.remove(textureId)
         val s = synchronized(sessionsLock) { sessions.remove(textureId) } ?: return
         val devId = s.deviceId
         val closeStart = android.os.SystemClock.elapsedRealtime()
@@ -682,6 +692,10 @@ class NitroCameraImpl(
             put("frameHeight", s.frameOutput.size.height)
             put("fps", s.activeFps)
             put("pixelFormat", s.currentPixelFormat)
+            // Camera2 YUV_420_888 is JFIF (BT.601 full range); RGBA is full range.
+            put("colorRange", "full")
+            put("audio", s.enableAudio)
+            audioErrors[textureId]?.let { put("audioError", it) }
         }.toString()
     }
 
@@ -694,6 +708,27 @@ class NitroCameraImpl(
     override fun setNativeDetector(textureId: Long, detector: String) {
         session(textureId)?.setNativeDetector(detector)
     }
+
+    override suspend fun focusAt(textureId: Long, x: Double, y: Double, locked: Long): Long {
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        return if (s.focusAt(x, y, locked != 0L)) 1L else 0L
+    }
+
+    override suspend fun setDepthOutput(textureId: Long, enabled: Long) {
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        s.setDepthOutput(enabled != 0L)
+    }
+
+    override fun setNativeBuffers(textureId: Long, enabled: Long) {
+        if (enabled != 0L && android.os.Build.VERSION.SDK_INT < 28)
+            throw UnsupportedOperationException("NATIVE_BUFFER_UNSUPPORTED: needs Android 9 (API 28)")
+        val s = session(textureId) ?: throw IllegalStateException("SESSION_NOT_RUNNING: no session $textureId")
+        s.frameOutput.nativeBuffers = enabled != 0L
+        if (enabled == 0L) dev.shreeman.nitro_camera.utils.NativeBuffers.releaseAll(textureId)
+    }
+
+    override fun releaseNativeBuffer(handle: Long) =
+        dev.shreeman.nitro_camera.utils.NativeBuffers.release(handle)
 
     override fun startEncodedOutput(textureId: Long, width: Long, height: Long, bitRate: Long) {
         encodedOutputs.remove(textureId)?.stop()

@@ -470,6 +470,110 @@ class CameraController extends ChangeNotifier {
     _native.setFocusPoint(_textureId!, x, y);
   }
 
+  /// Focuses and meters at ([x], [y]) in 0..1 of the upright preview
+  /// ((0,0) = top-left) and completes when the focus scan ends: `true` when
+  /// it ended sharp (iOS reports every completed scan as sharp). With
+  /// [FocusAdaptiveness.locked] the lens stays there; with
+  /// [FocusAdaptiveness.continuous] continuous AF resumes around the point.
+  /// Mirrors vision-camera's `focus(point, { adaptiveness })`.
+  ///
+  /// Throws [ArgumentError] for a point outside 0..1,
+  /// `DeviceException('device/focus-unsupported')` on a fixed-focus camera.
+  Future<bool> focusAt(double x, double y, {FocusAdaptiveness adaptiveness = FocusAdaptiveness.continuous}) async {
+    _requireInitialized();
+    if (!(x >= 0 && x <= 1)) throw ArgumentError.value(x, 'x', 'must be within 0..1');
+    if (!(y >= 0 && y <= 1)) throw ArgumentError.value(y, 'y', 'must be within 0..1');
+    try {
+      return await _native.focusAt(_textureId!, x, y, adaptiveness == FocusAdaptiveness.locked ? 1 : 0) == 1;
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Turns the depth stream ([depthStream]) on or off — vision-camera's
+  /// CameraDepthFrameOutput. Needs a camera whose format reports
+  /// `supportsDepthCapture` (iOS TrueDepth / dual / LiDAR, Android
+  /// DEPTH_OUTPUT); otherwise throws
+  /// `DeviceException('device/depth-unsupported')`. Android reconfigures the
+  /// session (a brief preview blink), so it refuses during a recording with
+  /// `SessionException('session/busy')`.
+  Future<void> setDepthOutput(bool enabled) async {
+    _requireInitialized();
+    try {
+      await _native.setDepthOutput(_textureId!, enabled ? 1 : 0);
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Depth maps of this session (float32 metres — see `DepthFrame.metres`).
+  Stream<DepthFrame> get depthStream => _native.depthStream.where((f) => f.textureId == _textureId);
+
+  /// Attaches a hardware H.264 encoder to the session through the native
+  /// `NitroCameraOutputs` hook (the path an RTMP / WebRTC publisher plugin
+  /// takes); replaces a running one. [width]/[height] apply on Android; iOS
+  /// encodes at the session's frame size.
+  void startEncodedOutput({int width = 720, int height = 1280, int bitRate = 2500000}) {
+    _requireInitialized();
+    if (width <= 0 || width.isOdd) throw ArgumentError.value(width, 'width', 'must be positive and even');
+    if (height <= 0 || height.isOdd) throw ArgumentError.value(height, 'height', 'must be positive and even');
+    if (bitRate <= 0) throw ArgumentError.value(bitRate, 'bitRate', 'must be positive');
+    _native.startEncodedOutput(_textureId!, width, height, bitRate);
+  }
+
+  /// Counters of the running encoder output (zeros when none is running).
+  EncodedOutputStats get encodedOutputStats {
+    _requireInitialized();
+    return _native.getEncodedOutputStats(_textureId!);
+  }
+
+  /// Detaches the encoder output. No-op when none is running.
+  void stopEncodedOutput() {
+    _requireInitialized();
+    _native.stopEncodedOutput(_textureId!);
+  }
+
+  /// Attaches the camera's own buffer to frames — `CameraFrame.nativeBuffer`
+  /// / `FrameData.nativeBuffer`, an `AHardwareBuffer*` (Android 9+) or a
+  /// `CVPixelBufferRef` (iOS) — vision-camera's `frame.getNativeBuffer()`,
+  /// for GPU / ML code that imports it without a copy. One buffer is held at
+  /// a time; a [CameraFrameProcessor] returns it after each handler, raw
+  /// [frameStream] listeners call [releaseNativeBuffer]. A buffer is valid
+  /// until released or 1 s after delivery, whichever comes first — the camera
+  /// reclaims unreleased ones, so don't use it past that. Throws
+  /// `DeviceException('device/native-buffer-unsupported')` below Android 9.
+  void setNativeBuffers(bool enabled) {
+    _requireInitialized();
+    try {
+      _native.setNativeBuffers(_textureId!, enabled ? 1 : 0);
+    } catch (e) {
+      throw _typedNativeError(e);
+    }
+  }
+
+  /// Returns [frame]'s native buffer to the camera (no-op without one).
+  void releaseNativeBuffer(CameraFrame frame) {
+    if (frame.nativeBuffer != 0) _native.releaseNativeBuffer(frame.nativeBuffer);
+  }
+
+  /// Maps a native `CODE: detail` failure to its typed exception; anything
+  /// else is returned unchanged.
+  static Object _typedNativeError(Object e) {
+    final msg = e.toString();
+    for (final (prefix, make) in <(String, Object Function(String))>[
+      ('INVALID_ARGUMENT: ', (m) => ArgumentError(m)),
+      ('FOCUS_UNSUPPORTED: ', (m) => DeviceException('device/focus-unsupported', m, cause: e)),
+      ('DEPTH_UNSUPPORTED: ', (m) => DeviceException('device/depth-unsupported', m, cause: e)),
+      ('NATIVE_BUFFER_UNSUPPORTED: ', (m) => DeviceException('device/native-buffer-unsupported', m, cause: e)),
+      ('SESSION_NOT_RUNNING: ', (m) => SessionException('session/not-running', m, cause: e)),
+      ('SESSION_BUSY: ', (m) => SessionException('session/busy', m, cause: e)),
+    ]) {
+      final i = msg.indexOf(prefix);
+      if (i >= 0) return make(msg.substring(i + prefix.length));
+    }
+    return e;
+  }
+
   /// Sets the auto-focus mode.
   void setAutoFocus(AutoFocusMode mode) {
     _requireInitialized();

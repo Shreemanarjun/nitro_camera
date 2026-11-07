@@ -10,9 +10,43 @@
   sensor timestamps — without touching the camera's streams (a direct preview
   moves onto the GL renderer). iOS: register a sink that receives the
   session's video `CMSampleBuffer`s.
-* **Encoded output** — `NitroCamera.startEncodedOutput` /
-  `getEncodedOutputStats` / `stopEncodedOutput`: a hardware H.264 encoder
-  (MediaCodec / VideoToolbox) attached through that hook.
+* **Encoded output** — `CameraController.startEncodedOutput` /
+  `encodedOutputStats` / `stopEncodedOutput` (and the raw `NitroCamera`
+  methods): a hardware H.264 encoder (MediaCodec / VideoToolbox) attached
+  through that hook.
+* **Focus at a point, awaited** — `CameraController.focusAt(x, y,
+  {adaptiveness})` completes when the focus scan ends (`true` = sharp) and can
+  keep the lens there (`FocusAdaptiveness.locked`) or resume continuous AF —
+  vision-camera's `focus(point, { adaptiveness })`. Invalid points throw
+  `ArgumentError`, fixed-focus cameras `DeviceException('device/focus-unsupported')`.
+* **Depth output** — `CameraController.setDepthOutput(bool)` +
+  `depthStream` (`DepthFrame`, float32 metres via `.metres` / `.metresAt`):
+  Android DEPTH16 cameras, iOS TrueDepth / dual / LiDAR. Cameras without depth
+  throw `DeviceException('device/depth-unsupported')`.
+* **Hardware detectors** — `NativeDetector.hardwareFace` (Camera2 face
+  statistics / AVCaptureMetadataOutput) and `NativeDetector.hardwareCode`
+  (iOS AVCaptureMetadataOutput barcodes): detection without frame copies or
+  ML Kit. Unsupported ones emit a typed error payload.
+* **Native buffers** — `CameraController.setNativeBuffers(true)`:
+  `CameraFrame.nativeBuffer` / `FrameData.nativeBuffer` carry the camera's
+  own `AHardwareBuffer*` (Android 9+) / `CVPixelBufferRef` for GPU / ML
+  imports without a copy (vision-camera's `frame.getNativeBuffer()`). One is
+  held at a time; `CameraFrameProcessor` returns it after each handler, raw
+  stream listeners call `releaseNativeBuffer`.
+* **Session state** — `SessionState.colorRange` (full / video YUV range),
+  `audio` and `audioError`.
+
+### Fixed
+
+* **iOS audio** — the app audio session is now configured by the plugin
+  (play-and-record mixing with other apps' audio, Bluetooth, speaker) instead
+  of AVFoundation's automatic setup, and a session that asked for audio but
+  can't record it (permission denied, no microphone, audio-session failure)
+  reports why (`SessionState.audioError` + an `AUDIO_UNAVAILABLE:` error
+  event) instead of silently recording without sound. Android likewise opens
+  video-only with `audioError` when the microphone permission is missing.
+* **iOS barcode detections** — the Vision barcode detector's string
+  symbology no longer breaks `DetectionResult.fromJson` (`DetectedBarcode.formatName`).
 
 ## 0.0.3 - 2026-11-04
 

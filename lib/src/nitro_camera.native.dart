@@ -132,6 +132,12 @@ class CameraFrame {
   final int bytesPerRow; // row stride of [pixels] (plane 0); != width*bpp when padded
   final int pixelFormat; // 0 = YUV_420 (plane 0 = luma), 1 = BGRA_8888
   final int isMirrored; // 0 / 1 (front camera)
+  /// With [NitroCamera.setNativeBuffers] on: the frame's native buffer — an
+  /// `AHardwareBuffer*` (Android 9+) or a `CVPixelBufferRef` (iOS) — held
+  /// until [NitroCamera.releaseNativeBuffer], at most 1 s after delivery (an
+  /// unreleased buffer is then reclaimed). 0 = none (off, or the previous
+  /// buffer is still held).
+  final int nativeBuffer;
 
   const CameraFrame({
     required this.pixels,
@@ -144,6 +150,32 @@ class CameraFrame {
     this.bytesPerRow = 0,
     this.pixelFormat = 1,
     this.isMirrored = 0,
+    this.nativeBuffer = 0,
+  });
+}
+
+/// One depth map from [NitroCamera.depthStream]: [data] holds
+/// `height` rows of `width` little-endian float32 distances in METRES
+/// (`bytesPerRow` apart; 0 / NaN = no measurement). Zero-copy: read it inside
+/// the listener only.
+@HybridStruct(zeroCopy: ['data'])
+class DepthFrame {
+  final Uint8List data;
+  final int size;
+  final int width;
+  final int height;
+  final int bytesPerRow;
+  final int timestamp; // ms since epoch
+  final int textureId;
+
+  const DepthFrame({
+    required this.data,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.bytesPerRow,
+    required this.timestamp,
+    required this.textureId,
   });
 }
 
@@ -474,6 +506,16 @@ abstract class NitroCamera extends HybridObject {
   /// Locks focus at the normalised point ([x], [y]) where (0,0) is top-left.
   void setFocusPoint(int textureId, double x, double y);
 
+  /// Focuses (and meters exposure) at the normalised point ([x], [y]) in
+  /// 0..1, (0,0) = top-left of the upright preview, and completes when the
+  /// focus scan ends: 1 = focused, 0 = the scan ended without sharp focus.
+  /// [locked] 1 keeps focus there afterwards (vision-camera's
+  /// `adaptiveness: 'locked'`); 0 lets continuous AF resume. Throws
+  /// `INVALID_ARGUMENT:` for a point outside 0..1 and `FOCUS_UNSUPPORTED:` on
+  /// a fixed-focus camera.
+  @nitroNativeAsync
+  Future<int> focusAt(int textureId, double x, double y, int locked);
+
   /// Sets the auto-focus mode. Pass an [AutoFocusMode] value.
   void setAutoFocus(int textureId, int mode);
 
@@ -655,6 +697,25 @@ abstract class NitroCamera extends HybridObject {
   /// and select them here. An unknown name emits a descriptive error event.
   void setNativeDetector(int textureId, String detector);
 
+  /// Starts / stops the depth stream ([depthStream]) for the session.
+  /// Android: a DEPTH16 stream on cameras with the DEPTH_OUTPUT capability
+  /// (reopens the session); iOS: AVCaptureDepthDataOutput (TrueDepth / dual /
+  /// LiDAR cameras). Throws `DEPTH_UNSUPPORTED:` when the device has no depth
+  /// (`CameraFormat.supportsDepthCapture`). [enabled]: 1 = on, 0 = off.
+  @nitroNativeAsync
+  Future<void> setDepthOutput(int textureId, int enabled);
+
+  /// Attaches the native buffer to frames ([CameraFrame.nativeBuffer]) —
+  /// vision-camera's `frame.getNativeBuffer()`, for handing the camera's own
+  /// buffer to GPU / ML code without a copy. One buffer is held at a time, so
+  /// the camera pool never starves. Throws `NATIVE_BUFFER_UNSUPPORTED:` below
+  /// Android 9. [enabled]: 1 = on, 0 = off (releases a held buffer).
+  void setNativeBuffers(int textureId, int enabled);
+
+  /// Returns a held [CameraFrame.nativeBuffer] to the camera. Unknown or
+  /// already-released handles are ignored.
+  void releaseNativeBuffer(int handle);
+
   /// Attaches a hardware H.264 encoder (MediaCodec / VideoToolbox) to the
   /// session through the native `NitroCameraOutputs` hook — the path an
   /// RTMP / WebRTC publisher plugin takes. Upright, un-mirrored on Android,
@@ -698,4 +759,8 @@ abstract class NitroCamera extends HybridObject {
   /// briefly-slow listener.
   @NitroStream(backpressure: Backpressure.bufferDrop)
   Stream<CameraEvent> get eventStream;
+
+  /// Depth maps from every session with [setDepthOutput] on.
+  @NitroStream(backpressure: Backpressure.dropLatest)
+  Stream<DepthFrame> get depthStream;
 }

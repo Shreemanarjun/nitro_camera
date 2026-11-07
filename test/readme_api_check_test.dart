@@ -429,3 +429,38 @@ const _enumTable = <dynamic>[
   [PreviewMode.texture, PreviewMode.platformView, PreviewMode.impeller],
   [PreviewResizeMode.cover, PreviewResizeMode.contain],
 ];
+
+// ---------------------------------------------------------------------------
+// § Live controls — awaitable focus
+// ---------------------------------------------------------------------------
+
+Future<void> _readmeFocusAt(CameraController controller) async {
+  final sharp = await controller.focusAt(0.5, 0.5);
+  await controller.focusAt(0.3, 0.7, adaptiveness: FocusAdaptiveness.locked);
+}
+
+// ---------------------------------------------------------------------------
+// § Depth / Native buffers / Encoder output
+// ---------------------------------------------------------------------------
+
+Future<void> _readmeDepth(CameraController controller) async {
+  await controller.setDepthOutput(true);
+  controller.depthStream.listen((DepthFrame d) {
+    final metres = d.metres;
+    final centre = d.metresAt(d.width ~/ 2, d.height ~/ 2);
+  });
+}
+
+int _myHandler(FrameData f) => f.nativeBuffer;
+
+void _readmeNativeBuffers(CameraController controller, CameraFrame frame) {
+  controller.setNativeBuffers(true);
+  final proc = CameraFrameProcessor<int>(_myHandler);
+  controller.releaseNativeBuffer(frame);
+}
+
+void _readmeEncodedOutput(CameraController controller) {
+  controller.startEncodedOutput(width: 720, height: 1280, bitRate: 2500000);
+  print(controller.encodedOutputStats.frames);
+  controller.stopEncodedOutput();
+}

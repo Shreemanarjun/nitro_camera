@@ -55,6 +55,10 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func enableDeviceAvailabilityEvents(enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.enableDeviceAvailabilityEvents") }
     public func setKeepScreenOn(enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setKeepScreenOn") }
     public func setNativeDetector(textureId: Int64, detector: String) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setNativeDetector") }
+    public func focusAt(textureId: Int64, x: Double, y: Double, locked: Int64) async throws -> Int64 { fatalError("TODO: implement NitroCameraModuleImpl.focusAt") }
+    public func setDepthOutput(textureId: Int64, enabled: Int64) async throws -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setDepthOutput") }
+    public func setNativeBuffers(textureId: Int64, enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setNativeBuffers") }
+    public func releaseNativeBuffer(handle: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.releaseNativeBuffer") }
     public func startEncodedOutput(textureId: Int64, width: Int64, height: Int64, bitRate: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.startEncodedOutput") }
     public func getEncodedOutputStats(textureId: Int64) -> EncodedOutputStats { fatalError("TODO: implement NitroCameraModuleImpl.getEncodedOutputStats") }
     public func stopEncodedOutput(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.stopEncodedOutput") }
@@ -64,4 +68,5 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func reset() -> Void { fatalError("TODO: implement NitroCameraModuleImpl.reset") }
     public var frameStream: AnyPublisher<CameraFrame, Never> { fatalError("TODO: implement NitroCameraModuleImpl.frameStream") }
     public var eventStream: AnyPublisher<CameraEvent, Never> { fatalError("TODO: implement NitroCameraModuleImpl.eventStream") }
+    public var depthStream: AnyPublisher<DepthFrame, Never> { fatalError("TODO: implement NitroCameraModuleImpl.depthStream") }
 }

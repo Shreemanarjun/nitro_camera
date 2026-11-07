@@ -98,6 +98,18 @@ class FakeNitroCamera extends NitroCamera {
   @override
   Stream<CameraEvent> get eventStream => _events.stream;
 
+  final StreamController<DepthFrame> _depth =
+      StreamController<DepthFrame>.broadcast();
+
+  @override
+  Stream<DepthFrame> get depthStream => _depth.stream;
+
+  /// Pushes a depth map as if a native session produced it.
+  void emitDepth(DepthFrame frame) => _depth.add(frame);
+
+  /// Result of the next [focusAt] (1 = focused).
+  int focusAtResult = 1;
+
   // ---- Test drivers ----
 
   void emitEvent(
@@ -399,18 +411,35 @@ class FakeNitroCamera extends NitroCamera {
       _rec('setNativeDetector', [textureId, detector], null);
 
   @override
+  void setNativeBuffers(int textureId, int enabled) => _rec('setNativeBuffers', [textureId, enabled], null);
+
+  @override
+  void releaseNativeBuffer(int handle) => _rec('releaseNativeBuffer', [handle], null);
+
+  @override
+  Future<int> focusAt(int textureId, double x, double y, int locked) async =>
+      _rec('focusAt', [textureId, x, y, locked], focusAtResult);
+
+  @override
+  Future<void> setDepthOutput(int textureId, int enabled) async =>
+      _rec('setDepthOutput', [textureId, enabled], null);
+
+  @override
   void startEncodedOutput(int textureId, int width, int height, int bitRate) =>
       _rec('startEncodedOutput', [textureId, width, height, bitRate], null);
 
   @override
-  EncodedOutputStats getEncodedOutputStats(int textureId) =>
-      const EncodedOutputStats(
+  EncodedOutputStats getEncodedOutputStats(int textureId) => _rec(
+    'getEncodedOutputStats',
+    [textureId],
+    const EncodedOutputStats(
         frames: 0,
         keyframes: 0,
         bytes: 0,
         firstPtsUs: -1,
         lastPtsUs: -1,
-      );
+      ),
+  );
 
   @override
   void stopEncodedOutput(int textureId) =>

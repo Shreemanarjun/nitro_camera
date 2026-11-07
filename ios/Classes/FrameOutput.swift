@@ -23,6 +23,20 @@ final class FrameOutput: NSObject, FlutterTexture,
     /// The AVFoundation output this object wraps (upstream's `output`).
     let output = AVCaptureVideoDataOutput()
 
+    /// Attach the retained pixel buffer to frames (setNativeBuffers).
+    var nativeBuffers = false
+
+    /// "full" / "video" — the YCbCr range of the delivered buffers (BGRA is full).
+    var colorRange: String {
+        let type = (output.videoSettings?[kCVPixelBufferPixelFormatTypeKey as String] as? NSNumber)?.uint32Value
+        switch type {
+        case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
+            return "video"
+        default:
+            return "full"
+        }
+    }
+
     /// Flutter texture id. The FlutterTexture registered with the registry is
     /// THIS object; the owning CameraSession forwards this id as its own.
     var textureId: Int64 = 0
@@ -248,6 +262,8 @@ final class FrameOutput: NSObject, FlutterTexture,
         // no further captureOutput can race this).
         nativeDetector = ""
         NitraDetectors.stop(textureId: textureId)
+        nativeBuffers = false
+        NativeBuffers.releaseAll(textureId)
         pixelLock.lock()
         closed = true
         latestPixelBuffer = nil
@@ -397,7 +413,9 @@ final class FrameOutput: NSObject, FlutterTexture,
             textureId: textureId,
             bytesPerRow: Int64(rowBytes),
             pixelFormat: Int64(pixelFormat),
-            isMirrored: device.position == .front ? 1 : 0
+            isMirrored: device.position == .front ? 1 : 0,
+            nativeBuffer: nativeBuffers && !NativeBuffers.isHolding(textureId)
+                ? NativeBuffers.hold(pixelBuffer, textureId: textureId) : 0
         )
         cb(frame)
     }

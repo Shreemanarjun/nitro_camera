@@ -18,6 +18,10 @@ enum PixelFormat {
   static PixelFormat fromNative(int value) => value == 0 ? PixelFormat.yuv420 : PixelFormat.bgra;
 }
 
+/// YCbCr value range of the frame stream (vision-camera's full / video range):
+/// full = 0..255, video = 16..235 luma / 16..240 chroma.
+enum ColorRange { full, video, unknown }
+
 /// A typed snapshot of the live native camera session — the parsed form of
 /// `NitroCamera.getSessionStateJson`. Prefer this over hand-parsing JSON.
 class SessionState {
@@ -33,6 +37,18 @@ class SessionState {
   final int frameWidth;
   final int frameHeight;
 
+  /// Range of the frame stream's values ([ColorRange.unknown] when the native
+  /// layer doesn't report it).
+  final ColorRange colorRange;
+
+  /// Whether the session captures audio (recordings get an audio track).
+  final bool audio;
+
+  /// Why audio was requested but isn't captured — microphone permission
+  /// denied, no microphone, the audio session failed. The session then
+  /// records video only. `null` when audio is fine or wasn't requested.
+  final String? audioError;
+
   const SessionState({
     required this.running,
     required this.width,
@@ -41,6 +57,9 @@ class SessionState {
     required this.pixelFormat,
     int? frameWidth,
     int? frameHeight,
+    this.colorRange = ColorRange.unknown,
+    this.audio = false,
+    this.audioError,
   }) : frameWidth = frameWidth ?? width,
        frameHeight = frameHeight ?? height;
 
@@ -58,6 +77,9 @@ class SessionState {
         pixelFormat: PixelFormat.fromNative((m['pixelFormat'] as num?)?.toInt() ?? 1),
         frameWidth: (m['frameWidth'] as num?)?.toInt(),
         frameHeight: (m['frameHeight'] as num?)?.toInt(),
+        colorRange: ColorRange.values.asNameMap()[m['colorRange']] ?? ColorRange.unknown,
+        audio: m['audio'] == true,
+        audioError: m['audioError'] as String?,
       );
     } catch (_) {
       return const SessionState(

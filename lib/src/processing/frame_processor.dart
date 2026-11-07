@@ -27,6 +27,12 @@ class FrameData {
   /// Whether the frame is horizontally mirrored (front camera).
   final bool isMirrored;
 
+  /// The camera's native buffer (`AHardwareBuffer*` / `CVPixelBufferRef`)
+  /// when native buffers are on (`CameraController.setNativeBuffers`), else 0.
+  /// Valid only during the handler call — the processor returns it to the
+  /// camera right after.
+  final int nativeBuffer;
+
   const FrameData({
     required this.bytes,
     required this.width,
@@ -36,6 +42,7 @@ class FrameData {
     this.orientation = 0,
     this.bytesPerRow = 0,
     this.isMirrored = false,
+    this.nativeBuffer = 0,
   });
 
   /// Effective row stride — falls back to a tightly-packed row when the native
@@ -71,9 +78,17 @@ typedef FrameSource = Stream<CameraFrame> Function();
 /// own `NitroCamera` handle (same native object as the UI isolate's).
 Stream<CameraFrame> nativeFrameSource() => NitroCamera.instance.frameStream;
 
+/// Returns a [CameraFrame.nativeBuffer] to the camera. Runs on whichever
+/// isolate saw the frame, so it must be top-level/static.
+typedef BufferReleaser = void Function(int handle);
+
+/// The default [BufferReleaser]: `NitroCamera.releaseNativeBuffer`.
+void nativeBufferReleaser(int handle) => NitroCamera.instance.releaseNativeBuffer(handle);
+
 class _AttachDirect {
   final FrameSource source;
-  const _AttachDirect(this.source);
+  final BufferReleaser release;
+  const _AttachDirect(this.source, this.release);
 }
 
 class _Detach {
@@ -122,7 +137,8 @@ class _FrameWire {
   final int orientation;
   final int bytesPerRow;
   final bool isMirrored;
-  const _FrameWire(this.bytes, this.width, this.height, this.format, this.timestamp, this.orientation, this.bytesPerRow, this.isMirrored);
+  final int nativeBuffer;
+  const _FrameWire(this.bytes, this.width, this.height, this.format, this.timestamp, this.orientation, this.bytesPerRow, this.isMirrored, [this.nativeBuffer = 0]);
 }
 
 /// Runs a [FrameHandler] on a dedicated background [Isolate], keeping heavy
@@ -145,7 +161,11 @@ class CameraFrameProcessor<R> {
   final WorkerInitializer? workerInit;
   final Object? workerInitArg;
 
-  CameraFrameProcessor(this.handler, {this.workerInit, this.workerInitArg});
+  /// Returns a frame's native buffer once the handler is done with it (or the
+  /// frame was dropped). Top-level/static: [attachDirect] runs it on the worker.
+  final BufferReleaser releaseBuffer;
+
+  CameraFrameProcessor(this.handler, {this.workerInit, this.workerInitArg, this.releaseBuffer = nativeBufferReleaser});
 
   Isolate? _isolate;
   SendPort? _toWorker;
@@ -155,6 +175,7 @@ class CameraFrameProcessor<R> {
 
   bool _busy = false;
   _FrameWire? _pending;
+  int _inFlightBuffer = 0; // native buffer of the frame the worker is on
   bool _disposed = false;
 
   /// Results emitted by the handler, in completion order.
@@ -180,6 +201,8 @@ class CameraFrameProcessor<R> {
       }
       // Otherwise it's a handler reply (result + timing).
       _busy = false;
+      _releaseBuffer(_inFlightBuffer);
+      _inFlightBuffer = 0;
       final reply = msg as _Reply<Object?>;
       // Not an R only when the handler threw (null for a non-nullable R).
       final result = reply.result;
@@ -216,6 +239,7 @@ class CameraFrameProcessor<R> {
         frame.orientation,
         frame.bytesPerRow,
         frame.isMirrored,
+        frame.nativeBuffer,
       ),
     );
   }
@@ -224,7 +248,7 @@ class CameraFrameProcessor<R> {
   /// worker with a single copy. Cancel the returned subscription to detach.
   StreamSubscription<CameraFrame> attach(Stream<CameraFrame> frames) {
     return frames.listen((f) {
-      if (_disposed || !_ready.isCompleted) return;
+      if (_disposed || !_ready.isCompleted) return _releaseBuffer(f.nativeBuffer);
       // fromList copies the native view out *now* (while it is valid); the send
       // then transfers ownership without a second copy.
       _enqueue(
@@ -237,6 +261,7 @@ class CameraFrameProcessor<R> {
           f.orientation,
           f.bytesPerRow,
           f.isMirrored != 0,
+          f.nativeBuffer,
         ),
       );
     });
@@ -255,13 +280,14 @@ class CameraFrameProcessor<R> {
   void attachDirect([FrameSource source = nativeFrameSource]) {
     if (_disposed || !_ready.isCompleted) return;
     _direct = true;
-    _toWorker!.send(_AttachDirect(source));
+    _toWorker!.send(_AttachDirect(source, releaseBuffer));
   }
 
   bool _direct = false;
 
   void _enqueue(_FrameWire wire) {
     if (_busy) {
+      _releaseBuffer(_pending?.nativeBuffer ?? 0); // the replaced frame is dropped
       _pending = wire; // drop-latest: keep only the newest
       return;
     }
@@ -270,7 +296,12 @@ class CameraFrameProcessor<R> {
 
   void _dispatch(_FrameWire wire) {
     _busy = true;
+    _inFlightBuffer = wire.nativeBuffer;
     _toWorker!.send(wire);
+  }
+
+  void _releaseBuffer(int handle) {
+    if (handle != 0) releaseBuffer(handle);
   }
 
   /// Kills the worker isolate and closes [results]. Idempotent.
@@ -287,6 +318,9 @@ class CameraFrameProcessor<R> {
     }
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
+    _releaseBuffer(_pending?.nativeBuffer ?? 0);
+    _releaseBuffer(_inFlightBuffer);
+    _inFlightBuffer = 0;
     _pending = null;
     if (!_out.isClosed) await _out.close();
     if (!_stats.isClosed) await _stats.close();
@@ -324,10 +358,20 @@ class CameraFrameProcessor<R> {
     StreamSubscription<CameraFrame>? direct;
     NitroBuffer? frameBuf;
     FrameData? latest;
+    BufferReleaser? release;
+    void releaseOf(FrameData? f) {
+      if (f != null && f.nativeBuffer != 0) release?.call(f.nativeBuffer);
+    }
+
     void runLatest() {
       final f = latest;
       latest = null;
-      if (f != null) run(f);
+      if (f == null) return;
+      try {
+        run(f);
+      } finally {
+        releaseOf(f);
+      }
     }
 
     rp.listen((msg) async {
@@ -342,12 +386,15 @@ class CameraFrameProcessor<R> {
             orientation: msg.orientation,
             bytesPerRow: msg.bytesPerRow,
             isMirrored: msg.isMirrored,
+            nativeBuffer: msg.nativeBuffer,
           ),
         );
       } else if (msg is _AttachDirect) {
         await direct?.cancel();
+        release = msg.release;
         direct = msg.source().listen((f) {
           final first = latest == null;
+          releaseOf(latest); // replaced before it ran
           // Copy now (the native view is only valid during this callback) into
           // one reused native buffer: a `@zeroCopy` param then takes it by
           // pointer, with no second copy. The handler runs synchronously
@@ -363,12 +410,14 @@ class CameraFrameProcessor<R> {
             orientation: f.orientation,
             bytesPerRow: f.bytesPerRow,
             isMirrored: f.isMirrored != 0,
+            nativeBuffer: f.nativeBuffer,
           );
           if (first) scheduleMicrotask(runLatest);
         });
       } else if (msg is _Detach) {
         await direct?.cancel();
         direct = null;
+        releaseOf(latest);
         latest = null;
         frameBuf?.dispose();
         frameBuf = null;

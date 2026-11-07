@@ -64,6 +64,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  ffi: ^2.2.0 # native-buffer Patrol check (AHardwareBuffer_describe / CVPixelBuffer)
   integration_test:
     sdk: flutter
   patrol: ^4.11.0

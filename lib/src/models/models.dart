@@ -11,3 +11,4 @@ export 'photo_options.dart';
 export 'recording.dart';
 export 'resolved_config.dart';
 export 'session_state.dart';
+export 'outputs.dart';

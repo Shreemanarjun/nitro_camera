@@ -9,6 +9,7 @@ import android.view.Surface
 import dev.shreeman.nitro_camera.extensions.isFrontFacing
 import dev.shreeman.nitro_camera.extensions.sensorOrientationDegrees
 import dev.shreeman.nitro_camera.session.ConstraintResolver
+import dev.shreeman.nitro_camera.utils.NativeBuffers
 import dev.shreeman.nitro_camera.utils.NitraDetectors
 import nitro.nitro_camera_module.CameraFrame
 import java.nio.ByteBuffer
@@ -47,6 +48,8 @@ class FrameOutput(
     // CameraFrame header.
     @Volatile var pixelFormat: Long = 0
     @Volatile var samplingRate: Long = 1
+    /** Attach the image's AHardwareBuffer to frames (setNativeBuffers). */
+    @Volatile var nativeBuffers = false
 
     /** Delivery callback into the shared frame flow (set by NitroCameraImpl via the session). */
     var onFrame: ((CameraFrame) -> Unit)? = null
@@ -84,25 +87,33 @@ class FrameOutput(
                     "enabled=${frameProcessingEnabled()} det='${nativeDetector()}' sampling=$samplingRate")
             }
 
+            var handle = 0L
             try {
-                if (frameProcessingEnabled()) {
-                    emitFrame(image)
-                }
                 val det = nativeDetector()
                 if (det.isNotEmpty()) {
                     NitraDetectors.process(image, characteristics, textureId, det, onDetection)
                 }
+                if (frameProcessingEnabled()) {
+                    if (nativeBuffers && !NativeBuffers.isHolding(textureId)) {
+                        handle = NativeBuffers.hold(textureId, image)
+                    }
+                    if (!emitFrame(image, handle) && handle != 0L) {
+                        NativeBuffers.release(handle) // not delivered: give it back
+                        handle = 0L
+                    }
+                }
             } finally {
-                image.close()
+                if (handle == 0L) image.close() // a held image closes on release
             }
         }, handler)
     }
 
-    private fun emitFrame(image: android.media.Image) {
-        val cb = onFrame ?: return
+    /** Returns whether the frame was delivered. */
+    private fun emitFrame(image: android.media.Image, nativeBuffer: Long): Boolean {
+        val cb = onFrame ?: return false
         try {
             frameCounter++
-            if (frameCounter % samplingRate != 0L) return
+            if (frameCounter % samplingRate != 0L) return false
             val plane = image.planes[0]
             val src = plane.buffer
             val size = src.remaining().toLong()
@@ -124,12 +135,16 @@ class FrameOutput(
 
             cb(CameraFrame(buffer, size, image.width.toLong(), image.height.toLong(),
                 System.currentTimeMillis(), rotation.toLong(), textureId,
-                plane.rowStride.toLong(), 0L /* YUV luma */, if (isFront) 1L else 0L))
-        } catch (_: Exception) { }
+                plane.rowStride.toLong(), 0L /* YUV luma */, if (isFront) 1L else 0L, nativeBuffer))
+            return true
+        } catch (_: Exception) {
+            return false
+        }
     }
 
-    /** Closes the underlying ImageReader. */
+    /** Releases held buffers, then closes the underlying ImageReader. */
     fun close() {
+        NativeBuffers.releaseAll(textureId)
         reader.close()
     }
 }

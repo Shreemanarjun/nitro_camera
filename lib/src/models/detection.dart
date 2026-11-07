@@ -6,7 +6,16 @@ library;
 /// Which native ML detector to run. Wire values match the native side.
 enum NativeDetector {
   barcode('barcode'),
-  face('face');
+  face('face'),
+
+  /// Faces found by the camera pipeline itself (Camera2 face statistics /
+  /// AVCaptureMetadataOutput) — no frame copies, works without ML Kit.
+  /// Bounds are in sensor space (`rotation` turns them upright).
+  hardwareFace('hardwareFace'),
+
+  /// Barcodes found by AVCaptureMetadataOutput (iOS only; Android reports an
+  /// unsupported-detector error).
+  hardwareCode('hardwareCode');
 
   /// The string passed across the FFI boundary.
   final String wire;
@@ -52,17 +61,26 @@ class DetectedBarcode {
   /// Decoded value (raw value, or the display value when raw is absent).
   final String text;
 
-  /// The native barcode-format code.
+  /// The native barcode-format code (ML Kit's numeric format on Android, 0
+  /// when the platform names the format instead — see [formatName]).
   final int format;
+
+  /// The platform's format name, when it reports one (iOS:
+  /// `org.iso.QRCode`, `VNBarcodeSymbologyQR`, …).
+  final String? formatName;
 
   /// Bounding box in frame pixels (may be null if the detector didn't report one).
   final DetectionBounds? bounds;
 
-  const DetectedBarcode({required this.text, required this.format, this.bounds});
+  const DetectedBarcode({required this.text, required this.format, this.formatName, this.bounds});
 
   factory DetectedBarcode.fromJson(Map<String, dynamic> j) => DetectedBarcode(
     text: j['text'] as String? ?? '',
-    format: (j['format'] as num?)?.toInt() ?? 0,
+    format: switch (j['format']) {
+      final num n => n.toInt(),
+      _ => 0,
+    },
+    formatName: j['format'] is String ? j['format'] as String : null,
     bounds: DetectionBounds._fromJson(j['bounds']),
   );
 }
@@ -132,6 +150,8 @@ class DetectionResult {
     final detector = switch (name) {
       'barcode' => NativeDetector.barcode,
       'face' => NativeDetector.face,
+      'hardwareFace' => NativeDetector.hardwareFace,
+      'hardwareCode' => NativeDetector.hardwareCode,
       _ => null,
     };
     if (detector == null) return null;
@@ -141,8 +161,8 @@ class DetectionResult {
       frameWidth: (json['width'] as num?)?.toInt() ?? 0,
       frameHeight: (json['height'] as num?)?.toInt() ?? 0,
       rotation: (json['rotation'] as num?)?.toInt() ?? 0,
-      barcodes: detector == NativeDetector.barcode ? results.map(DetectedBarcode.fromJson).toList() : const [],
-      faces: detector == NativeDetector.face ? results.map(DetectedFace.fromJson).toList() : const [],
+      barcodes: detector == NativeDetector.barcode || detector == NativeDetector.hardwareCode ? results.map(DetectedBarcode.fromJson).toList() : const [],
+      faces: detector == NativeDetector.face || detector == NativeDetector.hardwareFace ? results.map(DetectedFace.fromJson).toList() : const [],
     );
   }
 

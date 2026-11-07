@@ -2,12 +2,16 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
-import 'package:nitro_camera/native.dart' show NitroCamera, EncodedOutputStats;
+import 'package:nitro_camera/native.dart' show NitroCamera, EncodedOutputStats, DepthFrame;
 import 'package:path_provider/path_provider.dart';
 
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
 
+import '../support/native_buffer_probe.dart';
 import 'module.dart';
+
+// Native-buffer processor handler — top-level: it runs on the worker isolate.
+int hasNativeBuffer(FrameData f) => f.nativeBuffer != 0 ? 1 : 0;
 
 // Frame-processor plugin under test — top-level: it crosses isolates.
 FrameProcessorPlugin createMeanLumaPlugin(Map<String, Object?> options) =>
@@ -561,6 +565,230 @@ final class CameraApis extends Module {
     );
     n.stopEncodedOutput(tid);
     expect(cameraStore.status.value, CameraStatus.running);
+  }
+
+  /// Encoded output: the error paths (invalid sizes rejected before native,
+  /// stop / stats with nothing running, unknown session) — the session must
+  /// stay healthy throughout.
+  Future<void> verifyEncodedOutputErrors() async {
+    final c = _ctrl;
+    expect(() => c.startEncodedOutput(width: 721), throwsArgumentError);
+    expect(() => c.startEncodedOutput(height: 0), throwsArgumentError);
+    expect(() => c.startEncodedOutput(bitRate: -1), throwsArgumentError);
+    c.stopEncodedOutput(); // nothing running: no-op
+    final idle = c.encodedOutputStats;
+    expect((idle.frames, idle.firstPtsUs), (0, -1));
+    NitroCamera.instance.startEncodedOutput(987654, 720, 1280, 2500000); // unknown session: no-op
+    expect(NitroCamera.instance.getEncodedOutputStats(987654).frames, 0);
+    await pumpFor(const Duration(milliseconds: 300));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// focusAt (vision-camera focus(point, {adaptiveness})): completes with a
+  /// verdict on a focusable camera, both adaptiveness modes, overlapping
+  /// calls, and the error paths (out-of-range point, unknown session,
+  /// fixed-focus camera → typed exception).
+  Future<void> verifyFocusAt() async {
+    final c = _ctrl;
+    await expectLater(c.focusAt(1.5, 0.5), throwsArgumentError);
+    await expectLater(c.focusAt(0.5, double.nan), throwsArgumentError);
+    await expectLater(
+      NitroCamera.instance.focusAt(987654, 0.5, 0.5, 0),
+      throwsA(predicate((e) => '$e'.contains('SESSION_NOT_RUNNING'))),
+    );
+
+    if (!c.device.supportsFocus) {
+      await expectLater(c.focusAt(0.5, 0.5), throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/focus-unsupported')));
+    } else {
+      final sw = Stopwatch()..start();
+      final sharp = await c.focusAt(0.5, 0.5);
+      // ignore: avoid_print
+      print('focusAt continuous: sharp=$sharp in ${sw.elapsedMilliseconds} ms');
+      expect(sw.elapsedMilliseconds, lessThan(4000), reason: 'completes within the 3 s scan budget');
+      final locked = await c.focusAt(0.2, 0.8, adaptiveness: FocusAdaptiveness.locked);
+      expect(locked, isA<bool>());
+      // Two overlapping focus calls both complete (the newer one supersedes).
+      final both = await Future.wait([c.focusAt(0.3, 0.3), c.focusAt(0.7, 0.7)]);
+      expect(both, hasLength(2));
+      // A later AF-mode change releases the lock without errors.
+      c.setAutoFocus(AutoFocusMode.continuous);
+    }
+    await pumpFor(const Duration(milliseconds: 500));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// Depth output: on a camera without depth the call throws
+  /// device/depth-unsupported and changes nothing; with depth, metres arrive,
+  /// stop when disabled, and on/off are idempotent.
+  Future<bool> verifyDepthOutput() async {
+    final c = _ctrl;
+    final advertised = c.device.formats.any((f) => f.supportsDepthCapture);
+    await c.setDepthOutput(false); // off while off: no-op
+    try {
+      await c.setDepthOutput(true);
+    } on DeviceException catch (e) {
+      expect(e.code, 'device/depth-unsupported');
+      // ignore: avoid_print
+      print('depth unsupported (advertised by some format: $advertised): ${e.message}');
+      await pumpFor(const Duration(milliseconds: 300));
+      expect(cameraStore.status.value, CameraStatus.running);
+      return false;
+    }
+    final frames = <(int, int, double)>[];
+    final sub = c.depthStream.listen((DepthFrame f) {
+      final m = f.metres;
+      var valid = 0;
+      for (var i = 0; i < m.length; i += 7) {
+        if (m[i].isFinite && m[i] > 0 && m[i] < 20) valid++;
+      }
+      frames.add((f.width, f.height, valid / (m.length / 7)));
+    });
+    await c.setDepthOutput(true); // on while on: no-op
+    await pumpUntil(() => frames.length >= 5, reason: 'depth maps arrive');
+    final (w, h, validFrac) = frames.last;
+    // ignore: avoid_print
+    print('depth: ${w}x$h valid=${(validFrac * 100).toStringAsFixed(0)}% after ${frames.length} maps');
+    expect(w * h, greaterThan(0));
+    expect(validFrac, greaterThan(0.05), reason: 'some pixels carry a plausible distance');
+    await c.setDepthOutput(false);
+    await pumpFor(const Duration(milliseconds: 800));
+    final n = frames.length;
+    await pumpFor(const Duration(milliseconds: 800));
+    expect(frames.length, n, reason: 'no depth after disabling');
+    await sub.cancel();
+    expect(cameraStore.status.value, CameraStatus.running);
+    return true;
+  }
+
+  /// Hardware (frame-free) detectors: each name yields either typed results or
+  /// a typed unsupported error — never silence, never a broken session — and
+  /// switching back to a frame detector / off works.
+  Future<void> verifyHardwareDetectors() async {
+    final c = _ctrl;
+    for (final d in [NativeDetector.hardwareFace, NativeDetector.hardwareCode]) {
+      final payloads = <Map<String, dynamic>>[];
+      final sub = c.nativeDetections.listen(payloads.add);
+      await pumpFor(const Duration(milliseconds: 300)); // let the event subscription attach
+      c.startDetector(d);
+      await pumpUntil(() => payloads.any((p) => p['detector'] == d.wire), reason: '${d.wire} answers (results or an error)');
+      final p = payloads.firstWhere((p) => p['detector'] == d.wire);
+      // ignore: avoid_print
+      print('${d.wire}: ${p.containsKey('error') ? 'error: ${p['error']}' : 'results=${(p['results'] as List).length}'}');
+      if (p.containsKey('error')) {
+        expect(p['error'], contains('not supported'));
+        expect(DetectionResult.fromJson(p), isNull);
+      } else {
+        final r = DetectionResult.fromJson(p)!;
+        expect(r.detector, d);
+        expect(r.frameWidth, greaterThan(0));
+      }
+      if (Platform.isAndroid && d == NativeDetector.hardwareCode) {
+        expect(p.containsKey('error'), isTrue, reason: 'Android has no hardware code detector');
+      }
+      c.stopDetector();
+      await sub.cancel();
+      await pumpFor(const Duration(milliseconds: 300));
+      expect(cameraStore.status.value, CameraStatus.running);
+    }
+    // hardware → frame detector → off keeps the session healthy.
+    c.startDetector(NativeDetector.hardwareFace);
+    await pumpFor(const Duration(milliseconds: 300));
+    c.setNativeDetector('meanLuma');
+    final results = <Map<String, dynamic>>[];
+    final sub = c.nativeDetections.listen(results.add);
+    await pumpUntil(() => results.any((r) => r['detector'] == 'meanLuma'), reason: 'frame detector after a hardware one');
+    c.stopDetector();
+    await sub.cancel();
+    await pumpFor(const Duration(milliseconds: 300));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// Session-state extras: the colour range is reported, and audio is either
+  /// on or explains why not (never silently missing).
+  Future<void> verifySessionStateExtras() async {
+    final st = _ctrl.getSessionState();
+    // ignore: avoid_print
+    print('session state: colorRange=${st.colorRange.name} audio=${st.audio} audioError=${st.audioError}');
+    expect(st.colorRange, isNot(ColorRange.unknown));
+    if (!st.audio) {
+      // Audio off: either not requested (no error) or explained.
+      expect(st.audioError == null || st.audioError!.isNotEmpty, isTrue);
+    } else {
+      expect(st.audioError, isNull);
+    }
+  }
+
+  /// Native buffers (vision-camera `frame.getNativeBuffer()`): the handle is
+  /// a live AHardwareBuffer / CVPixelBuffer of the frame's size (asked of the
+  /// platform via FFI), one is held at a time without stalling the stream,
+  /// release recycles it, bogus / double releases are harmless, a frame
+  /// processor returns buffers by itself, and turning it off stops handles.
+  Future<void> verifyNativeBuffers() async {
+    final c = _ctrl;
+    final frames = <CameraFrame>[];
+    final sub = c.frameStream.listen(frames.add);
+    c.setNativeBuffers(true);
+    c.setFrameProcessing(enabled: true);
+    await pumpUntil(() => frames.any((f) => f.nativeBuffer != 0), reason: 'a frame carries a native buffer');
+    final held = frames.firstWhere((f) => f.nativeBuffer != 0);
+    final (bw, bh) = describeNativeBuffer(held.nativeBuffer);
+    // ignore: avoid_print
+    print('native buffer 0x${held.nativeBuffer.toRadixString(16)}: platform says ${bw}x$bh, frame ${held.width}x${held.height}');
+    expect((bw, bh), (held.width, held.height), reason: 'the handle is the frame\'s own buffer');
+
+    // Holding it (inside the 1 s lease): frames keep flowing, no second handle.
+    final before = frames.length;
+    await pumpFor(const Duration(milliseconds: 600));
+    final during = frames.skip(before).toList();
+    expect(during.length, greaterThanOrEqualTo(5), reason: 'a held buffer must not stall the stream');
+    expect(during.where((f) => f.nativeBuffer != 0), isEmpty, reason: 'one buffer is held at a time');
+
+    c.releaseNativeBuffer(held);
+    c.releaseNativeBuffer(held); // double release: ignored
+    NitroCamera.instance.releaseNativeBuffer(0x1234); // unknown handle: ignored
+    final mark = frames.length;
+    await pumpUntil(() => frames.skip(mark).any((f) => f.nativeBuffer != 0), reason: 'release recycles the slot');
+    final again = frames.skip(mark).firstWhere((f) => f.nativeBuffer != 0);
+
+    // Never released: the 1 s lease reclaims it, so buffers keep coming.
+    final leaseStart = DateTime.now();
+    final mark2 = frames.indexOf(again) + 1;
+    await pumpUntil(() => frames.skip(mark2).any((f) => f.nativeBuffer != 0), reason: 'an unreleased buffer is reclaimed by the lease');
+    final leaseMs = DateTime.now().difference(leaseStart).inMilliseconds;
+    // ignore: avoid_print
+    print('lease reclaimed an unreleased buffer after $leaseMs ms');
+    expect(leaseMs, inInclusiveRange(700, 3000), reason: 'not before the 1 s lease, not much after');
+    c.releaseNativeBuffer(again); // already reclaimed: ignored
+    c.releaseNativeBuffer(frames.skip(mark2).firstWhere((f) => f.nativeBuffer != 0));
+    await sub.cancel();
+
+    // A frame processor returns each buffer after its handler.
+    final proc = CameraFrameProcessor<int>(hasNativeBuffer);
+    await proc.start();
+    final hits = <int>[];
+    final rs = proc.results.listen(hits.add);
+    final att = proc.attach(c.frameStream);
+    await pumpFor(const Duration(seconds: 2));
+    await att.cancel();
+    await rs.cancel();
+    await proc.dispose();
+    // ignore: avoid_print
+    print('processor: ${hits.where((h) => h == 1).length}/${hits.length} frames carried a buffer');
+    expect(hits.where((h) => h == 1).length, greaterThanOrEqualTo(5), reason: 'the processor recycles buffers');
+
+    c.setNativeBuffers(false);
+    final off = <CameraFrame>[];
+    final offSub = c.frameStream.listen(off.add);
+    await pumpFor(const Duration(milliseconds: 600));
+    await offSub.cancel();
+    c.setFrameProcessing(enabled: false);
+    expect(off, isNotEmpty);
+    expect(off.where((f) => f.nativeBuffer != 0), isEmpty, reason: 'off: no handles');
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
   }
 
   /// A custom NATIVE detector the example registers from the host app

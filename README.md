@@ -239,6 +239,13 @@ controller.setFlash(FlashMode.auto);     // off | on | auto
 All controls apply as diff-driven live updates — no session reopen — the same
 model as vision-camera's declarative `configure()`.
 
+Awaitable focus (vision-camera's `focus(point, { adaptiveness })`):
+
+```dart
+final sharp = await controller.focusAt(0.5, 0.5); // completes when the scan ends
+await controller.focusAt(0.3, 0.7, adaptiveness: FocusAdaptiveness.locked); // lens stays there
+```
+
 ### Declarative configuration
 
 Instead of calling individual setters you can hold one immutable
@@ -394,6 +401,43 @@ controller.stopDetector();
 ```
 
 > Requires the host app to add the matching ML Kit dependency.
+
+`NativeDetector.hardwareFace` (Camera2 face statistics / iOS
+AVCaptureMetadataOutput) and `NativeDetector.hardwareCode` (iOS barcodes)
+run in the camera pipeline itself — no ML Kit, no frame copies. An
+unsupported one answers with an error payload.
+
+### Depth
+
+```dart
+await controller.setDepthOutput(true); // DeviceException('device/depth-unsupported') without depth
+controller.depthStream.listen((DepthFrame d) {
+  final metres = d.metres;       // float32, row-major, 0 = no measurement
+  final centre = d.metresAt(d.width ~/ 2, d.height ~/ 2);
+});
+```
+
+### Native buffers (GPU / ML without a copy)
+
+```dart
+controller.setNativeBuffers(true);
+final proc = CameraFrameProcessor<int>(myHandler); // FrameData.nativeBuffer: AHardwareBuffer* / CVPixelBufferRef
+// A processor returns each buffer after its handler; raw frameStream
+// listeners call controller.releaseNativeBuffer(frame).
+```
+
+### Encoder output & plugin outputs
+
+```dart
+controller.startEncodedOutput(width: 720, height: 1280, bitRate: 2500000);
+print(controller.encodedOutputStats.frames);
+controller.stopEncodedOutput();
+```
+
+Other plugins (an RTMP / WebRTC publisher) attach natively through
+`NitroCameraOutputs` — Android: `NitroCameraOutputs.add(textureId, surface)`;
+iOS: `NitroCameraOutputs.add(textureId:id:sink:)` — with the session's
+`controller.textureId`.
 
 ### GPU filters / shaders
 

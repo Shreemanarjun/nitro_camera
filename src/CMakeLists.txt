@@ -18,12 +18,13 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(NITRO_NATIVE "${CMAKE_CURRENT_SOURCE_DIR}/native")
-# NITRO_LINK_SPEC_CHECKSUM a9e2572f7853e7f4
+# NITRO_LINK_SPEC_CHECKSUM 09cfd17ed9491197
 set(GENERATED_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../lib/src/generated/cpp")
 
 add_library(nitro_camera SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/../lib/src/generated/cpp/nitro_camera.bridge.g.cpp"
   "nitro_camera.cpp"
+  "native_buffers.cpp"
   "dart_api_dl.c"
 )
 
