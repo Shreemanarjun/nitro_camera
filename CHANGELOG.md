@@ -1,3 +1,19 @@
+## Unreleased
+
+### Added
+
+* **Plugin camera outputs** — `NitroCameraOutputs` (Kotlin / Swift), the
+  native hook other plugins (an RTMP / WebRTC publisher, a second encoder)
+  attach through, like vision-camera v5's `CameraOutput`. Android: register a
+  `Surface` (e.g. a MediaCodec input surface) for a `textureId`; the GL
+  renderer draws every frame into it — upright, un-mirrored unless asked,
+  sensor timestamps — without touching the camera's streams (a direct preview
+  moves onto the GL renderer). iOS: register a sink that receives the
+  session's video `CMSampleBuffer`s.
+* **Encoded output** — `NitroCamera.startEncodedOutput` /
+  `getEncodedOutputStats` / `stopEncodedOutput`: a hardware H.264 encoder
+  (MediaCodec / VideoToolbox) attached through that hook.
+
 ## 0.0.3 - 2026-11-04
 
 ### Added

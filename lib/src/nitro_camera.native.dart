@@ -288,6 +288,25 @@ class PreviewTransform {
   });
 }
 
+/// Counters of a hardware H.264 encoder output — see
+/// [NitroCamera.startEncodedOutput]. Timestamps are the camera's, in µs.
+@HybridStruct()
+class EncodedOutputStats {
+  final int frames;
+  final int keyframes;
+  final int bytes;
+  final int firstPtsUs; // -1 until the first frame
+  final int lastPtsUs;
+
+  const EncodedOutputStats({
+    required this.frames,
+    required this.keyframes,
+    required this.bytes,
+    required this.firstPtsUs,
+    required this.lastPtsUs,
+  });
+}
+
 /// Per-capture options for [NitroCamera.takePhotoWithOptions].
 @HybridStruct()
 class PhotoOptions {
@@ -635,6 +654,20 @@ abstract class NitroCamera extends HybridObject {
   /// detector plugins by name via `NitraDetectors.register(...)` (Kotlin/Swift)
   /// and select them here. An unknown name emits a descriptive error event.
   void setNativeDetector(int textureId, String detector);
+
+  /// Attaches a hardware H.264 encoder (MediaCodec / VideoToolbox) to the
+  /// session through the native `NitroCameraOutputs` hook — the path an
+  /// RTMP / WebRTC publisher plugin takes. Upright, un-mirrored on Android,
+  /// camera timestamps; the preview keeps running (Android moves a direct
+  /// preview onto the GL renderer). [width]/[height] apply on Android; iOS
+  /// encodes at the session's frame size. Replaces a running encoder output.
+  void startEncodedOutput(int textureId, int width, int height, int bitRate);
+
+  /// Counters of the encoder output (all zero / -1 when none is running).
+  EncodedOutputStats getEncodedOutputStats(int textureId);
+
+  /// Detaches and releases the encoder output. No-op when none is running.
+  void stopEncodedOutput(int textureId);
 
   /// Returns the camera-ID combinations that can stream CONCURRENTLY
   /// (multi-cam), as a JSON array of arrays (e.g. `[["0","1"]]`). Empty when

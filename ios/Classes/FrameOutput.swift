@@ -323,6 +323,9 @@ final class FrameOutput: NSObject, FlutterTexture,
             recorder?.appendVideo(sampleBuffer)
         }
 
+        // Plugin outputs (NitroCameraOutputs) — the raw sample buffer.
+        NitroCameraOutputs.deliver(sampleBuffer, textureId: textureId)
+
         // Native ML detector path (Vision) — throttled + drop-while-busy inside
         // the runner. Runs even when frame processing is off (the Android
         // analogue adds the frame-reader target for detectors; here the video

@@ -313,6 +313,7 @@ public class CameraSession: NSObject {
         // session's own frames, so a deferred unregister is safe.
         let reg = textureRegistry
         let tid = textureId
+        NitroCameraOutputs.clear(textureId: tid)
         DispatchQueue.main.async { reg?.unregisterTexture(tid) }
     }
 

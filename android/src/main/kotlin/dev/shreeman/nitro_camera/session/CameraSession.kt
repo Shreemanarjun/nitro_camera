@@ -13,6 +13,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import dev.shreeman.nitro_camera.NitraRenderer
+import dev.shreeman.nitro_camera.NitroCameraOutputs
 import dev.shreeman.nitro_camera.extensions.cameraErrorMessage
 import dev.shreeman.nitro_camera.extensions.hasFlashUnit
 import dev.shreeman.nitro_camera.extensions.isFrontFacing
@@ -257,6 +258,7 @@ class CameraSession(
         // Seed + track device rotation for an upright preview in all orientations.
         renderer.displayRotationDegrees = currentDisplayRotationDegrees()
         try { displayManager.registerDisplayListener(displayListener, cameraHandler) } catch (_: Exception) {}
+        NitroCameraOutputs.listen(textureId) { syncExternalOutputs() }
 
 
         // Listen to SurfaceProducer lifecycle if available. Flutter recreates the
@@ -877,6 +879,7 @@ class CameraSession(
         isClosed = true
         val closeStart = android.os.SystemClock.elapsedRealtime()
         try { displayManager.unregisterDisplayListener(displayListener) } catch (_: Exception) {}
+        NitroCameraOutputs.listen(textureId, null)
         onEvent?.invoke(CameraEventType.STOPPED, InterruptionReason.NONE, "")
 
         // Stop internal frame delivery immediately (thread-safe, cheap).
@@ -945,6 +948,7 @@ class CameraSession(
     suspend fun releaseTexture() {
         if (textureReleased) return
         textureReleased = true
+        NitroCameraOutputs.clear(textureId)
         withContext(Dispatchers.Main) {
             surfaceEntry?.release()
             try {
@@ -1158,6 +1162,15 @@ class CameraSession(
         glHandler.post {
             renderer.setPlatformSurface(surface)
         }
+    }
+
+    /// Plugin outputs (NitroCameraOutputs) are drawn by the GL renderer, so
+    /// the first one moves a direct preview onto it (like GL recording).
+    private fun syncExternalOutputs() {
+        if (isClosed) return
+        val outputs = NitroCameraOutputs.outputsFor(textureId)
+        renderer.setExternalOutputs(outputs)
+        if (outputs.isNotEmpty() && directPreview) switchToGlPreview()
     }
 
     /// Leaves direct preview for the GL renderer. The producer surface can only

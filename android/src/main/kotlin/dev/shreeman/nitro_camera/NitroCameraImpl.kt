@@ -99,6 +99,8 @@ class NitroCameraImpl(
         val activeSessions = synchronized(sessionsLock) {
             val list = sessions.values.toList()
             sessions.clear()
+            encodedOutputs.values.forEach { it.stop() }
+            encodedOutputs.clear()
             list
         }
         activeSessions.map { async(Dispatchers.IO) { runCatching { it.close() } } }.awaitAll()
@@ -115,6 +117,7 @@ class NitroCameraImpl(
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val sessions = ConcurrentHashMap<Long, CameraSession>()
+    private val encodedOutputs = ConcurrentHashMap<Long, dev.shreeman.nitro_camera.outputs.EncodedOutput>()
     private val sessionsLock = Any()
 
     /// Device JSON / characteristics reading (vision-camera's HybridCameraDevice).
@@ -555,6 +558,7 @@ class NitroCameraImpl(
     }
 
     override suspend fun closeCamera(textureId: Long) {
+        encodedOutputs.remove(textureId)?.stop()
         val s = synchronized(sessionsLock) { sessions.remove(textureId) } ?: return
         val devId = s.deviceId
         val closeStart = android.os.SystemClock.elapsedRealtime()
@@ -689,6 +693,20 @@ class NitroCameraImpl(
 
     override fun setNativeDetector(textureId: Long, detector: String) {
         session(textureId)?.setNativeDetector(detector)
+    }
+
+    override fun startEncodedOutput(textureId: Long, width: Long, height: Long, bitRate: Long) {
+        encodedOutputs.remove(textureId)?.stop()
+        if (session(textureId) == null) return
+        encodedOutputs[textureId] = dev.shreeman.nitro_camera.outputs.EncodedOutput(
+            textureId, width.toInt(), height.toInt(), bitRate.toInt())
+    }
+
+    override fun getEncodedOutputStats(textureId: Long): EncodedOutputStats =
+        encodedOutputs[textureId]?.stats() ?: EncodedOutputStats(0L, 0L, 0L, -1L, -1L)
+
+    override fun stopEncodedOutput(textureId: Long) {
+        encodedOutputs.remove(textureId)?.stop()
     }
 
     // ── Physical-orientation events (vision-camera's DeviceOrientationManager) ──

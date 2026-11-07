@@ -74,6 +74,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var platformEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var recorderEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    // Plugin outputs (NitroCameraOutputs). [externalWanted] is set from any
+    // thread; the EGL surfaces are reconciled against it on the GL thread at
+    // draw time, so an add that races renderer setup is never lost.
+    @Volatile private var externalWanted: List<NitroCameraOutputs.Output> = emptyList()
+    private val externalEgl = HashMap<Surface, EGLSurface>()
+    private val externalFailed = HashSet<Surface>()
     private var eglConfig: EGLConfig? = null
 
     private var program: Int = 0
@@ -313,6 +319,33 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         }
     }
 
+    fun setExternalOutputs(outputs: List<NitroCameraOutputs.Output>) {
+        externalWanted = outputs
+    }
+
+    /** GL thread. Creates / destroys EGL surfaces to match [externalWanted]. */
+    private fun reconcileExternal(wanted: List<NitroCameraOutputs.Output>) {
+        if (externalEgl.isEmpty() && wanted.isEmpty()) return
+        val it = externalEgl.entries.iterator()
+        while (it.hasNext()) {
+            val (s, egl) = it.next()
+            if (wanted.none { o -> o.surface == s } || !s.isValid) {
+                EGL14.eglDestroySurface(eglDisplay, egl)
+                it.remove()
+            }
+        }
+        externalFailed.retainAll(wanted.map { it.surface }.toSet())
+        val config = eglConfig ?: return
+        for (o in wanted) {
+            if (externalEgl.containsKey(o.surface) || o.surface in externalFailed || !o.surface.isValid) continue
+            val egl = EGL14.eglCreateWindowSurface(eglDisplay, config, o.surface, intArrayOf(EGL14.EGL_NONE), 0)
+            if (egl == EGL14.EGL_NO_SURFACE) {
+                Log.e("NitroCamera", "NitraRenderer: external output EGL surface failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+                externalFailed.add(o.surface)
+            } else externalEgl[o.surface] = egl
+        }
+    }
+
     fun updateShader(shader: String) {
         if (fragmentShader == shader) return
 
@@ -374,22 +407,46 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 GLES20.glFlush()
                 renderToSurface(recorderEglSurface)
             }
+
+            // 4. Plugin outputs (NitroCameraOutputs) — un-mirrored like the recorder unless asked.
+            val wanted = externalWanted
+            reconcileExternal(wanted)
+            for (o in wanted) {
+                val egl = externalEgl[o.surface] ?: continue
+                GLES20.glFlush()
+                if (!renderToSurface(egl, o.mirror)) {
+                    EGL14.eglDestroySurface(eglDisplay, egl)
+                    externalEgl.remove(o.surface)
+                    externalFailed.add(o.surface)
+                }
+            }
         } catch (e: Exception) {
             Log.e("NitroCamera", "NitraRenderer: Draw internal error: ${e.message}")
         }
     }
 
-    private fun renderToSurface(surface: EGLSurface) {
-        if (surface == EGL14.EGL_NO_SURFACE) return
+    /**
+     * [externalMirror] is non-null for a plugin output (its mirror flag).
+     * Returns false only when the surface's consumer is gone (swap failed).
+     */
+    private fun renderToSurface(surface: EGLSurface, externalMirror: Boolean? = null): Boolean {
+        if (surface == EGL14.EGL_NO_SURFACE) return true
+        val external = externalMirror != null
+        // Front camera: preview surfaces are mirrored (selfie view); the recorder
+        // is not; a plugin output follows its own flag.
+        val screenMirror = isFrontCamera && when {
+            external -> externalMirror == true
+            else -> surface != recorderEglSurface
+        }
 
         EGL14.eglMakeCurrent(eglDisplay, surface, surface, eglContext)
 
         if (program == 0 || phLoc == -1) {
             setupProgram()
-            if (program == 0 || phLoc == -1) return
+            if (program == 0 || phLoc == -1) return true
         }
 
-        val st = inputSurfaceTexture ?: return
+        val st = inputSurfaceTexture ?: return true
 
         // Consume the camera frame ONCE per drawFrame (on whichever surface
         // renders first — texture surface normally, platform surface in PV mode).
@@ -459,7 +516,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         val surfKind = when (surface) {
             eglSurface -> "texture"
             platformEglSurface -> "platformView"
-            else -> "recorder"
+            recorderEglSurface -> "recorder"
+            else -> "external"
         }
         val dimKey = "$surfKind:${sw.toInt()}x${sh.toInt()}:$effectiveOrientation:$oesRotation:$sensorOrientation:$isFrontCamera:$displayRotationDegrees"
         if (dimKey != lastDimLog) {
@@ -470,7 +528,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 "display=$displayRotationDegrees effOrient=$effectiveOrientation " +
                 "oesRot=$oesRotation extra=$extraRotation crop=($cropX,$cropY) " +
                 "oes=[${m[0]},${m[1]},${m[4]},${m[5]},${m[12]},${m[13]}] " +
-                "screenMirror=${isFrontCamera && surface != recorderEglSurface}")
+                "screenMirror=$screenMirror")
         }
         val texM = FloatArray(16)
         android.opengl.Matrix.setIdentityM(texM, 0)
@@ -492,7 +550,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         // the direct preview). Mirror the preview OUTPUT horizontally — screen
         // space, after rotation. The recorder keeps its existing (un-mirrored)
         // output.
-        if (isFrontCamera && surface != recorderEglSurface) {
+        if (screenMirror) {
             val flipX = FloatArray(16)
             android.opengl.Matrix.setIdentityM(flipX, 0)
             android.opengl.Matrix.translateM(flipX, 0, 0.5f, 0.5f, 0f)
@@ -530,8 +588,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         GLES20.glVertexAttribPointer(thLoc, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
-        if (surface == recorderEglSurface) {
-             // Sync timestamps for recorder smooth playback
+        if (surface == recorderEglSurface || external) {
+             // Sync timestamps for recorder / encoder smooth playback
              val nsecs = st.timestamp
              EGLExt.eglPresentationTimeANDROID(eglDisplay, surface, nsecs)
         }
@@ -540,6 +598,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
             val err = EGL14.eglGetError()
             if (err == EGL14.EGL_BAD_SURFACE || err == 0x300D) {
                 Log.w("NitroCamera", "NitraRenderer: Platform surface became bad, detaching.")
+                if (external) return false
                 if (surface == platformEglSurface) {
                     detachPlatformSurface()
                 } else if (surface == recorderEglSurface) {
@@ -549,6 +608,7 @@ class NitraRenderer(private val width: Int, private val height: Int) {
                 Log.w("NitroCamera", "eglSwapBuffers failed: 0x${Integer.toHexString(err)}")
             }
         }
+        return true
     }
 
 
@@ -558,6 +618,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
             // Delete GL resources before destroying context
             if (program != 0) GLES20.glDeleteProgram(program)
+            externalEgl.values.forEach { EGL14.eglDestroySurface(eglDisplay, it) }
+            externalEgl.clear()
             if (textureId != -1) {
                 GLES20.glDeleteTextures(1, intArrayOf(textureId), 0)
             }

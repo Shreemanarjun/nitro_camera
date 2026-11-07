@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nitro_camera/nitro_camera.dart';
-import 'package:nitro_camera/native.dart' show NitroCamera;
+import 'package:nitro_camera/native.dart' show NitroCamera, EncodedOutputStats;
 import 'package:path_provider/path_provider.dart';
 
 import 'package:nitro_camera_example/features/camera/state/camera_store.dart';
@@ -424,12 +424,25 @@ final class CameraApis extends Module {
         final sw = Stopwatch()..start();
         Object? second;
         try {
-          await c.takePhotoWithOptions(const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng));
+          await c.takePhotoWithOptions(
+            const PhotoCaptureOptions(outputFormat: PhotoOutputFormat.dng),
+          );
         } catch (e2) {
           second = e2;
         }
-        expect(second, isA<CaptureException>().having((x) => x.code, 'code', 'capture/raw-unavailable'));
-        expect(sw.elapsedMilliseconds, lessThan(500), reason: 'second DNG request must fail fast');
+        expect(
+          second,
+          isA<CaptureException>().having(
+            (x) => x.code,
+            'code',
+            'capture/raw-unavailable',
+          ),
+        );
+        expect(
+          sw.elapsedMilliseconds,
+          lessThan(500),
+          reason: 'second DNG request must fail fast',
+        );
         await pumpFor(const Duration(seconds: 2));
       }
     }
@@ -508,6 +521,46 @@ final class CameraApis extends Module {
     await pumpFor(const Duration(milliseconds: 500));
     expect(cameraStore.status.value, CameraStatus.running);
     expect(cameraStore.errorMessage.value, isNull);
+  }
+
+  /// NitroCamera.startEncodedOutput — a hardware H.264 encoder attached
+  /// through the native NitroCameraOutputs hook (the path an RTMP / WebRTC
+  /// plugin takes). It must receive steadily timestamped frames with a
+  /// keyframe, the preview must keep running, and stop + restart must work.
+  Future<void> verifyEncodedOutput() async {
+    final tid = _ctrl.textureId!;
+    final n = NitroCamera.instance;
+    n.startEncodedOutput(tid, 720, 1280, 2500000);
+    await pumpFor(const Duration(seconds: 3));
+    final EncodedOutputStats s = n.getEncodedOutputStats(tid);
+    final spanUs = s.lastPtsUs - s.firstPtsUs;
+    // ignore: avoid_print
+    print(
+      'encoded output: frames=${s.frames} keyframes=${s.keyframes} '
+      'bytes=${s.bytes} span=${spanUs / 1e6}s',
+    );
+    expect(
+      s.frames,
+      greaterThanOrEqualTo(30),
+      reason: 'encoder fed by the camera',
+    );
+    expect(s.keyframes, greaterThanOrEqualTo(1));
+    expect(spanUs, greaterThan(1500000), reason: 'camera timestamps on output');
+    expect(cameraStore.status.value, CameraStatus.running);
+
+    n.stopEncodedOutput(tid);
+    expect(n.getEncodedOutputStats(tid).frames, 0, reason: 'stopped');
+    await pumpFor(const Duration(milliseconds: 500));
+    expect(cameraStore.status.value, CameraStatus.running);
+    expect(cameraStore.errorMessage.value, isNull);
+
+    n.startEncodedOutput(tid, 720, 1280, 2500000);
+    await pumpUntil(
+      () => n.getEncodedOutputStats(tid).frames > 0,
+      reason: 'restart on the same session works',
+    );
+    n.stopEncodedOutput(tid);
+    expect(cameraStore.status.value, CameraStatus.running);
   }
 
   /// A custom NATIVE detector the example registers from the host app
@@ -785,11 +838,9 @@ final class CameraApis extends Module {
       second.setFrameProcessing(enabled: false);
       c.setFrameProcessing(enabled: false);
 
-      expect(
-        secondFrames.toSet(),
-        {second.textureId},
-        reason: 'second session frames carry ITS textureId only',
-      );
+      expect(secondFrames.toSet(), {
+        second.textureId,
+      }, reason: 'second session frames carry ITS textureId only');
       expect(
         firstFrames.toSet().difference({c.textureId!}),
         isEmpty,

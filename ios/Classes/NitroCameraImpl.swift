@@ -23,6 +23,8 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     /// Active sessions keyed by textureId.
     private var sessions = [Int64: CameraSession]()
     private let sessionsLock = NSLock()
+    /// Encoder outputs keyed by textureId (guarded by `sessionsLock`).
+    private var encodedOutputs = [Int64: EncodedOutput]()
 
     // Frame stream publisher (CPU path).
     private let frameSubject = PassthroughSubject<CameraFrame, Never>()
@@ -249,7 +251,9 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
     public func closeCamera(textureId: Int64) async throws {
         sessionsLock.lock()
         let session = sessions.removeValue(forKey: textureId)
+        let encoder = encodedOutputs.removeValue(forKey: textureId)
         sessionsLock.unlock()
+        encoder?.stop()
         session?.close()
         emitEvent(1 /* stopped */, textureId: textureId)
     }
@@ -268,6 +272,8 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
             session.close()
         }
         sessions.removeAll()
+        encodedOutputs.values.forEach { $0.stop() }
+        encodedOutputs.removeAll()
         sessionsLock.unlock()
     }
 
@@ -347,6 +353,30 @@ public class NitroCameraImpl: NSObject, HybridNitroCameraProtocol {
 
     public func setNativeDetector(textureId: Int64, detector: String) {
         session(for: textureId)?.frameOutput.setNativeDetector(detector)
+    }
+
+    public func startEncodedOutput(textureId: Int64, width: Int64, height: Int64, bitRate: Int64) {
+        stopEncodedOutput(textureId: textureId)
+        guard session(for: textureId) != nil else { return }
+        let encoder = EncodedOutput(textureId: textureId, bitRate: bitRate)
+        sessionsLock.lock()
+        encodedOutputs[textureId] = encoder
+        sessionsLock.unlock()
+    }
+
+    public func getEncodedOutputStats(textureId: Int64) -> EncodedOutputStats {
+        sessionsLock.lock()
+        let encoder = encodedOutputs[textureId]
+        sessionsLock.unlock()
+        return encoder?.stats()
+            ?? EncodedOutputStats(frames: 0, keyframes: 0, bytes: 0, firstPtsUs: -1, lastPtsUs: -1)
+    }
+
+    public func stopEncodedOutput(textureId: Int64) {
+        sessionsLock.lock()
+        let encoder = encodedOutputs.removeValue(forKey: textureId)
+        sessionsLock.unlock()
+        encoder?.stop()
     }
 
     // MARK: - Photo capture (routes to PhotoOutput)

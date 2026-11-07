@@ -398,6 +398,24 @@ class FakeNitroCamera extends NitroCamera {
   void setNativeDetector(int textureId, String detector) =>
       _rec('setNativeDetector', [textureId, detector], null);
 
+  @override
+  void startEncodedOutput(int textureId, int width, int height, int bitRate) =>
+      _rec('startEncodedOutput', [textureId, width, height, bitRate], null);
+
+  @override
+  EncodedOutputStats getEncodedOutputStats(int textureId) =>
+      const EncodedOutputStats(
+        frames: 0,
+        keyframes: 0,
+        bytes: 0,
+        firstPtsUs: -1,
+        lastPtsUs: -1,
+      );
+
+  @override
+  void stopEncodedOutput(int textureId) =>
+      _rec('stopEncodedOutput', [textureId], null);
+
   // ---- Session ----
 
   @override

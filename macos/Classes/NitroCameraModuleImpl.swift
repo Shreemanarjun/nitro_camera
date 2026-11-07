@@ -55,6 +55,9 @@ public class NitroCameraModuleImpl: HybridNitroCameraProtocol {
     public func enableDeviceAvailabilityEvents(enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.enableDeviceAvailabilityEvents") }
     public func setKeepScreenOn(enabled: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setKeepScreenOn") }
     public func setNativeDetector(textureId: Int64, detector: String) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.setNativeDetector") }
+    public func startEncodedOutput(textureId: Int64, width: Int64, height: Int64, bitRate: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.startEncodedOutput") }
+    public func getEncodedOutputStats(textureId: Int64) -> EncodedOutputStats { fatalError("TODO: implement NitroCameraModuleImpl.getEncodedOutputStats") }
+    public func stopEncodedOutput(textureId: Int64) -> Void { fatalError("TODO: implement NitroCameraModuleImpl.stopEncodedOutput") }
     public func getConcurrentCameraIdsJson() -> String { fatalError("TODO: implement NitroCameraModuleImpl.getConcurrentCameraIdsJson") }
     public func takePhotoWithOptions(textureId: Int64, options: PhotoOptions) async throws -> PhotoResult { fatalError("TODO: implement NitroCameraModuleImpl.takePhotoWithOptions") }
     public func takeSnapshot(textureId: Int64) async throws -> PhotoResult { fatalError("TODO: implement NitroCameraModuleImpl.takeSnapshot") }
