@@ -1732,6 +1732,7 @@ class CameraSession(
         val surface = videoOutput.adoptParked() ?: return false
         wireRecordingCallbacks()
         switchToGlPreview {
+            renderer.recorderClockMonotonic = true // persistent: see NitraRenderer
             renderer.setRecordingSurface(surface)
             videoOutput.resumeAdopted()
         }
@@ -1826,12 +1827,26 @@ class CameraSession(
                         portrait = recPortrait,
                         persistent = options.persistent != 0L,
                     )
-                    // 2. Start the hardware recorder FIRST (important for some drivers)
+                    // 2. Start the hardware recorder FIRST (some drivers need
+                    //    it; the microphone also warms up during step 3).
                     videoOutput.startVideoRecorder()
-                    // 3. Enable the surface on the GL thread ONLY after the recorder is active
+                    // 3. Attach its surface once the preview runs on the GL
+                    //    renderer (a direct preview reconfigures first, ~1 s),
+                    //    and report "started" only when the first frame has
+                    //    reached the encoder: the clip begins there (MediaRecorder
+                    //    starts the movie when both tracks have data), so
+                    //    resolving earlier made clips shorter than the caller's
+                    //    recording window. The fallback keeps a camera that
+                    //    never delivers a frame from hanging startRecording.
+                    val resolved = java.util.concurrent.atomic.AtomicBoolean(false)
+                    val resolve = {
+                        if (resolved.compareAndSet(false, true) && cont.isActive) cont.resume(Unit)
+                    }
+                    renderer.onRecorderFrame = resolve
+                    renderer.recorderClockMonotonic = options.persistent != 0L
                     switchToGlPreview { renderer.setRecordingSurface(recSurface) }
+                    glHandler.postDelayed({ resolve() }, 2000)
                     Log.d("NitroCamera", "Video recording started on GPU pipeline")
-                    if (cont.isActive) cont.resume(Unit)
                 } catch (e: Exception) {
                     // Recorder-scoped failure: reject the caller's promise (which
                     // surfaces as a typed RecorderException) — do NOT emit a

@@ -1,142 +1,64 @@
-## Unreleased
+## 0.0.4 - 2026-11-08
 
 ### Added
 
-* **Plugin camera outputs** — `NitroCameraOutputs` (Kotlin / Swift), the
-  native hook other plugins (an RTMP / WebRTC publisher, a second encoder)
-  attach through, like vision-camera v5's `CameraOutput`. Android: register a
-  `Surface` (e.g. a MediaCodec input surface) for a `textureId`; the GL
-  renderer draws every frame into it — upright, un-mirrored unless asked,
-  sensor timestamps — without touching the camera's streams (a direct preview
-  moves onto the GL renderer). iOS: register a sink that receives the
-  session's video `CMSampleBuffer`s.
-* **Encoded output** — `CameraController.startEncodedOutput` /
-  `encodedOutputStats` / `stopEncodedOutput` (and the raw `NitroCamera`
-  methods): a hardware H.264 encoder (MediaCodec / VideoToolbox) attached
-  through that hook.
-* **Focus at a point, awaited** — `CameraController.focusAt(x, y,
-  {adaptiveness})` completes when the focus scan ends (`true` = sharp) and can
-  keep the lens there (`FocusAdaptiveness.locked`) or resume continuous AF —
-  vision-camera's `focus(point, { adaptiveness })`. Invalid points throw
-  `ArgumentError`, fixed-focus cameras `DeviceException('device/focus-unsupported')`.
-* **Depth output** — `CameraController.setDepthOutput(bool)` +
-  `depthStream` (`DepthFrame`, float32 metres via `.metres` / `.metresAt`):
-  Android DEPTH16 cameras, iOS TrueDepth / dual / LiDAR. Cameras without depth
-  throw `DeviceException('device/depth-unsupported')`.
-* **Hardware detectors** — `NativeDetector.hardwareFace` (Camera2 face
-  statistics / AVCaptureMetadataOutput) and `NativeDetector.hardwareCode`
-  (iOS AVCaptureMetadataOutput barcodes): detection without frame copies or
-  ML Kit. Unsupported ones emit a typed error payload.
-* **Native buffers** — `CameraController.setNativeBuffers(true)`:
-  `CameraFrame.nativeBuffer` / `FrameData.nativeBuffer` carry the camera's
-  own `AHardwareBuffer*` (Android 9+) / `CVPixelBufferRef` for GPU / ML
-  imports without a copy (vision-camera's `frame.getNativeBuffer()`). One is
-  held at a time; `CameraFrameProcessor` returns it after each handler, raw
-  stream listeners call `releaseNativeBuffer`.
-* **Session state** — `SessionState.colorRange` (full / video YUV range),
-  `audio` and `audioError`.
-* **Pluggable scanner engine** — `CodeScanner(handler:)` replaces the built-in
-  Dart decoder with any top-level `FrameHandler<CodeResult?>`, e.g. zxing-cpp
-  via `nitro_zxing` (the example app does this: QR scans drop from tens of ms
-  to ~4 ms a frame at 60 FPS on an iPhone 12). Helpers for such handlers:
-  `scannerWindowOf(frame)` (the viewfinder window to crop to) and
-  `scanFrameAdaptive(frame, kind, formats:)` (run the built-in engines only
-  for the formats the custom engine doesn't read).
-* **Direct scanner frames** — `CodeScanner.start(frames, direct: true)` has
-  the worker isolate read the native frame stream itself
-  (`CameraFrameProcessor.attachDirect`): no UI-isolate hop and no per-frame
-  copy. `frames` is ignored in this mode; handlers must not keep
-  `FrameData.bytes` past the call.
-* **Gesture listeners** (vision-camera 5.2.4 #4171 / #4172) —
-  `TapToFocusDetector(onTap:, onFocusCompleted:)`: the tapped point (0..1),
-  then the point and whether its focus scan ended sharp, e.g. to fade a focus
-  ring. `PinchToZoomDetector(onZoomChanged:)`: every clamped zoom a pinch
-  sets. Without `onFocusCompleted` a tap focuses exactly as before; with it,
-  a fixed-focus camera still meters exposure and just skips the callback.
-* **UI rotation** (vision-camera 5.2.3 #4147, `onUIRotationChanged`) —
-  `OrientationManager.uiRotationStream()`: the signed degrees (-90 / 0 / 90 /
-  180) to turn controls so they stay upright on a portrait-locked screen as
-  the phone rotates. Helpers: `OrientationManager.uiRotation(...)` (upstream's
-  `getUIRotation`) and `OrientationManager.clockwiseDegrees(...)`, which maps
-  each platform's orientation degrees to one clockwise convention.
-* **Photo container format** (vision-camera 5.2.4 #4170) —
-  `PhotoResult.containerFormat` and `PhotoResult.isRawPhoto`, alongside the
-  existing width / height / orientation / mirroring / timestamp.
-
-* **Persistent recording** (vision-camera `enablePersistentRecorder`) —
-  `startRecording(path, options: RecordingOptions(persistent: 1))` keeps one
-  recording going through a camera switch or reopening configure: the next
-  session that opens continues the same file, the switch gap is cut rather
-  than recorded as frozen video, and `stopRecording()` on the new controller
-  finalises it. A recording no session claims within 10 s is finalised.
-  `SessionState.recording` / `recordingPaused` report it. Android records
-  persistent clips through the GL pipeline (upright frames from any camera).
-* **Synchronized output** (vision-camera CameraOutputSynchronizer) —
-  `setSynchronizedOutput(true)` + `synchronizedFrames`: each video frame
-  paired with the depth map from the same capture (`SyncedFrame`, typed
-  `metres`). iOS AVCaptureDataOutputSynchronizer; Android sensor-timestamp
-  matching. The plain frame / depth streams keep working alongside.
-* **GPU resizer** (vision-camera-resizer) — `setResizer(ResizerOptions(...))`
-  + `resizedFrames`: every frame scaled on the GPU into an ML tensor of the
-  asked size, RGB(A)/BGR(A), uint8 or float32 0..1, cover or contain
-  (`ResizedFrame.float32` / `.uint8`). iOS Core Image on Metal; Android an
-  offscreen GL pass on the camera texture.
-* **Camera overlay** (the vision-camera Skia frame-processor role) —
-  `setOverlay(CameraOverlay()..rect(..)..circle(..)..line(..)..text(..))`
-  draws shapes and text into the preview AND recordings, in normalised
-  upright-frame coordinates; frame processors, the resizer and photos get the
-  frame without it. Implements the previously reserved `updateOverlay`.
-* **Multi-cam** (vision-camera `requiresMultiCam`) —
-  `CameraController.setMultiCamEnabled(true)` before opening cameras runs
-  them simultaneously; on iOS every session then joins one shared
-  AVCaptureMultiCamSession (multi-cam formats, explicit connections, the
-  microphone on the first camera; depth / hardware detectors unavailable).
-  Android already runs concurrent cameras.
+* **Persistent recording** — `startRecording(path, persistent: true)` keeps one file
+  recording across a camera switch or reopen (vision-camera
+  `enablePersistentRecorder`); `SessionState.recording` / `recordingPaused`.
+* **Synchronized output** — `setSynchronizedOutput(enabled: true)` +
+  `synchronizedFrames`: each video frame paired with its depth map.
+* **GPU resizer** — `startResizer(width:, height:, layout:, dataType:, fit:)`
+  + `resizedFrames`: ML tensors scaled on the GPU; `stopResizer()`.
+* **Camera overlay** — `setOverlay(CameraOverlay()..rect()..text())` draws
+  shapes and text into the preview and recordings.
+* **Multi-cam** — `CameraController.setMultiCam(enabled: true)` runs cameras
+  simultaneously (iOS `AVCaptureMultiCamSession`).
 * **Camera extensions** (Android 12+) — `setExtension(CameraExtension.night)`
-  (or hdr / bokeh / faceRetouch / auto, see `CameraDeviceInfo.extensions`)
-  runs a CameraExtensionSession for preview + stills; `setExtension(null)`
-  returns to the regular session. iOS throws
-  `DeviceException('device/extension-unsupported')`.
+  and hdr / bokeh / faceRetouch / auto.
+* **Plugin camera outputs** — `NitroCameraOutputs` (Kotlin / Swift) lets other
+  plugins receive camera frames; `startEncodedOutput` feeds a hardware H.264
+  encoder through it.
+* **Depth output** — `setDepthOutput(enabled: true)` + `depthFrames` (float32 metres).
+* **Hardware detectors** — `NativeDetector.hardwareFace` / `hardwareCode`
+  (no frame copies, no ML Kit).
+* **Native buffers** — `setNativeBuffers(enabled: true)`: `nativeBuffer` carries the
+  camera's `AHardwareBuffer*` / `CVPixelBufferRef`, held one at a time.
+* **Awaited focus** — `focusAt(x, y, {adaptiveness})` completes when the
+  scan ends.
+* **Pluggable scanner engine** — `CodeScanner(handler:)` (e.g. zxing-cpp via
+  `nitro_zxing`) and `start(frames, direct: true)`.
+* **Gesture callbacks** — `TapToFocusDetector(onTap:, onFocusCompleted:)`,
+  `PinchToZoomDetector(onZoomChanged:)`.
+* **UI rotation** — `OrientationManager.uiRotationStream()` keeps controls
+  upright on a portrait-locked screen.
+* `SessionState.colorRange` / `audio` / `audioError`;
+  `PhotoResult.containerFormat` / `isRawPhoto`.
 
 ### Changed
 
-* **Faster built-in scanner engines** — the postal / width engines threshold
-  each window once (`GrayWindow.mask`) instead of on every pixel test, size
-  bars in a single pass, and the streaming scan reuses its per-frame buffers
-  instead of allocating several full-window copies per frame (which kept the
-  worker's GC busy). Results are unchanged; the ALL-formats scan with no code
-  in view went from ~720 ms to ~50 ms a frame on an iPhone 12.
+* `startRecording` takes typed named parameters — `codec`, `fileType`,
+  `bitRate`, `maxDuration`, `maxFileSize`, `location`, `persistent` —
+  instead of raw `RecordingOptions` int codes (`options:` is deprecated,
+  removed in 0.1.0).
+* Built-in scanner engines are faster (empty ALL-formats scan ~720 → ~50 ms a
+  frame on an iPhone 12) with the same results.
 
 ### Fixed
 
-* **iOS: crash in a frame processor during a session change.** The zero-copy
-  frame buffer was freed as soon as it grew or its session closed, while a
-  frame still queued for a worker isolate pointed into it (`EXC_BAD_ACCESS`
-  in the worker's copy, e.g. starting a recording in scanner mode). Replaced
-  buffers are now freed after a short grace period. Same for the depth,
-  synchronized and resized streams.
-* **iOS: hardware code detectors report as soon as they start.** They now emit
-  one empty result on activation instead of staying silent until a code is in
-  view.
-* **Orientation on subscribe** (vision-camera 5.2.3 #4150) —
-  `OrientationManager.orientationStream` sends the current orientation to a
-  new listener straight away, and iOS emits it when orientation events are
-  enabled instead of waiting for the phone to rotate.
-* **Several `OrientationManager`s at once** — they share the one native
-  orientation listener: disposing one no longer stops events for the others
-  (only the last dispose turns it off, and `dispose()` without `start()` no
-  longer touches it), and a manager started later replays the orientation the
-  others already know.
-  `CameraDevicesObserver` shares its hot-plug callback the same way.
-* **iOS audio** — the app audio session is now configured by the plugin
-  (play-and-record mixing with other apps' audio, Bluetooth, speaker) instead
-  of AVFoundation's automatic setup, and a session that asked for audio but
-  can't record it (permission denied, no microphone, audio-session failure)
-  reports why (`SessionState.audioError` + an `AUDIO_UNAVAILABLE:` error
-  event) instead of silently recording without sound. Android likewise opens
-  video-only with `audioError` when the microphone permission is missing.
-* **iOS barcode detections** — the Vision barcode detector's string
-  symbology no longer breaks `DetectionResult.fromJson` (`DetectedBarcode.formatName`).
+* Android: a persistent recording no longer reports the device's sleep time
+  as its duration after a camera switch (its frames now use MediaRecorder's
+  monotonic clock); GL-path `startRecording` resolves once video reaches the
+  encoder.
+* Frame processor no longer allocates a frame copy per dropped frame (peak
+  memory 827 → 372 MB in the heaviest test; avoids iOS memory-limit kills).
+* iOS: crash when a session changed while a worker still read a frame buffer.
+* iOS: hardware code detectors emit an empty result as soon as they start.
+* `OrientationManager.orientationStream` sends the current orientation on
+  subscribe; several managers / `CameraDevicesObserver`s share one native
+  listener safely.
+* iOS audio session is configured by the plugin; a session without usable
+  audio reports `audioError` instead of recording silently.
+* iOS: Vision barcode symbology no longer breaks `DetectionResult.fromJson`.
 
 ## 0.0.3 - 2026-11-04
 

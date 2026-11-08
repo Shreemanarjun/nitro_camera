@@ -12,13 +12,50 @@ enum FocusAdaptiveness {
   locked,
 }
 
+/// Channel layout of a GPU-resizer tensor ([CameraController.startResizer]).
+enum TensorLayout {
+  rgb(3, 0),
+  rgba(4, 0),
+  bgr(3, 1),
+  bgra(4, 1);
+
+  const TensorLayout(this.channels, this.wireOrder);
+
+  /// Values per pixel.
+  final int channels;
+
+  /// Native channel-order code (0 = RGB(A), 1 = BGR(A)).
+  final int wireOrder;
+}
+
+/// Value type of a GPU-resizer tensor.
+enum TensorDataType {
+  /// 0..255 bytes.
+  uint8,
+
+  /// 0..1 floats.
+  float32,
+}
+
+/// How a frame is fitted into the tensor size.
+enum ResizeFit {
+  /// Scale to fill, cropping the overflow.
+  cover,
+
+  /// Scale to fit, padding with black bars.
+  contain,
+}
+
 /// Typed views of a [ResizedFrame] tensor.
 extension ResizedFrameTensor on ResizedFrame {
-  /// The tensor as float32 values (0..1) — only when `dataType == 1`.
+  /// The tensor's value type.
+  TensorDataType get type => dataType == 1 ? TensorDataType.float32 : TensorDataType.uint8;
+
+  /// The tensor as float32 values (0..1) — only for [TensorDataType.float32].
   /// Borrowed: valid only inside the stream listener.
   Float32List get float32 => data.buffer.asFloat32List(data.offsetInBytes, width * height * channels);
 
-  /// The tensor as uint8 values (0..255) — only when `dataType == 0`.
+  /// The tensor as uint8 values (0..255) — only for [TensorDataType.uint8].
   Uint8List get uint8 => data.buffer.asUint8List(data.offsetInBytes, width * height * channels);
 }
 

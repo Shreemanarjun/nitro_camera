@@ -28,7 +28,7 @@ void main() {
 
   group('persistent recording (vision-camera enablePersistentRecorder)', () {
     test('the persistent flag reaches native', () async {
-      await c.startRecording('/tmp/p.mp4', options: const RecordingOptions(persistent: 1));
+      await c.startRecording('/tmp/p.mp4', persistent: true);
       final opts = fake.argsOf('startVideoRecording')![2] as RecordingOptions;
       expect(opts.persistent, 1);
     });
@@ -73,28 +73,36 @@ void main() {
       expect(n, 1);
     });
 
-    test('forwards explicit options', () async {
+    test('maps the typed named parameters onto the native options', () async {
       await c.startRecording(
         '/tmp/out.mov',
-        options: const RecordingOptions(
-          codec: 1,
-          fileType: 1,
-          bitRate: 8000000,
-          maxDurationMs: 60000,
-          hasLocation: 1,
-          latitude: 1.5,
-          longitude: 2.5,
-        ),
+        codec: VideoCodec.hevc,
+        fileType: VideoFileType.mov,
+        bitRate: 8000000,
+        maxDuration: const Duration(minutes: 1),
+        maxFileSize: 5000,
+        location: (latitude: 1.5, longitude: 2.5, altitude: 3.5),
       );
 
       final o = fake.argsOf('startVideoRecording')![2] as RecordingOptions;
-      expect(o.codec, 1);
-      expect(o.fileType, 1);
-      expect(o.bitRate, 8000000);
-      expect(o.maxDurationMs, 60000);
-      expect(o.hasLocation, 1);
-      expect(o.latitude, 1.5);
-      expect(o.longitude, 2.5);
+      expect(
+        (o.codec, o.fileType, o.bitRate, o.maxDurationMs, o.maxFileSizeBytes, o.persistent),
+        (1, 1, 8000000, 60000, 5000, 0),
+      );
+      expect((o.hasLocation, o.latitude, o.longitude, o.altitude), (1, 1.5, 2.5, 3.5));
+    });
+
+    test('defaults leave limits, location and persistence off', () async {
+      await c.startRecording('/tmp/out.mp4');
+      final o = fake.argsOf('startVideoRecording')![2] as RecordingOptions;
+      expect((o.codec, o.fileType, o.bitRate, o.maxDurationMs, o.maxFileSizeBytes, o.hasLocation, o.persistent), (0, 0, 0, 0, 0, 0, 0));
+    });
+
+    test('the deprecated raw options still pass through unchanged', () async {
+      // ignore: deprecated_member_use_from_same_package
+      await c.startRecording('/tmp/out.mov', options: const RecordingOptions(codec: 1, maxDurationMs: 42));
+      final o = fake.argsOf('startVideoRecording')![2] as RecordingOptions;
+      expect((o.codec, o.maxDurationMs), (1, 42));
     });
 
     test('a second start while recording is ignored', () async {

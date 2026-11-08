@@ -295,13 +295,13 @@ final snap = await controller.takeSnapshot();
 ```dart
 await controller.startRecording(
   '/path/to/output.mp4',
-  options: const RecordingOptions(
-    codec: 0,             // VideoCodec.h264 (0) | .hevc (1)
-    fileType: 0,          // VideoFileType.mp4 (0) | .mov (1)
-    bitRate: 0,           // 0 = encoder default
-    maxDurationMs: 0,     // 0 = unlimited
-    maxFileSizeBytes: 0,  // 0 = unlimited
-  ),
+  codec: VideoCodec.hevc,                    // default h264
+  fileType: VideoFileType.mov,               // default mp4
+  bitRate: 8000000,                          // default: encoder's choice
+  maxDuration: const Duration(minutes: 1),   // auto-stop limits (optional)
+  maxFileSize: 200 * 1024 * 1024,
+  location: (latitude: 52.52, longitude: 13.40, altitude: 34), // geotag
+  persistent: true, // keep recording across a camera switch
 );
 
 controller.pauseRecording();
@@ -410,17 +410,46 @@ unsupported one answers with an error payload.
 ### Depth
 
 ```dart
-await controller.setDepthOutput(true); // DeviceException('device/depth-unsupported') without depth
-controller.depthStream.listen((DepthFrame d) {
+await controller.setDepthOutput(enabled: true); // DeviceException('device/depth-unsupported') without depth
+controller.depthFrames.listen((DepthFrame d) {
   final metres = d.metres;       // float32, row-major, 0 = no measurement
   final centre = d.metresAt(d.width ~/ 2, d.height ~/ 2);
 });
 ```
 
+### Synchronized frames, resizer, overlay, extensions, multi-cam
+
+```dart
+await controller.setSynchronizedOutput(enabled: true); // frame + depth from the same capture
+controller.synchronizedFrames.listen((SyncedFrame f) {
+  final metres = f.metres; // the depth half, float32 metres
+});
+
+// GPU resizer — ML tensors without a CPU resize (vision-camera-resizer)
+await controller.startResizer(width: 224, height: 224, dataType: TensorDataType.float32);
+controller.resizedFrames.listen((ResizedFrame t) {
+  final input = t.float32; // RGB, 0..1, upright; read inside the listener
+});
+await controller.stopResizer();
+
+// Overlay — drawn into the preview AND recordings (normalised 0..1 coordinates)
+controller.setOverlay(CameraOverlay()
+  ..rect(const Rect.fromLTWH(0.1, 0.1, 0.3, 0.2), color: Colors.green)
+  ..text('person 92%', at: const Offset(0.1, 0.07), color: Colors.green));
+controller.setOverlay(null); // clear
+
+// Vendor extensions (Android 12+): night, hdr, bokeh, faceRetouch, auto
+await controller.setExtension(CameraExtension.night);
+await controller.setExtension(null);
+
+// Several cameras at once (iOS AVCaptureMultiCamSession) — before opening them
+CameraController.setMultiCam(enabled: true);
+```
+
 ### Native buffers (GPU / ML without a copy)
 
 ```dart
-controller.setNativeBuffers(true);
+controller.setNativeBuffers(enabled: true);
 final proc = CameraFrameProcessor<int>(myHandler); // FrameData.nativeBuffer: AHardwareBuffer* / CVPixelBufferRef
 // A processor returns each buffer after its handler; raw frameStream
 // listeners call controller.releaseNativeBuffer(frame).

@@ -174,11 +174,7 @@ final class ComboAnalysis extends Module {
 
       await c.startRecording(
         path,
-        options: const RecordingOptions(
-          codec: 0, // h264
-          fileType: 0, // mp4
-          bitRate: 4_000_000,
-        ),
+        bitRate: 4_000_000,
       );
       expect(
         c.isRecording,
@@ -292,11 +288,7 @@ final class ComboAnalysis extends Module {
 
       await c.startRecording(
         path,
-        options: const RecordingOptions(
-          codec: 0, // h264
-          fileType: 0, // mp4
-          bitRate: 4_000_000,
-        ),
+        bitRate: 4_000_000,
       );
       expect(
         c.isRecording,
@@ -418,11 +410,7 @@ final class ComboAnalysis extends Module {
       final clock = Stopwatch()..start();
       await c.startRecording(
         path,
-        options: const RecordingOptions(
-          codec: 0, // h264
-          fileType: 0, // mp4
-          bitRate: 4_000_000,
-        ),
+        bitRate: 4_000_000,
       );
       expect(
         c.isRecording,

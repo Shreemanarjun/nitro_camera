@@ -480,7 +480,7 @@ final class ComboRecording extends Module {
     final beforeTid = cameraStore.activeTextureId.value;
     final wall = Stopwatch()..start();
 
-    await original.startRecording(path, options: const RecordingOptions(persistent: 1));
+    await original.startRecording(path, persistent: true);
     expect(original.isRecording, isTrue, reason: 'startRecording() did not arm');
     await pumpFor(const Duration(seconds: 2));
 

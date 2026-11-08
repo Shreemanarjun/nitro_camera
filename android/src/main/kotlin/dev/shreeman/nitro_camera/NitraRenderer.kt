@@ -144,6 +144,8 @@ class NitraRenderer(private val width: Int, private val height: Int) {
     private var overlayTex = 0
     private var overlayProgram = 0
     private var overlayVisible = false
+    // Last presentation time per encoder surface (see PresentationClock).
+    private val lastPresentedNs = java.util.WeakHashMap<Any, Long>()
 
     // ---- GPU resizer (vision-camera-resizer) --------------------------------
     // Renders the upright camera frame into a small offscreen framebuffer and
@@ -558,6 +560,12 @@ class NitraRenderer(private val width: Int, private val height: Int) {
         }
     }
 
+    /** Stamp recorder frames on the monotonic clock (persistent recordings). */
+    @Volatile var recorderClockMonotonic = false
+
+    /** One-shot, GL thread: fired after the first frame is presented to the recorder surface. */
+    @Volatile var onRecorderFrame: (() -> Unit)? = null
+
     fun drawFrame() {
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return
 
@@ -800,8 +808,18 @@ class NitraRenderer(private val width: Int, private val height: Int) {
 
         if (surface == recorderEglSurface || external) {
              // Sync timestamps for recorder / encoder smooth playback
-             val nsecs = st.timestamp
+             // A persistent recording spans a MediaRecorder pause/resume (the
+             // camera switch), whose bookkeeping runs on the monotonic clock;
+             // other recordings and plugin encoders keep sensor time.
+             val nsecs = if (surface == recorderEglSurface && recorderClockMonotonic) dev.shreeman.nitro_camera.utils.PresentationClock.toMonotonic(
+                 st.timestamp, android.os.SystemClock.elapsedRealtimeNanos(), System.nanoTime()) else st.timestamp
+             // An encoder must only see increasing sensor times. A fresh
+             // SurfaceTexture (camera switch, persistent recording) reports 0
+             // until its first camera frame; one such frame made MediaRecorder
+             // write an hour-long clip (boot-relative times vs 0).
+             if (!dev.shreeman.nitro_camera.utils.PresentationClock.accept(lastPresentedNs, surface, nsecs)) return true
              EGLExt.eglPresentationTimeANDROID(eglDisplay, surface, nsecs)
+             if (surface == recorderEglSurface) onRecorderFrame?.let { onRecorderFrame = null; it() }
         }
 
         if (!EGL14.eglSwapBuffers(eglDisplay, surface)) {

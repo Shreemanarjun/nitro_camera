@@ -762,7 +762,9 @@ final class ComboStress extends Module {
   /// caller asserts the list is empty at the end.
   Future<({Mp4Info info, int fileSize})> _autoStopPass({
     required String tag,
-    required RecordingOptions options,
+    required int bitRate,
+    Duration? maxDuration,
+    int? maxFileSize,
     required RecordingFinishedReason expected,
     required Duration wait,
     required List<String> lingering,
@@ -782,7 +784,12 @@ final class ComboStress extends Module {
         .listen((e) => stopped.add(e.message));
 
     await _awaitWithin(
-      c.startRecording(path, options: options),
+      c.startRecording(
+        path,
+        bitRate: bitRate,
+        maxDuration: maxDuration,
+        maxFileSize: maxFileSize,
+      ),
       deadline: const Duration(seconds: 15),
       label: '$tag startRecording',
     );
@@ -799,9 +806,8 @@ final class ComboStress extends Module {
       isTrue,
       reason:
           '$tag: no auto-stop within ${wait.inSeconds}s — the '
-          '${expected.name} limit never fired (maxDurationMs='
-          '${options.maxDurationMs}, maxFileSizeBytes='
-          '${options.maxFileSizeBytes})',
+          '${expected.name} limit never fired (maxDuration=$maxDuration, '
+          'maxFileSize=$maxFileSize)',
     );
 
     // Dart must see the recording finish WITHOUT an explicit stop call.
@@ -881,10 +887,8 @@ final class ComboStress extends Module {
     const durationLimitMs = 2500;
     final byDuration = await _autoStopPass(
       tag: 'autostop_dur',
-      options: const RecordingOptions(
-        bitRate: 4000000,
-        maxDurationMs: durationLimitMs,
-      ),
+      bitRate: 4000000,
+      maxDuration: const Duration(milliseconds: durationLimitMs),
       expected: RecordingFinishedReason.maxDurationReached,
       wait: const Duration(seconds: 25),
       lingering: lingering,
@@ -931,10 +935,8 @@ final class ComboStress extends Module {
     const sizeLimitBytes = 2000000;
     final bySize = await _autoStopPass(
       tag: 'autostop_size',
-      options: const RecordingOptions(
-        bitRate: 6000000,
-        maxFileSizeBytes: sizeLimitBytes,
-      ),
+      bitRate: 6000000,
+      maxFileSize: sizeLimitBytes,
       expected: RecordingFinishedReason.maxFileSizeReached,
       wait: const Duration(seconds: 40),
       lingering: lingering,

@@ -499,14 +499,14 @@ class CameraController extends ChangeNotifier {
     }
   }
 
-  /// Turns the depth stream ([depthStream]) on or off — vision-camera's
+  /// Turns the depth stream ([depthFrames]) on or off — vision-camera's
   /// CameraDepthFrameOutput. Needs a camera whose format reports
   /// `supportsDepthCapture` (iOS TrueDepth / dual / LiDAR, Android
   /// DEPTH_OUTPUT); otherwise throws
   /// `DeviceException('device/depth-unsupported')`. Android reconfigures the
   /// session (a brief preview blink), so it refuses during a recording with
   /// `SessionException('session/busy')`.
-  Future<void> setDepthOutput(bool enabled) async {
+  Future<void> setDepthOutput({required bool enabled}) async {
     _requireInitialized();
     try {
       await _native.setDepthOutput(_textureId!, enabled ? 1 : 0);
@@ -516,15 +516,15 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Depth maps of this session (float32 metres — see `DepthFrame.metres`).
-  Stream<DepthFrame> get depthStream => _native.depthStream.where((f) => f.textureId == _textureId);
+  Stream<DepthFrame> get depthFrames => _native.depthStream.where((f) => f.textureId == _textureId);
 
   /// Pairs each video frame with the depth map captured WITH it and streams
   /// the pairs on [synchronizedFrames] — vision-camera's
   /// CameraOutputSynchronizer. Turns depth output on as needed, so it throws
   /// the same `device/depth-unsupported` / `session/busy` errors as
-  /// [setDepthOutput]. The plain [frameStream] and [depthStream] keep
+  /// [setDepthOutput]. The plain [frameStream] and [depthFrames] keep
   /// working alongside.
-  Future<void> setSynchronizedOutput(bool enabled) async {
+  Future<void> setSynchronizedOutput({required bool enabled}) async {
     _requireInitialized();
     try {
       await _native.setSynchronizedOutput(_textureId!, enabled ? 1 : 0);
@@ -552,7 +552,7 @@ class CameraController extends ChangeNotifier {
   /// hardware budget) fails like any other open — [initialize] throws.
   /// Depth and hardware detectors are unavailable in multi-cam mode on iOS.
   /// Android runs concurrent cameras natively, so this is a no-op there.
-  static void setMultiCamEnabled(bool enabled, {NitroCamera? native}) =>
+  static void setMultiCam({required bool enabled, NitroCamera? native}) =>
       (native ?? NitroCamera.instance).setMultiCamEnabled(enabled ? 1 : 0);
 
   /// Turns a vendor camera extension on (Android 12+ night, HDR, bokeh, face
@@ -572,15 +572,39 @@ class CameraController extends ChangeNotifier {
   }
 
   /// Starts (or reconfigures) the GPU resizer: every frame is scaled on the
-  /// GPU into an ML-ready tensor on [resizedFrames] — vision-camera-resizer.
-  /// Pass `const ResizerOptions(enabled: 0)` (or call [stopResizer]) to stop.
-  /// Throws [ArgumentError] for a non-positive size or channels other than 3
-  /// or 4.
-  Future<void> setResizer(ResizerOptions options) async {
-    _requireInitialized();
-    if (options.enabled != 0 && (options.width <= 0 || options.height <= 0 || (options.channels != 3 && options.channels != 4))) {
-      throw ArgumentError('resizer needs a positive size and 3 or 4 channels');
+  /// GPU into a [width] × [height] ML tensor on [resizedFrames] —
+  /// vision-camera-resizer. Upright and un-mirrored. Throws [ArgumentError]
+  /// for a non-positive size.
+  ///
+  /// ```dart
+  /// await controller.startResizer(width: 224, height: 224, dataType: TensorDataType.float32);
+  /// controller.resizedFrames.listen((t) => model.run(t.float32));
+  /// ```
+  Future<void> startResizer({
+    required int width,
+    required int height,
+    TensorLayout layout = TensorLayout.rgb,
+    TensorDataType dataType = TensorDataType.uint8,
+    ResizeFit fit = ResizeFit.cover,
+  }) {
+    if (width <= 0 || height <= 0) {
+      throw ArgumentError('startResizer needs a positive width and height (got ${width}x$height)');
     }
+    return _applyResizer(ResizerOptions(
+      width: width,
+      height: height,
+      channels: layout.channels,
+      dataType: dataType.index,
+      channelOrder: layout.wireOrder,
+      scaleMode: fit.index,
+    ));
+  }
+
+  /// Stops the GPU resizer.
+  Future<void> stopResizer() => _applyResizer(const ResizerOptions(enabled: 0));
+
+  Future<void> _applyResizer(ResizerOptions options) async {
+    _requireInitialized();
     try {
       await _native.setResizer(_textureId!, options);
     } catch (e) {
@@ -588,10 +612,7 @@ class CameraController extends ChangeNotifier {
     }
   }
 
-  /// Stops the GPU resizer.
-  Future<void> stopResizer() => setResizer(const ResizerOptions(enabled: 0));
-
-  /// GPU-resized tensors of this session ([setResizer]); read `data` (or
+  /// GPU-resized tensors of this session ([startResizer]); read `data` (or
   /// `ResizedFrame.float32`) inside the listener only.
   Stream<ResizedFrame> get resizedFrames => _native.resizedStream.where((f) => f.textureId == _textureId);
 
@@ -632,7 +653,7 @@ class CameraController extends ChangeNotifier {
   /// until released or 1 s after delivery, whichever comes first — the camera
   /// reclaims unreleased ones, so don't use it past that. Throws
   /// `DeviceException('device/native-buffer-unsupported')` below Android 9.
-  void setNativeBuffers(bool enabled) {
+  void setNativeBuffers({required bool enabled}) {
     _requireInitialized();
     try {
       _native.setNativeBuffers(_textureId!, enabled ? 1 : 0);
@@ -961,10 +982,29 @@ class CameraController extends ChangeNotifier {
 
   /// Starts recording to [outputPath].
   ///
-  /// [options] controls codec / bit-rate / container / auto-stop limits and an
-  /// optional GPS geotag (see [RecordingOptions]).
+  /// * [codec] / [fileType] — H.264 or HEVC in MP4 or MOV.
+  /// * [bitRate] — target bits per second; `null` = encoder default.
+  /// * [maxDuration] / [maxFileSize] (bytes) — auto-stop limits; the file is
+  ///   finalised and reported on [events] (`recordingStopped`).
+  /// * [location] — GPS geotag written into the movie metadata.
+  /// * [persistent] — keep recording through a camera switch or reopening
+  ///   [configure]: the next session continues the same file
+  ///   (vision-camera's `enablePersistentRecorder`).
+  ///
+  /// ```dart
+  /// await controller.startRecording(path, codec: VideoCodec.hevc, maxDuration: const Duration(seconds: 30));
+  /// ```
   Future<void> startRecording(
     String outputPath, {
+    VideoCodec codec = VideoCodec.h264,
+    VideoFileType fileType = VideoFileType.mp4,
+    int? bitRate,
+    Duration? maxDuration,
+    int? maxFileSize,
+    ({double latitude, double longitude, double altitude})? location,
+    bool persistent = false,
+    @Deprecated('Use the named parameters (codec, fileType, bitRate, maxDuration, '
+        'maxFileSize, location, persistent). Removed in 0.1.0.')
     RecordingOptions? options,
   }) async {
     _requireInitialized();
@@ -973,7 +1013,19 @@ class CameraController extends ChangeNotifier {
       await _native.startVideoRecording(
         _textureId!,
         outputPath,
-        options ?? const RecordingOptions(),
+        options ??
+            RecordingOptions(
+              codec: codec.index,
+              fileType: fileType.index,
+              bitRate: bitRate ?? 0,
+              maxDurationMs: maxDuration?.inMilliseconds ?? 0,
+              maxFileSizeBytes: maxFileSize ?? 0,
+              latitude: location?.latitude ?? 0,
+              longitude: location?.longitude ?? 0,
+              altitude: location?.altitude ?? 0,
+              hasLocation: location != null ? 1 : 0,
+              persistent: persistent ? 1 : 0,
+            ),
       );
     } on CameraException {
       rethrow;

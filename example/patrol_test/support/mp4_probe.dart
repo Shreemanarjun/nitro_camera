@@ -32,6 +32,10 @@ class Mp4Info {
   /// Duration from `mvhd` (timescale-corrected), or null when absent.
   final int? durationMs;
 
+  /// Per-track `mdhd` duration and `elst` start offset, for diagnosing A/V
+  /// alignment (e.g. `vide 980ms@+480ms soun 1500ms@+0ms`).
+  final String trackTiming;
+
   /// Number of `trak` boxes.
   final int trackCount;
 
@@ -65,6 +69,7 @@ class Mp4Info {
     required this.hasMdat,
     required this.hasMoov,
     required this.durationMs,
+    this.trackTiming = '',
     required this.trackCount,
     required this.hasAudioTrack,
     required this.hasVideoTrack,
@@ -82,7 +87,7 @@ class Mp4Info {
       'Mp4Info(playable=$isPlayable, ftyp=$hasFtyp, mdat=$hasMdat, '
       'moov=$hasMoov, durationMs=$durationMs, tracks=$trackCount, '
       'video=$hasVideoTrack, audio=$hasAudioTrack, '
-      'rotation=$rotationDegrees, ${width}x$height)';
+      'rotation=$rotationDegrees, ${width}x$height, $trackTiming)';
 }
 
 /// Reads the box structure of [file] without decoding any media.
@@ -105,6 +110,9 @@ Mp4Info probeMp4(File file) {
     hasMdat: state.mdatBytes > 0,
     hasMoov: state.hasMoov,
     durationMs: durationMs,
+    trackTiming: state.tracks
+        .map((t) => '${t.handler} ${t.mediaMs}ms@+${t.emptyEditMs}ms')
+        .join(' '),
     trackCount: state.trackCount,
     hasAudioTrack: state.hasAudioTrack,
     hasVideoTrack: state.hasVideoTrack,
@@ -123,6 +131,7 @@ class _ProbeState {
   bool hasVideoTrack = false;
   int movieTimescale = 0;
   int movieDuration = 0;
+  final tracks = <_TrackTiming>[];
 
   /// `tkhd` precedes `hdlr` inside a `trak`, so the transform is parked here
   /// and only promoted to the video track once `hdlr` says `vide`.
@@ -133,6 +142,12 @@ class _ProbeState {
   int? videoRotation;
   int? videoWidth;
   int? videoHeight;
+}
+
+class _TrackTiming {
+  String handler = '?';
+  int mediaMs = 0;
+  int emptyEditMs = 0;
 }
 
 /// Container boxes whose payload is itself a box list.
@@ -168,6 +183,7 @@ void _walk(Uint8List bytes, ByteData data, int start, int end, _ProbeState s) {
         s.hasMoov = true;
       case 'trak':
         s.trackCount++;
+        s.tracks.add(_TrackTiming());
         s.pendingRotation = null;
         s.pendingWidth = null;
         s.pendingHeight = null;
@@ -177,6 +193,20 @@ void _walk(Uint8List bytes, ByteData data, int start, int end, _ProbeState s) {
         _readTkhd(data, bodyStart, bodyEnd, s);
       case 'hdlr':
         _readHdlr(bytes, bodyStart, bodyEnd, s);
+        if (s.tracks.isNotEmpty && bodyStart + 12 <= bodyEnd) {
+          s.tracks.last.handler = String.fromCharCodes(bytes, bodyStart + 8, bodyStart + 12);
+        }
+      case 'mdhd':
+        if (s.tracks.isNotEmpty && bodyStart + 24 <= bodyEnd && data.getUint8(bodyStart) == 0) {
+          final ts = data.getUint32(bodyStart + 12);
+          if (ts > 0) s.tracks.last.mediaMs = (data.getUint32(bodyStart + 16) * 1000 / ts).round();
+        }
+      case 'elst':
+        // An empty edit (media_time -1) first = the track starts that late.
+        if (s.tracks.isNotEmpty && s.movieTimescale > 0 && bodyStart + 16 <= bodyEnd &&
+            data.getUint8(bodyStart) == 0 && data.getInt32(bodyStart + 12) == -1) {
+          s.tracks.last.emptyEditMs = (data.getUint32(bodyStart + 8) * 1000 / s.movieTimescale).round();
+        }
     }
 
     if (_containers.contains(type)) _walk(bytes, data, bodyStart, bodyEnd, s);

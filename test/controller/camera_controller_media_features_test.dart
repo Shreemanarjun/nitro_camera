@@ -59,9 +59,9 @@ void main() {
 
   group('multi-cam', () {
     test('setMultiCamEnabled reaches native', () {
-      CameraController.setMultiCamEnabled(true, native: fake);
+      CameraController.setMultiCam(enabled: true, native: fake);
       expect(fake.argsOf('setMultiCamEnabled'), [1]);
-      CameraController.setMultiCamEnabled(false, native: fake);
+      CameraController.setMultiCam(enabled: false, native: fake);
       expect(fake.argsOf('setMultiCamEnabled'), [0]);
     });
   });
@@ -79,16 +79,16 @@ void main() {
     );
 
     test('options reach native; stopResizer disables', () async {
-      await c.setResizer(const ResizerOptions(width: 192, height: 192, dataType: 1, channelOrder: 1, scaleMode: 1));
+      await c.startResizer(width: 192, height: 192, layout: TensorLayout.bgr, dataType: TensorDataType.float32, fit: ResizeFit.contain);
       final o = fake.argsOf('setResizer')![1] as ResizerOptions;
       expect((o.enabled, o.width, o.height, o.channels, o.dataType, o.channelOrder, o.scaleMode), (1, 192, 192, 3, 1, 1, 1));
       await c.stopResizer();
       expect((fake.argsOf('setResizer')![1] as ResizerOptions).enabled, 0);
     });
 
-    test('rejects a bad size or channel count before reaching native', () async {
-      await expectLater(c.setResizer(const ResizerOptions(width: 0)), throwsArgumentError);
-      await expectLater(c.setResizer(const ResizerOptions(channels: 2)), throwsArgumentError);
+    test('rejects a bad size before reaching native', () async {
+      expect(() => c.startResizer(width: 0, height: 224), throwsArgumentError);
+      expect(() => c.startResizer(width: 224, height: -1), throwsArgumentError);
       expect(fake.called('setResizer'), isFalse);
     });
 

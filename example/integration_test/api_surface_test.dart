@@ -440,11 +440,7 @@ void main() {
           '${dir.path}/api_video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       await c.startRecording(
         path,
-        options: const RecordingOptions(
-          codec: 0, // h264
-          fileType: 0, // mp4
-          bitRate: 4_000_000,
-        ),
+        bitRate: 4_000_000,
       );
       expect(c.isRecording, isTrue);
       await pumpFor(tester, const Duration(seconds: 1));

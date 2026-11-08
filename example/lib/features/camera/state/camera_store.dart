@@ -315,6 +315,9 @@ class CameraStore {
     activeController.value = controller;
     activeTextureId.value = controller.textureId;
     status.value = CameraStatus.running;
+    // Off the startup path: the orientation sensor only matters once the
+    // preview shows (starting it before the camera opened cost ~17 ms).
+    _startUiRotation();
     resolvedConfig.value = controller.resolvedConfig;
 
     _eventSub?.cancel();
@@ -436,7 +439,6 @@ class CameraStore {
 
   Future<void> _initImpl() async {
     await Future<void>.value(); // yield once before the heavy init work
-    _startUiRotation();
     unawaited(hydrateGallery());
     try {
       loading.value = true;
@@ -794,16 +796,11 @@ class CameraStore {
           final path = '${dir.path}/video_$stamp.$ext';
           await ctrl.startRecording(
             path,
-            options: RecordingOptions(
-              codec: videoCodec.value.nativeValue,
-              fileType: videoCodec.value == VideoCodec.hevc
-                  ? VideoFileType.mov.nativeValue
-                  : VideoFileType.mp4.nativeValue,
-              latitude: geotagEnabled.value ? _demoLocation.latitude : 0,
-              longitude: geotagEnabled.value ? _demoLocation.longitude : 0,
-              altitude: geotagEnabled.value ? _demoLocation.altitude : 0,
-              hasLocation: geotagEnabled.value ? 1 : 0,
-            ),
+            codec: videoCodec.value,
+            fileType: videoCodec.value == VideoCodec.hevc
+                ? VideoFileType.mov
+                : VideoFileType.mp4,
+            location: geotagEnabled.value ? _demoLocation : null,
           );
         }
         isRecording.value = true;

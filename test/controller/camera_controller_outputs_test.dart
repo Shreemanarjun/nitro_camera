@@ -46,16 +46,16 @@ void main() {
     }
 
     test('enable / disable reach native', () async {
-      await c.setSynchronizedOutput(true);
+      await c.setSynchronizedOutput(enabled: true);
       expect(fake.argsOf('setSynchronizedOutput'), [7, 1]);
-      await c.setSynchronizedOutput(false);
+      await c.setSynchronizedOutput(enabled: false);
       expect(fake.argsOf('setSynchronizedOutput'), [7, 0]);
     });
 
     test('maps DEPTH_UNSUPPORTED like setDepthOutput', () async {
       fake.failWith('setSynchronizedOutput', Exception('DEPTH_UNSUPPORTED: no depth'));
       await expectLater(
-        c.setSynchronizedOutput(true),
+        c.setSynchronizedOutput(enabled: true),
         throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/depth-unsupported')),
       );
     });
@@ -115,30 +115,30 @@ void main() {
 
   group('depth output', () {
     test('setDepthOutput forwards on/off', () async {
-      await c.setDepthOutput(true);
-      await c.setDepthOutput(false);
+      await c.setDepthOutput(enabled: true);
+      await c.setDepthOutput(enabled: false);
       expect(fake.callNames, ['setDepthOutput', 'setDepthOutput']);
       expect(fake.argsOf('setDepthOutput'), [7, 0]);
     });
 
     test('maps DEPTH_UNSUPPORTED to DeviceException(device/depth-unsupported)', () async {
       fake.failWith('setDepthOutput', Exception('DEPTH_UNSUPPORTED: no depth'));
-      await expectLater(c.setDepthOutput(true), throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/depth-unsupported')));
+      await expectLater(c.setDepthOutput(enabled: true), throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/depth-unsupported')));
     });
 
     test('maps SESSION_NOT_RUNNING to SessionException(session/not-running)', () async {
       fake.failWith('setDepthOutput', Exception('SESSION_NOT_RUNNING: gone'));
-      await expectLater(c.setDepthOutput(true), throwsA(isA<SessionException>().having((e) => e.code, 'code', 'session/not-running')));
+      await expectLater(c.setDepthOutput(enabled: true), throwsA(isA<SessionException>().having((e) => e.code, 'code', 'session/not-running')));
     });
 
     test('maps SESSION_BUSY (recording) to SessionException(session/busy)', () async {
       fake.failWith('setDepthOutput', Exception('SESSION_BUSY: recording'));
-      await expectLater(c.setDepthOutput(true), throwsA(isA<SessionException>().having((e) => e.code, 'code', 'session/busy')));
+      await expectLater(c.setDepthOutput(enabled: true), throwsA(isA<SessionException>().having((e) => e.code, 'code', 'session/busy')));
     });
 
     test('depthStream keeps only this session and exposes metres', () async {
       final got = <List<double>>[];
-      final sub = c.depthStream.listen((f) => got.add([f.metres[0], f.metres[3], f.metresAt(1, 1)]));
+      final sub = c.depthFrames.listen((f) => got.add([f.metres[0], f.metres[3], f.metresAt(1, 1)]));
       fake.emitDepth(_depth(textureId: 99)); // another session
       fake.emitDepth(_depth(textureId: 7));
       await pumpEventQueue();
@@ -174,22 +174,22 @@ void main() {
 
   group('native buffers', () {
     test('setNativeBuffers forwards; release skips frames without a buffer', () {
-      c.setNativeBuffers(true);
+      c.setNativeBuffers(enabled: true);
       c.releaseNativeBuffer(_frameWith(0));
       c.releaseNativeBuffer(_frameWith(0xBEEF));
-      c.setNativeBuffers(false);
+      c.setNativeBuffers(enabled: false);
       expect(fake.callNames, ['setNativeBuffers', 'releaseNativeBuffer', 'setNativeBuffers']);
       expect(fake.calls[1].args, [0xBEEF]);
     });
 
     test('maps NATIVE_BUFFER_UNSUPPORTED to DeviceException(device/native-buffer-unsupported)', () {
       fake.failWith('setNativeBuffers', Exception('NATIVE_BUFFER_UNSUPPORTED: needs Android 9'));
-      expect(() => c.setNativeBuffers(true), throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/native-buffer-unsupported')));
+      expect(() => c.setNativeBuffers(enabled: true), throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/native-buffer-unsupported')));
     });
 
     test('before initialize throws session/not-initialized', () {
       final fresh = CameraController(device: testDevice(), native: fake);
-      expect(() => fresh.setNativeBuffers(true), throwsA(isA<SessionException>()));
+      expect(() => fresh.setNativeBuffers(enabled: true), throwsA(isA<SessionException>()));
     });
   });
 

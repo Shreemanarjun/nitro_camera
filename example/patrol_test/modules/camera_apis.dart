@@ -324,11 +324,7 @@ final class CameraApis extends Module {
     final wall = Stopwatch()..start();
     await c.startRecording(
       path,
-      options: const RecordingOptions(
-        codec: 0, // h264
-        fileType: 0, // mp4
-        bitRate: 4_000_000,
-      ),
+      bitRate: 4_000_000,
     );
     expect(c.isRecording, isTrue);
     await pumpFor(const Duration(seconds: 1));
@@ -662,7 +658,7 @@ final class CameraApis extends Module {
     final startDevice = cameraStore.currentDevice.value;
     Future<bool> enableOn(CameraController c) async {
       try {
-        await c.setSynchronizedOutput(true);
+        await c.setSynchronizedOutput(enabled: true);
         return true;
       } on DeviceException catch (e) {
         expect(e.code, 'device/depth-unsupported');
@@ -673,12 +669,17 @@ final class CameraApis extends Module {
     var c = _ctrl;
     var switched = false;
     if (!await enableOn(c)) {
-      final front = cameraStore.devices.value.where((d) => d.position == CameraPosition.front).firstOrNull;
+      final front = cameraStore.devices.value
+          .where((d) => d.position == CameraPosition.front)
+          .firstOrNull;
       if (front == null || front.id == c.device.id) return false;
       final before = cameraStore.activeTextureId.value;
       await cameraStore.selectDevice(front);
       await pumpUntil(
-        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before && (cameraStore.activeController.value?.isInitialized ?? false),
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != before &&
+            (cameraStore.activeController.value?.isInitialized ?? false),
         reason: 'switched to the front camera for depth',
         timeout: const Duration(seconds: 25),
       );
@@ -701,22 +702,41 @@ final class CameraApis extends Module {
       }
       expect(p.size, greaterThan(0), reason: 'the pair carries video pixels');
       expect(p.textureId, c.textureId);
-      pairs.add((p.width, p.height, p.depthWidth, p.depthHeight, valid / (m.length / 7)));
+      pairs.add((
+        p.width,
+        p.height,
+        p.depthWidth,
+        p.depthHeight,
+        valid / (m.length / 7),
+      ));
     });
-    final s2 = c.depthStream.listen((_) => plainDepth++);
+    final s2 = c.depthFrames.listen((_) => plainDepth++);
     final s3 = c.frameStream.listen((_) => plainFrames++);
     c.setFrameProcessing(enabled: true);
 
-    await pumpUntil(() => pairs.length >= 5, reason: 'synchronized pairs arrive', timeout: const Duration(seconds: 15));
-    await pumpUntil(() => plainDepth >= 3 && plainFrames >= 3, reason: 'the plain depth and frame streams keep flowing while pairing');
+    await pumpUntil(
+      () => pairs.length >= 5,
+      reason: 'synchronized pairs arrive',
+      timeout: const Duration(seconds: 15),
+    );
+    await pumpUntil(
+      () => plainDepth >= 3 && plainFrames >= 3,
+      reason: 'the plain depth and frame streams keep flowing while pairing',
+    );
     final (w, h, dw, dh, validFrac) = pairs.last;
     // ignore: avoid_print
-    print('synced: video ${w}x$h + depth ${dw}x$dh valid=${(validFrac * 100).toStringAsFixed(0)}% after ${pairs.length} pairs (plain depth $plainDepth, frames $plainFrames)');
+    print(
+      'synced: video ${w}x$h + depth ${dw}x$dh valid=${(validFrac * 100).toStringAsFixed(0)}% after ${pairs.length} pairs (plain depth $plainDepth, frames $plainFrames)',
+    );
     expect(w * h, greaterThan(0));
     expect(dw * dh, greaterThan(0));
-    expect(validFrac, greaterThan(0.05), reason: 'the depth half carries plausible distances');
+    expect(
+      validFrac,
+      greaterThan(0.05),
+      reason: 'the depth half carries plausible distances',
+    );
 
-    await c.setSynchronizedOutput(false);
+    await c.setSynchronizedOutput(enabled: false);
     await pumpFor(const Duration(milliseconds: 600));
     final n = pairs.length;
     await pumpFor(const Duration(milliseconds: 800));
@@ -725,14 +745,16 @@ final class CameraApis extends Module {
     await s1.cancel();
     await s2.cancel();
     await s3.cancel();
-    await c.setDepthOutput(false);
+    await c.setDepthOutput(enabled: false);
     expect(cameraStore.status.value, CameraStatus.running);
 
     if (switched && startDevice != null) {
       final before = cameraStore.activeTextureId.value;
       await cameraStore.selectDevice(startDevice);
       await pumpUntil(
-        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before,
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != before,
         reason: 'restored the original camera',
         timeout: const Duration(seconds: 25),
       );
@@ -745,25 +767,54 @@ final class CameraApis extends Module {
   /// in that corner of a frame pulled from the recorded clip.
   Future<void> verifyOverlayInRecording() async {
     final c = _ctrl;
-    c.setOverlay(CameraOverlay()..rect(const Rect.fromLTWH(0, 0, 0.35, 0.35), color: const Color(0xFFFF0000), strokeWidth: 0));
+    c.setOverlay(
+      CameraOverlay()..rect(
+        const Rect.fromLTWH(0, 0, 0.35, 0.35),
+        color: const Color(0xFFFF0000),
+        strokeWidth: 0,
+      ),
+    );
     await pumpFor(const Duration(milliseconds: 500));
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/patrol_overlay_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    final path =
+        '${dir.path}/patrol_overlay_${DateTime.now().millisecondsSinceEpoch}.mp4';
     await c.startRecording(path);
     await pumpFor(const Duration(seconds: 2));
     final rec = await c.stopRecording();
     c.setOverlay(null);
 
-    final jpeg = await VideoThumbnail.thumbnailData(video: rec.path, imageFormat: ImageFormat.JPEG, maxWidth: 240, quality: 95, timeMs: 1000);
+    final jpeg = await VideoThumbnail.thumbnailData(
+      video: rec.path,
+      imageFormat: ImageFormat.JPEG,
+      maxWidth: 240,
+      quality: 95,
+      timeMs: 1000,
+    );
     final frame = img.decodeJpg(jpeg)!;
-    final corner = frame.getPixel((frame.width * 0.12).round(), (frame.height * 0.12).round());
-    final centre = frame.getPixel((frame.width * 0.7).round(), (frame.height * 0.7).round());
+    final corner = frame.getPixel(
+      (frame.width * 0.12).round(),
+      (frame.height * 0.12).round(),
+    );
+    final centre = frame.getPixel(
+      (frame.width * 0.7).round(),
+      (frame.height * 0.7).round(),
+    );
     // ignore: avoid_print
-    print('overlay: ${frame.width}x${frame.height} corner=(${corner.r},${corner.g},${corner.b}) centre=(${centre.r},${centre.g},${centre.b})');
-    expect(corner.r, greaterThan(180), reason: 'the overlay box is red in the recording');
+    print(
+      'overlay: ${frame.width}x${frame.height} corner=(${corner.r},${corner.g},${corner.b}) centre=(${centre.r},${centre.g},${centre.b})',
+    );
+    expect(
+      corner.r,
+      greaterThan(180),
+      reason: 'the overlay box is red in the recording',
+    );
     expect(corner.g, lessThan(90));
     expect(corner.b, lessThan(90));
-    expect(centre.r - math.max(centre.g, centre.b), lessThan(150), reason: 'outside the box is the camera image, not overlay red');
+    expect(
+      centre.r - math.max(centre.g, centre.b),
+      lessThan(150),
+      reason: 'outside the box is the camera image, not overlay red',
+    );
     File(rec.path).deleteSync();
   }
 
@@ -779,18 +830,33 @@ final class CameraApis extends Module {
         values.add(t.float32.toList());
       }
     });
-    await c.setResizer(const ResizerOptions(width: 64, height: 48, channels: 3, dataType: 1, scaleMode: 0));
+    await c.startResizer(width: 64, height: 48, dataType: TensorDataType.float32);
     await pumpUntil(() => f32.length >= 5, reason: 'float32 tensors arrive');
     final t = f32.last;
-    expect((t.width, t.height, t.channels, t.size), (64, 48, 3, 64 * 48 * 3 * 4));
+    expect(
+      (t.width, t.height, t.channels, t.size),
+      (64, 48, 3, 64 * 48 * 3 * 4),
+    );
     final v = values.last;
     expect(v.length, 64 * 48 * 3);
-    expect(v.every((x) => x >= 0 && x <= 1), isTrue, reason: 'float32 values are normalised to 0..1');
+    expect(
+      v.every((x) => x >= 0 && x <= 1),
+      isTrue,
+      reason: 'float32 values are normalised to 0..1',
+    );
     final mean = v.reduce((a, b) => a + b) / v.length;
-    final variance = v.map((x) => (x - mean) * (x - mean)).reduce((a, b) => a + b) / v.length;
+    final variance =
+        v.map((x) => (x - mean) * (x - mean)).reduce((a, b) => a + b) /
+        v.length;
     // ignore: avoid_print
-    print('resizer: 64x48x3 f32 mean=${mean.toStringAsFixed(3)} sd=${math.sqrt(variance).toStringAsFixed(3)}');
-    expect(math.sqrt(variance), greaterThan(0.005), reason: 'the tensor carries the camera image, not a flat fill');
+    print(
+      'resizer: 64x48x3 f32 mean=${mean.toStringAsFixed(3)} sd=${math.sqrt(variance).toStringAsFixed(3)}',
+    );
+    expect(
+      math.sqrt(variance),
+      greaterThan(0.005),
+      reason: 'the tensor carries the camera image, not a flat fill',
+    );
 
     // Reconfigure: uint8 BGRA, letterboxed.
     final u8 = <(int, int, int, int)>[];
@@ -804,8 +870,11 @@ final class CameraApis extends Module {
         u8.add((t.width, t.height, t.channels, opaque ? 1 : 0));
       }
     });
-    await c.setResizer(const ResizerOptions(width: 32, height: 32, channels: 4, dataType: 0, channelOrder: 1, scaleMode: 1));
-    await pumpUntil(() => u8.length >= 3, reason: 'uint8 tensors arrive after reconfiguring');
+    await c.startResizer(width: 32, height: 32, layout: TensorLayout.bgra, fit: ResizeFit.contain);
+    await pumpUntil(
+      () => u8.length >= 3,
+      reason: 'uint8 tensors arrive after reconfiguring',
+    );
     expect(u8.last, (32, 32, 4, 1));
 
     await c.stopResizer();
@@ -826,7 +895,13 @@ final class CameraApis extends Module {
     if (Platform.isIOS) {
       await expectLater(
         c.setExtension(CameraExtension.night),
-        throwsA(isA<DeviceException>().having((e) => e.code, 'code', 'device/extension-unsupported')),
+        throwsA(
+          isA<DeviceException>().having(
+            (e) => e.code,
+            'code',
+            'device/extension-unsupported',
+          ),
+        ),
       );
       await c.setExtension(null);
       expect(cameraStore.status.value, CameraStatus.running);
@@ -834,7 +909,10 @@ final class CameraApis extends Module {
     }
     final ext = c.device.extensions.firstOrNull;
     if (ext == null) {
-      await expectLater(c.setExtension(CameraExtension.night), throwsA(isA<DeviceException>()));
+      await expectLater(
+        c.setExtension(CameraExtension.night),
+        throwsA(isA<DeviceException>()),
+      );
       return;
     }
     await c.setExtension(ext);
@@ -845,20 +923,25 @@ final class CameraApis extends Module {
     await c.setExtension(null);
     await pumpFor(const Duration(seconds: 1));
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/patrol_after_ext_${DateTime.now().millisecondsSinceEpoch}.mp4';
+    final path =
+        '${dir.path}/patrol_after_ext_${DateTime.now().millisecondsSinceEpoch}.mp4';
     await c.startRecording(path);
     await pumpFor(const Duration(seconds: 1));
     final rec = await c.stopRecording();
-    expect(rec.fileSize, greaterThan(0), reason: 'the regular session is back after the extension');
+    expect(
+      rec.fileSize,
+      greaterThan(0),
+      reason: 'the regular session is back after the extension',
+    );
     File(rec.path).deleteSync();
   }
 
   Future<bool> verifyDepthOutput() async {
     final c = _ctrl;
     final advertised = c.device.formats.any((f) => f.supportsDepthCapture);
-    await c.setDepthOutput(false); // off while off: no-op
+    await c.setDepthOutput(enabled: false); // off while off: no-op
     try {
-      await c.setDepthOutput(true);
+      await c.setDepthOutput(enabled: true);
     } on DeviceException catch (e) {
       expect(e.code, 'device/depth-unsupported');
       // ignore: avoid_print
@@ -870,7 +953,7 @@ final class CameraApis extends Module {
       return false;
     }
     final frames = <(int, int, double)>[];
-    final sub = c.depthStream.listen((DepthFrame f) {
+    final sub = c.depthFrames.listen((DepthFrame f) {
       final m = f.metres;
       var valid = 0;
       for (var i = 0; i < m.length; i += 7) {
@@ -878,7 +961,7 @@ final class CameraApis extends Module {
       }
       frames.add((f.width, f.height, valid / (m.length / 7)));
     });
-    await c.setDepthOutput(true); // on while on: no-op
+    await c.setDepthOutput(enabled: true); // on while on: no-op
     await pumpUntil(() => frames.length >= 5, reason: 'depth maps arrive');
     final (w, h, validFrac) = frames.last;
     // ignore: avoid_print
@@ -891,7 +974,7 @@ final class CameraApis extends Module {
       greaterThan(0.05),
       reason: 'some pixels carry a plausible distance',
     );
-    await c.setDepthOutput(false);
+    await c.setDepthOutput(enabled: false);
     await pumpFor(const Duration(milliseconds: 800));
     final n = frames.length;
     await pumpFor(const Duration(milliseconds: 800));
@@ -987,15 +1070,24 @@ final class CameraApis extends Module {
   Future<void> verifyNativeBuffers() async {
     final c = _ctrl;
     final frames = <CameraFrame>[];
-    final sub = c.frameStream.listen(frames.add);
-    c.setNativeBuffers(true);
+    // Probe the first buffer the moment it arrives: it is only valid inside
+    // its 1 s lease, and a stalled pump loop could otherwise touch it after
+    // the lease reclaimed it (EXC_BAD_ACCESS in CVPixelBufferGetWidth).
+    (int, int)? probed;
+    final sub = c.frameStream.listen((f) {
+      if (probed == null && f.nativeBuffer != 0) {
+        probed = describeNativeBuffer(f.nativeBuffer);
+      }
+      frames.add(f);
+    });
+    c.setNativeBuffers(enabled: true);
     c.setFrameProcessing(enabled: true);
     await pumpUntil(
-      () => frames.any((f) => f.nativeBuffer != 0),
+      () => probed != null,
       reason: 'a frame carries a native buffer',
     );
     final held = frames.firstWhere((f) => f.nativeBuffer != 0);
-    final (bw, bh) = describeNativeBuffer(held.nativeBuffer);
+    final (bw, bh) = probed!;
     // ignore: avoid_print
     print(
       'native buffer 0x${held.nativeBuffer.toRadixString(16)}: platform says ${bw}x$bh, frame ${held.width}x${held.height}',
@@ -1072,7 +1164,7 @@ final class CameraApis extends Module {
       reason: 'the processor recycles buffers',
     );
 
-    c.setNativeBuffers(false);
+    c.setNativeBuffers(enabled: false);
     final off = <CameraFrame>[];
     final offSub = c.frameStream.listen(off.add);
     await pumpFor(const Duration(milliseconds: 600));
@@ -1237,7 +1329,7 @@ final class CameraApis extends Module {
         '${dir.path}/patrol_auto_${DateTime.now().millisecondsSinceEpoch}.mp4';
     await c.startRecording(
       path,
-      options: const RecordingOptions(maxDurationMs: 1500),
+      maxDuration: const Duration(milliseconds: 1500),
     );
     await pumpUntil(
       () => stops.isNotEmpty,
@@ -1269,10 +1361,8 @@ final class CameraApis extends Module {
     try {
       await c.startRecording(
         path,
-        options: const RecordingOptions(
-          codec: 1 /* hevc */,
-          fileType: 1 /* mov */,
-        ),
+        codec: VideoCodec.hevc,
+        fileType: VideoFileType.mov,
       );
     } on CameraException {
       // No HEVC encoder — the recorder rejected the codec at prepare().
@@ -1334,23 +1424,31 @@ final class CameraApis extends Module {
   /// on iOS through one shared AVCaptureMultiCamSession — and closing one
   /// leaves the other running. Returns false when no pair is supported.
   Future<bool> verifyTrueMulticam() async {
-    final combo = CameraController.getConcurrentCameraIds().where((ids) => ids.length >= 2).firstOrNull;
+    final combo = CameraController.getConcurrentCameraIds()
+        .where((ids) => ids.length >= 2)
+        .firstOrNull;
     if (combo == null) return false;
     final devices = await CameraController.getAvailableCameraDevices();
-    CameraDeviceInfo? byId(String id) => devices.where((d) => d.id == id).firstOrNull;
+    CameraDeviceInfo? byId(String id) =>
+        devices.where((d) => d.id == id).firstOrNull;
     final original = cameraStore.currentDevice.value!;
     // The app's camera must (re)open AFTER multi-cam is on to join it.
-    final appId = cameraStore.currentDevice.value?.id == combo[0] ? combo[1] : combo[0];
+    final appId = cameraStore.currentDevice.value?.id == combo[0]
+        ? combo[1]
+        : combo[0];
     final partnerId = combo.firstWhere((id) => id != appId);
     final appDevice = byId(appId), partner = byId(partnerId);
     if (appDevice == null || partner == null) return false;
 
-    CameraController.setMultiCamEnabled(true);
+    CameraController.setMultiCam(enabled: true);
     try {
       final before = cameraStore.activeTextureId.value;
       await cameraStore.selectDevice(appDevice);
       await pumpUntil(
-        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before && (cameraStore.activeController.value?.isInitialized ?? false),
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != before &&
+            (cameraStore.activeController.value?.isInitialized ?? false),
         reason: 'the app camera reopened inside the multi-cam session',
         timeout: const Duration(seconds: 25),
       );
@@ -1368,27 +1466,43 @@ final class CameraApis extends Module {
         secondFrames = 0;
         await pumpFor(const Duration(seconds: 2));
         // ignore: avoid_print
-        print('multicam: ${appDevice.name} $firstFrames frames + ${partner.name} $secondFrames frames in 2 s');
-        expect(firstFrames, greaterThan(10), reason: 'the first camera kept streaming while the second ran');
-        expect(secondFrames, greaterThan(10), reason: 'the second camera streamed at the same time');
+        print(
+          'multicam: ${appDevice.name} $firstFrames frames + ${partner.name} $secondFrames frames in 2 s',
+        );
+        expect(
+          firstFrames,
+          greaterThan(10),
+          reason: 'the first camera kept streaming while the second ran',
+        );
+        expect(
+          secondFrames,
+          greaterThan(10),
+          reason: 'the second camera streamed at the same time',
+        );
         await s2.cancel();
         second.setFrameProcessing(enabled: false);
         await second.dispose();
 
         firstFrames = 0;
         await pumpFor(const Duration(seconds: 1));
-        expect(firstFrames, greaterThan(5), reason: 'closing one camera left the other running');
+        expect(
+          firstFrames,
+          greaterThan(5),
+          reason: 'closing one camera left the other running',
+        );
         await s1.cancel();
         first.setFrameProcessing(enabled: false);
       } finally {
         if (second.isInitialized) await second.dispose();
       }
     } finally {
-      CameraController.setMultiCamEnabled(false);
+      CameraController.setMultiCam(enabled: false);
       final before = cameraStore.activeTextureId.value;
       await cameraStore.selectDevice(original);
       await pumpUntil(
-        () => cameraStore.status.value == CameraStatus.running && cameraStore.activeTextureId.value != before,
+        () =>
+            cameraStore.status.value == CameraStatus.running &&
+            cameraStore.activeTextureId.value != before,
         reason: 'restored the original camera outside multi-cam',
         timeout: const Duration(seconds: 25),
       );
