@@ -49,3 +49,4 @@ patrol_test/test_bundle.dart
 
 # Patrol dart-defines (often secrets)
 .patrol.env
+/android/build/
