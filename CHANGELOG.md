@@ -52,6 +52,8 @@
 * Frame processor no longer allocates a frame copy per dropped frame (peak
   memory 827 → 372 MB in the heaviest test; avoids iOS memory-limit kills).
 * iOS: crash when a session changed while a worker still read a frame buffer.
+* iOS: `stopRecording` throws when the writer failed during the recording,
+  instead of returning an empty result with no file.
 * iOS: hardware code detectors emit an empty result as soon as they start.
 * `OrientationManager.orientationStream` sends the current orientation on
   subscribe; several managers / `CameraDevicesObserver`s share one native

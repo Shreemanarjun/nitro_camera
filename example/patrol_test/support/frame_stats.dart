@@ -35,6 +35,11 @@ class FrameStreamReport {
   final double minFrameMean;
   final double maxFrameMean;
 
+  /// Longest run of consecutive all-black / all-white frames. Auto-exposure
+  /// legitimately produces a few around a torch toggle (~0.1 s); a black or
+  /// frozen preview produces an unbroken run.
+  final int maxDegenerateRun;
+
   const FrameStreamReport({
     required this.frameCount,
     required this.fps,
@@ -44,6 +49,7 @@ class FrameStreamReport {
     required this.p95,
     required this.minFrameMean,
     required this.maxFrameMean,
+    this.maxDegenerateRun = 0,
   });
 
   /// Dynamic-range proxy: spread between the 95th and 5th luma percentiles.
@@ -54,13 +60,17 @@ class FrameStreamReport {
   /// actually showing something / not stuck" check).
   bool get allFramesValid => minFrameMean > 3.0 && maxFrameMean < 252.0;
 
+  /// Like [allFramesValid] but tolerates a brief exposure transient (at most
+  /// [maxRun] consecutive degenerate frames — ~0.25 s at 60 fps by default).
+  bool noSustainedDegenerate({int maxRun = 15}) => maxDegenerateRun <= maxRun;
+
   @override
   String toString() =>
       'FrameStreamReport(n=$frameCount, fps=${fps.toStringAsFixed(1)}, '
       'maxGap=${maxGapMs}ms, meanLuma=${meanLuma.toStringAsFixed(1)}, '
       'range=$dynamicRange [$p5..$p95], '
       'frameMean=[${minFrameMean.toStringAsFixed(1)}..'
-      '${maxFrameMean.toStringAsFixed(1)}])';
+      '${maxFrameMean.toStringAsFixed(1)}], degenerateRun=$maxDegenerateRun)';
 }
 
 /// Collects [FrameStreamReport]s by listening to a [CameraController]'s
@@ -80,6 +90,8 @@ class FrameStatsCollector {
   int _maxGapMs = 0;
   double _minFrameMean = 255.0;
   double _maxFrameMean = 0.0;
+  int _degenerateRun = 0;
+  int _maxDegenerateRun = 0;
   final Stopwatch _wall = Stopwatch();
   StreamSubscription<CameraFrame>? _sub;
 
@@ -122,6 +134,12 @@ class FrameStatsCollector {
     if (frameSamples == 0) return;
 
     final frameMean = frameSum / frameSamples;
+    if (frameMean <= 3.0 || frameMean >= 252.0) {
+      _degenerateRun++;
+      if (_degenerateRun > _maxDegenerateRun) _maxDegenerateRun = _degenerateRun;
+    } else {
+      _degenerateRun = 0;
+    }
     if (frameMean < _minFrameMean) _minFrameMean = frameMean;
     if (frameMean > _maxFrameMean) _maxFrameMean = frameMean;
 
@@ -179,6 +197,7 @@ class FrameStatsCollector {
       p95: percentile(0.95),
       minFrameMean: _frameCount == 0 ? 0.0 : _minFrameMean,
       maxFrameMean: _maxFrameMean,
+      maxDegenerateRun: _maxDegenerateRun,
     );
   }
 }

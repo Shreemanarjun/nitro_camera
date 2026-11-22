@@ -340,8 +340,10 @@ final class CameraApis extends Module {
     wall.stop();
     expect(c.isRecording, isFalse);
     final f = File(rec.path);
-    expect(f.existsSync(), isTrue);
-    expect(rec.fileSize, greaterThan(0));
+    final recInfo = 'path="${rec.path}" durationMs=${rec.durationMs} '
+        'fileSize=${rec.fileSize} reason=${rec.reason} ${rec.width}x${rec.height}';
+    expect(f.existsSync(), isTrue, reason: 'stopRecording returned no file: $recInfo');
+    expect(rec.fileSize, greaterThan(0), reason: recInfo);
     expect(f.lengthSync(), rec.fileSize);
     expect(rec.durationMs, greaterThan(500));
     // Paused time must NOT be counted: reported duration is at least ~1s under

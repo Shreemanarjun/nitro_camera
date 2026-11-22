@@ -746,8 +746,11 @@ final class ComboAnalysis extends Module {
             'the torch + zoom sweep — a code in view during that window is '
             'never decoded ($report)',
       );
+      // Torch on/off makes auto-exposure overshoot for ~0.1 s (a few
+      // near-white then near-black frames — measured on iPhone 12), so only
+      // a SUSTAINED black/white run means a broken preview.
       expect(
-        report.allFramesValid,
+        report.noSustainedDegenerate(),
         isTrue,
         reason:
             'the preview went black or froze at the pixel level during the '

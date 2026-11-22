@@ -39,6 +39,10 @@ final class VideoRecorder {
     private var recordingURL: URL?
     private var recordingStartTime: Date?
     private var isWriting = false
+    /// Why the current recording died on its own (writer failed to start or
+    /// failed mid-recording). stop() throws it instead of reporting an empty
+    /// success — otherwise the clip is silently lost. On `frameQueue`.
+    private var recordingFailure: Error?
     private var recordingPaused = false
 
     /// True while a recording is actively writing frames (read on `frameQueue`
@@ -77,6 +81,8 @@ final class VideoRecorder {
     // the writer session HERE so trailing audio can't lengthen the file past
     // the last video frame (vision-camera's endSession(atSourceTime:)).
     private var lastVideoPTS: CMTime = .invalid
+    /// Last appended (retimed) audio PTS — audio must stay strictly increasing too.
+    private var lastAudioPTS: CMTime = .invalid
     // Raw (un-retimed) PTS of that last frame, and whether this recording
     // survives its session (vision-camera's `enablePersistentRecorder`):
     // both feed the hand-off to the next session in park()/adoptParked().
@@ -220,8 +226,10 @@ final class VideoRecorder {
             self.pauseStartPTS = .invalid
             self.totalPauseOffset = .zero
             self.lastVideoPTS = .invalid
+            self.lastAudioPTS = .invalid
             self.lastRawVideoPTS = .invalid
             self.recordingPersistent = options.persistent != 0
+            self.recordingFailure = nil
             self.isWriting = true
         }
         NSLog("NitroCamera record: start=%dms (fileType=%@ codec=%@)",
@@ -293,10 +301,14 @@ final class VideoRecorder {
                 NSLog("NitroCamera record: startWriting FAILED: %@",
                       writer.error?.localizedDescription ?? "unknown")
                 isWriting = false
+                recordingFailure = writer.error ?? CameraError.captureFailed
                 onEvent?(2 /* error */, writer.error?.localizedDescription ?? "recording failed to start")
                 return
             }
         }
+        // A timestamp that doesn't move forward fails the writer for good
+        // (AVFoundation -11800) — drop that frame instead.
+        if lastVideoPTS.isValid, CMTimeCompare(pts, lastVideoPTS) <= 0 { return }
         if writer.status == .writing, input.isReadyForMoreMediaData {
             if input.append(buffer) {
                 lastVideoPTS = pts
@@ -338,15 +350,17 @@ final class VideoRecorder {
 
     func appendAudio(_ sampleBuffer: CMSampleBuffer) {
         guard isWriting, let writer = assetWriter else { return }
-        let rawPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if recordingPaused {
-            if !pauseStartPTS.isValid { pauseStartPTS = rawPTS }
-            return
-        }
-        settlePauseOffset(rawPTS: rawPTS)
+        // Video alone marks and settles pauses: audio and video PTS differ by
+        // tens of ms, so letting audio set the offset retimed the next video
+        // frame BEHIND the last one and failed the writer. Drop audio until
+        // video has settled the resume.
+        if recordingPaused || pauseStartPTS.isValid { return }
         guard writer.status == .writing,
               let input = audioWriterInput, input.isReadyForMoreMediaData else { return }
-        input.append(retimedForPause(sampleBuffer))
+        let buffer = retimedForPause(sampleBuffer)
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if lastAudioPTS.isValid, CMTimeCompare(pts, lastAudioPTS) <= 0 { return }
+        if input.append(buffer) { lastAudioPTS = pts }
     }
 
     // MARK: - Failure / limits (on `frameQueue`)
@@ -359,6 +373,7 @@ final class VideoRecorder {
         isWriting = false
         let message = writer.error?.localizedDescription ?? "recording failed while writing"
         NSLog("NitroCamera record: writer FAILED mid-recording: %@", message)
+        recordingFailure = writer.error ?? CameraError.captureFailed
         assetWriter = nil
         videoWriterInput = nil
         audioWriterInput = nil
@@ -416,6 +431,13 @@ final class VideoRecorder {
                 let stopping = self.movieContinuation != nil
                 guard self.isWriting, let writer = self.assetWriter, !stopping else {
                     self.continuationLock.unlock()
+                    if !stopping, let failure = self.recordingFailure {
+                        // The recording already died (see recordingFailure):
+                        // report it rather than an empty "success".
+                        self.recordingFailure = nil
+                        continuation.resume(throwing: failure)
+                        return
+                    }
                     if !stopping {
                         // Nothing recording (e.g. a maxDuration/maxFileSize
                         // auto-stop already finalised it): a clean no-op, the
@@ -636,6 +658,7 @@ final class VideoRecorder {
             self.recordingStartTime = p.startTime
             self.recordingStartPTS = p.startPTS
             self.lastVideoPTS = p.lastVideoPTS
+            self.lastAudioPTS = p.lastVideoPTS
             self.lastRawVideoPTS = p.lastRawVideoPTS
             self.totalPauseOffset = p.pauseOffset
             self.recordingPaused = p.paused
@@ -652,6 +675,7 @@ final class VideoRecorder {
             self.recordingFileType = p.fileType
             self.recordingFinishedReason = 0
             self.recordingPersistent = true
+            self.recordingFailure = nil
             self.isWriting = true
         }
         NSLog("NitroCamera record: adopted persistent recording %@", p.url?.lastPathComponent ?? "?")
