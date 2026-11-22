@@ -619,18 +619,18 @@ packages:
     dependency: "direct main"
     description:
       name: nitro
-      sha256: e9ac1092561384bb79008a621e6dc3069382f4fb1774eb5be9fc4a49d9978ceb
+      sha256: a08c0324f14213c62ba803cada7df3717fecf03c7e94a11856bc7f179ce1ef0d
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.6"
+    version: "0.9.1"
   nitro_annotations:
     dependency: transitive
     description:
       name: nitro_annotations
-      sha256: c2c458598567824223bc03f03f380cb13d9a8a2dbee4aee01ea23f275cc7d128
+      sha256: "081862ace02d85db92651f310718efdbb039dda34613bd672916c80d42156a1c"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.6"
+    version: "0.9.1"
   nitro_camera:
     dependency: "direct main"
     description:
@@ -642,26 +642,25 @@ packages:
     dependency: "direct dev"
     description:
       name: nitro_generator
-      sha256: "6c6f30719d3657f0cdb3637875cd350f9cec9103ce276fd54513c7ee8ee20a8b"
+      sha256: "7972ed8146341ff088bb9aa12a3b8d9646a4b05e235f0ba5f6410d97cd8c2f38"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.6"
+    version: "0.9.1"
   nitro_http:
     dependency: "direct main"
     description:
       name: nitro_http
-      sha256: "7930123d9c4d488e1e9653d44b3863465bce31f1fe80c850115a970edd82290d"
+      sha256: f90bc6de55ef7631713734ba42c6a3403c46e1ea3fee35685952865fd6636d64
       url: "https://pub.dev"
     source: hosted
-    version: "0.0.6"
+    version: "0.0.8"
   nitro_zxing:
     dependency: "direct main"
     description:
-      name: nitro_zxing
-      sha256: "7512de423291f51308b1bed65aa0d5146eb4bd72cb3f48ab99716c7301eca41e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.0.1"
+      path: "../../nitro_zxing"
+      relative: true
+    source: path
+    version: "0.0.2"
   objective_c:
     dependency: transitive
     description:
@@ -1228,5 +1227,5 @@ packages:
     source: hosted
     version: "1.1.4"
 sdks:
-  dart: ">=3.13.4 <4.0.0"
+  dart: ">=3.12.0 <4.0.0"
   flutter: ">=3.44.0"

@@ -36,6 +36,8 @@
 
 ### Changed
 
+* Requires nitro ^0.9.1 (regenerated bridges); every Nitro plugin in an app
+  must move to 0.9 together.
 * `startRecording` takes typed named parameters — `codec`, `fileType`,
   `bitRate`, `maxDuration`, `maxFileSize`, `location`, `persistent` —
   instead of raw `RecordingOptions` int codes (`options:` is deprecated,

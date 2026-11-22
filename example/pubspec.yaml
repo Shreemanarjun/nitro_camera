@@ -46,7 +46,7 @@ dependencies:
   # zxing-cpp over FFI (react-native-nitro-zxing counterpart).
   nitro_zxing: ^0.0.1
   signals: ^6.3.0
-  nitro: ^0.8.6
+  nitro: ^0.9.1
   signals_flutter: ^6.3.0
   # media_kit replaces video_player (video_player_avfoundation is CocoaPods-only
   # and is fragile under the SPM-based iOS build).
@@ -59,7 +59,7 @@ dependencies:
   exif: ^3.3.0
   path: ^1.9.1
   get_thumbnail_video: ^0.7.3
-  nitro_http: ^0.0.6
+  nitro_http: ^0.0.8
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -75,7 +75,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   build_runner: ^2.15.1
-  nitro_generator: ^0.8.6
+  nitro_generator: ^0.9.1
   dart_code_linter: ^4.4.4
 
 # For information on the generic Dart part of this file, see the
@@ -130,3 +130,8 @@ patrol:
     package_name: dev.shreeman.nitro_camera_example
   ios:
     bundle_id: dev.shreeman.nitroCameraExample
+
+# nitro 0.9 support is not on pub.dev yet; drop once nitro_zxing > 0.0.2 ships.
+dependency_overrides:
+  nitro_zxing:
+    path: ../../nitro_zxing
