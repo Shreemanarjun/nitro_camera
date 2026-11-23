@@ -123,7 +123,7 @@ class _MediaViewerScreenState extends State<MediaViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final items = cameraStore.capturedMedia.value.reversed.toList();
       if (items.isEmpty) {
         return const Scaffold(backgroundColor: Colors.black);

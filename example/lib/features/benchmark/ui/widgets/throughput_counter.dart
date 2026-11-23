@@ -13,7 +13,7 @@ class ThroughputCounter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const target = ThroughputController.target;
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final state = tp.state.value;
       final count = tp.count.value;
       final status = switch (state) {

@@ -45,7 +45,7 @@ class _ThroughputScreenState extends State<ThroughputScreen> {
         fit: StackFit.expand,
         children: [
           // Own Watch: per-scan counter updates must not rebuild the CameraView.
-          Watch((context) {
+          SignalBuilder(builder: (context) {
             final device = _tp.device.value;
             if (device == null) return const SizedBox.shrink();
             return CameraView(

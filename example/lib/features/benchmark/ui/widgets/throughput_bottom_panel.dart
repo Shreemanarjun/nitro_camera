@@ -26,7 +26,7 @@ class ThroughputBottomPanel extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          child: Watch((context) {
+          child: SignalBuilder(builder: (context) {
             final state = tp.state.value;
             final config = tp.config.value;
             final error = tp.error.value;

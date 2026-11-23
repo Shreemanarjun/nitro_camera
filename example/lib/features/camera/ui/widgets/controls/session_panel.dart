@@ -20,7 +20,7 @@ class SessionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = cameraStore;
-    return Watch((_) {
+    return SignalBuilder(builder: (_) {
       final resolved = s.resolvedConfig.value;
       final events = s.sessionEvents.value;
       final state = s.sessionState(); // live getSessionState()

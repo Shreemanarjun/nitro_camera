@@ -17,7 +17,7 @@ class FilterSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final activeFilters = filters ?? CameraStore.filters;
       final activeCurrentName =
           currentFilterName ?? cameraStore.currentFilterName.value;

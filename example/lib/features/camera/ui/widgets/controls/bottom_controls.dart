@@ -13,7 +13,7 @@ class BottomControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final mode = cameraStore.mode.value;
       final lastCapturedPath = cameraStore.lastCapturedPath.value;
       final isLastCapturedVideo = cameraStore.isLastCapturedVideo.value;

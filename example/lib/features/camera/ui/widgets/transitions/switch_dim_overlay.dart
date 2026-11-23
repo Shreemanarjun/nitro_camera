@@ -15,7 +15,7 @@ class SwitchDimOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final switching = cameraStore.isSwitching.value;
       return IgnorePointer(
         child: TweenAnimationBuilder<double>(

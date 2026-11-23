@@ -71,7 +71,7 @@ class VideoRecordingHUD extends StatelessWidget {
             children: [
               const _PulseDot(),
               const SizedBox(width: 10),
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final s = cameraStore.recordingDuration.value;
                 final str =
                     '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';

@@ -39,7 +39,7 @@ class _UprightState extends State<Upright> {
   @override
   Widget build(BuildContext context) {
     final source = widget.rotation ?? cameraStore.uiRotation;
-    return Watch(
+    return SignalBuilder(builder: 
       (_) => AnimatedRotation(
         turns: _turnsFor(source.value),
         duration: const Duration(milliseconds: 300),

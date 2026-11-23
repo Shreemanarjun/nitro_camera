@@ -58,7 +58,7 @@ class TopBar extends StatelessWidget {
             children: [
               // FLASH — off → on → auto (always reachable; the native setter
               // is capability-guarded on devices without a flash unit).
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final flash = cameraStore.flashMode.value;
                 final (icon, color) = switch (flash) {
                   FlashMode.off => (Icons.flash_off_rounded, Colors.white70),
@@ -84,7 +84,7 @@ class TopBar extends StatelessWidget {
               }),
 
               // FILTERS tray toggle.
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final show = cameraStore.showFilters.value;
                 return _StripIcon(
                   icon: Icons.auto_awesome,
@@ -95,7 +95,7 @@ class TopBar extends StatelessWidget {
               }),
 
               // PREVIEW PATH — Texture ↔ platform view (active = PV).
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final mode = cameraStore.previewMode.value;
                 final isPv = mode == PreviewMode.platformView;
                 return _StripIcon(
@@ -109,7 +109,7 @@ class TopBar extends StatelessWidget {
               }),
 
               // RAW (DNG) — mini text badge, only when the sensor supports it.
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final dev = cameraStore.currentDevice.value;
                 if (dev == null || !dev.supportsRawCapture) {
                   return const SizedBox.shrink();
@@ -126,7 +126,7 @@ class TopBar extends StatelessWidget {
               // CUSTOM FRAME PROCESSOR — toggles the demo LUMA processor, the
               // reference implementation of the user-pluggable
               // [FrameProcessor] interface (bring your own pipeline).
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final on = cameraStore.frameProcessor.value != null;
                 return _StripIcon(
                   icon: Icons.memory_rounded,
@@ -147,7 +147,7 @@ class TopBar extends StatelessWidget {
               ),
 
               // QUICK SETTINGS dropdown (resolution / fps / aspect / settings).
-              Watch((context) {
+              SignalBuilder(builder: (context) {
                 final open = cameraStore.quickSettingsOpen.value;
                 return _StripIcon(
                   icon: Icons.tune_rounded,
@@ -165,7 +165,7 @@ class TopBar extends StatelessWidget {
 
   /// "1080P · 60" caption under the strip — tap opens the quick panel.
   Widget _configCaption() {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final res = cameraStore.resolutionLabel.value;
       final fps = cameraStore.fps.value;
       final open = cameraStore.quickSettingsOpen.value;

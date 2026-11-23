@@ -402,7 +402,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
           alignment: Alignment.center,
           child: Padding(
             padding: const EdgeInsets.only(top: 400),
-            child: Watch(
+            child: SignalBuilder(builder: 
               (_) => _ScanKindChips(
                 selected: cameraStore.scanKind.value,
                 onChanged: (k) => cameraStore.scanKind.value = k,
@@ -416,7 +416,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
           alignment: Alignment.centerRight,
           child: Padding(
             padding: const EdgeInsets.only(right: 14),
-            child: Watch(
+            child: SignalBuilder(builder: 
               (_) => _ZoomChips(
                 current: cameraStore.currentZoom.value,
                 onChanged: cameraStore.setZoom,
@@ -430,7 +430,7 @@ class _FrameOverlayState extends State<FrameOverlay> {
           alignment: Alignment.topRight,
           child: Padding(
             padding: const EdgeInsets.only(top: 168, right: 16),
-            child: Watch((_) {
+            child: SignalBuilder(builder: (_) {
               final oneShot = cameraStore.scanOneShot.value;
               return GlassTooltip(
                 message: 'Scan mode: one-shot / continuous',

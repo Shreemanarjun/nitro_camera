@@ -30,7 +30,7 @@ class ProcessorBadge extends StatelessWidget {
                 borderRadius: const BorderRadius.all(Radius.circular(12)),
                 border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
               ),
-              child: Watch((context) {
+              child: SignalBuilder(builder: (context) {
                 final processor = cameraStore.frameProcessor.value;
                 if (processor == null) return const SizedBox.shrink();
                 // The demo processor exposes a live luminance signal; other

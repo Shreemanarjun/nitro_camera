@@ -54,7 +54,7 @@ class _FilteredPreviewState extends State<FilteredPreview> {
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return widget.child; // Android: native GL filter.
     final keyed = KeyedSubtree(key: _childKey, child: widget.child);
-    return Watch((_) {
+    return SignalBuilder(builder: (_) {
       final name = cameraStore.currentFilterName.value;
       final matrix = _matrices[name];
       // No filter → no ColorFiltered at all: even an identity matrix forces a

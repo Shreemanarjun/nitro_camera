@@ -14,7 +14,7 @@ class ThroughputTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final active = tp.state.value.active;
       final engine = tp.engine.value;
       return Column(

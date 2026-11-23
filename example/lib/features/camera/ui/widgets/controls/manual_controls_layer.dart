@@ -20,7 +20,7 @@ class ManualControlsLayer extends StatelessWidget {
   Widget build(BuildContext context) {
     // Returns a plain Stack (no Positioned root) so it can sit under
     // _HideWhileRecording; the caller wraps it in Positioned.fill.
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       // Only meaningful in PHOTO/VIDEO — the pill that opens it lives there.
       final mode = cameraStore.mode.value;
       if (!cameraStore.manualPanelOpen.value || mode == 'SCANNER') {
@@ -56,7 +56,7 @@ class _FocusRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final fd = cameraStore.focusDistance.value;
       final manual = fd >= 0;
       final frac = manual ? fd : 0.0;
@@ -150,7 +150,7 @@ class _ExposureWheels extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final ns = cameraStore.manualShutterNs.value;
       final curDenom = ns <= 0 ? 0 : (1e9 / ns).round();
       final iso = cameraStore.manualIso.value;

@@ -20,7 +20,7 @@ class QuickPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final open = cameraStore.quickSettingsOpen.value;
       return AnimatedSwitcher(
         duration: const Duration(milliseconds: 260),
@@ -69,7 +69,7 @@ class QuickPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // RESOLUTION — options derive from the active device's formats.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final w = cameraStore.width.value;
                       final has4K = cameraStore.supports4K.value;
                       return _PanelRow(
@@ -96,7 +96,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // FPS.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final fps = cameraStore.fps.value;
                       return _PanelRow(
                         label: 'FPS',
@@ -108,7 +108,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // ASPECT ratio of the preview viewport.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final ar = cameraStore.selectedAspectRatio.value;
                       bool near(double v) =>
                           ar != null && (ar - v).abs() < 0.01;
@@ -148,7 +148,7 @@ class QuickPanel extends StatelessWidget {
                     // ── Promoted settings (also available in ALL SETTINGS) ──
 
                     // WHITE BALANCE presets via kelvin values (0 = auto).
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final k = cameraStore.whiteBalanceKelvin.value;
                       bool near(int v) => (k - v).abs() < 200;
                       return _PanelRow(
@@ -179,7 +179,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // HDR.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final on = cameraStore.hdrEnabled.value;
                       return _PanelRow(
                         label: 'HDR',
@@ -191,7 +191,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // VIDEO STABILIZATION.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final v = cameraStore.videoStabilization.value;
                       return _PanelRow(
                         label: 'STABILIZE',
@@ -216,7 +216,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // GEOTAG captured media.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final on = cameraStore.geotagEnabled.value;
                       return _PanelRow(
                         label: 'GEOTAG',
@@ -236,7 +236,7 @@ class QuickPanel extends StatelessWidget {
                     }),
 
                     // VIDEO CODEC.
-                    Watch((context) {
+                    SignalBuilder(builder: (context) {
                       final codec = cameraStore.videoCodec.value;
                       return _PanelRow(
                         label: 'CODEC',

@@ -27,7 +27,7 @@ class SensorTray extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final devices = cameraStore.devices.value;
       final currentDevice = cameraStore.currentDevice.value;
       if (devices.isEmpty) return const SizedBox.shrink();

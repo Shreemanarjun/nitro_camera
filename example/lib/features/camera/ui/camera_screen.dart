@@ -128,7 +128,7 @@ class _CameraScreenState extends State<CameraScreen>
     // (quality selector); the native renderer cover-crops to any surface.
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Watch((context) {
+      body: SignalBuilder(builder: (context) {
         final cameraPermission = cameraStore.cameraPermission.value;
         if (cameraPermission != 1) {
           return PermissionGuard(
@@ -160,7 +160,7 @@ class _CameraScreenState extends State<CameraScreen>
                   cameraStore.setZoom(newZoom);
                 },
                 behavior: HitTestBehavior.opaque,
-                child: Watch((context) {
+                child: SignalBuilder(builder: (context) {
                   final currentDevice = cameraStore.currentDevice.value;
                   final devices = cameraStore.devices.value;
                   if (devices.isEmpty || currentDevice == null) {
@@ -221,7 +221,7 @@ class _CameraScreenState extends State<CameraScreen>
               left: 0,
               right: 0,
               top: MediaQuery.of(context).size.height * 0.3,
-              child: Watch((context) {
+              child: SignalBuilder(builder: (context) {
                 final zoom = cameraStore.currentZoom.value;
                 if (zoom <= 1.02) return const SizedBox.shrink();
                 return Center(
@@ -248,7 +248,7 @@ class _CameraScreenState extends State<CameraScreen>
             ),
 
             // 2b. Tap-to-focus reticle.
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               final offset = cameraStore.focusIndicatorTrigger.value;
               if (offset == null) return const SizedBox.shrink();
               return FocusIndicator(key: ValueKey(offset), offset: offset);
@@ -264,7 +264,7 @@ class _CameraScreenState extends State<CameraScreen>
             ),
 
             // 5. Scanner overlay (QR / 1D / 2D / ALL).
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               final isScanner = cameraStore.mode.value == 'SCANNER';
               return AnimatedSwitcher(
                 duration: const Duration(milliseconds: 400),
@@ -283,7 +283,7 @@ class _CameraScreenState extends State<CameraScreen>
             // the demo LUMA processor publishes mean scene luminance through
             // a signal; this badge renders it live — the visible end of the
             // user-pluggable FrameProcessor pipeline.
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               if (cameraStore.frameProcessor.value == null) {
                 return const SizedBox.shrink();
               }
@@ -300,7 +300,7 @@ class _CameraScreenState extends State<CameraScreen>
             const BottomControls(),
 
             // 7. Global overlays: shutter flash at the native shutter moment.
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               final trigger = cameraStore.shutterFlash.value;
               if (trigger == 0) return const SizedBox.shrink();
               return FlashOverlay(key: ValueKey('shutter_$trigger'));
@@ -309,7 +309,7 @@ class _CameraScreenState extends State<CameraScreen>
             // Fast preview thumbnail (photoThumbnail event) — shown instantly,
             // before the full-res JPEG is written. Tapping it opens the media
             // viewer directly on the fresh capture.
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               final path = cameraStore.lastThumbnailPath.value;
               if (path == null) return const SizedBox.shrink();
               return Positioned(
@@ -324,7 +324,7 @@ class _CameraScreenState extends State<CameraScreen>
             }),
 
             // Dev FPS graph (vision-camera enableFpsGraph).
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               if (!cameraStore.showFpsGraph.value) {
                 return const SizedBox.shrink();
               }
@@ -337,7 +337,7 @@ class _CameraScreenState extends State<CameraScreen>
               );
             }),
 
-            Watch((context) {
+            SignalBuilder(builder: (context) {
               if (!cameraStore.isRecording.value) {
                 return const SizedBox.shrink();
               }
@@ -360,7 +360,7 @@ class _HideWhileRecording extends StatelessWidget {
   Widget build(BuildContext context) {
     // Watch tracks isRecording here (reading it in a plain build outside a
     // Watch would never rebuild on change).
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final recording = cameraStore.isRecording.value;
       return IgnorePointer(
         ignoring: recording,

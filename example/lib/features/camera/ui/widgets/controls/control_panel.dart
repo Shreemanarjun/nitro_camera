@@ -71,7 +71,7 @@ class ConfigBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final status = cameraStore.status.value;
       final isProcessing = cameraStore.isProcessingFrames.value;
       final devices = cameraStore.devices.value;
@@ -222,7 +222,7 @@ class ConfigBody extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Watch(
+                child: SignalBuilder(builder: 
                   (context) => SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       trackHeight: 2,

@@ -93,7 +93,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final items = cameraStore.capturedMedia.value.reversed.toList();
 
       return Scaffold(

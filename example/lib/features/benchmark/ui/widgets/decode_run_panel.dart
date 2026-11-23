@@ -21,7 +21,7 @@ class DecodeRunPanel extends StatelessWidget {
         color: Colors.black.withValues(alpha: 0.7),
         borderRadius: const BorderRadius.all(Radius.circular(12)),
       ),
-      child: Watch((context) {
+      child: SignalBuilder(builder: (context) {
         final running = bench.running.value;
         final results = bench.results.value;
         return Column(

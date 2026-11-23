@@ -154,7 +154,7 @@ class _ProStripState extends State<ProStrip> {
 
   List<Widget> _photoPills() => [
     _manualPill(),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final q = cameraStore.photoQuality.value;
       return _ProPill(
         icon: Icons.high_quality_rounded,
@@ -165,7 +165,7 @@ class _ProStripState extends State<ProStrip> {
       );
     }),
     _hdrPill(),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final on = cameraStore.lowLightBoost.value;
       return _ProPill(
         icon: Icons.nightlight_round,
@@ -176,7 +176,7 @@ class _ProStripState extends State<ProStrip> {
       );
     }),
     _evPill(),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final k = cameraStore.whiteBalanceKelvin.value;
       return _ProPill(
         icon: Icons.wb_sunny_outlined,
@@ -190,7 +190,7 @@ class _ProStripState extends State<ProStrip> {
   ];
 
   List<Widget> _scannerPills() => [
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final fps = cameraStore.fps.value;
       return _ProPill(
         icon: Icons.speed_rounded,
@@ -200,7 +200,7 @@ class _ProStripState extends State<ProStrip> {
         onTap: _cycleFps,
       );
     }),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final rate = cameraStore.samplingRate.value;
       return _ProPill(
         icon: Icons.blur_linear_rounded,
@@ -219,7 +219,7 @@ class _ProStripState extends State<ProStrip> {
 
   List<Widget> _videoPills() => [
     _manualPill(),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final v = cameraStore.videoStabilization.value;
       return _ProPill(
         icon: Icons.video_stable_rounded,
@@ -229,7 +229,7 @@ class _ProStripState extends State<ProStrip> {
         onTap: _cycleStabilization,
       );
     }),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final on = cameraStore.geotagEnabled.value;
       return _ProPill(
         icon: Icons.location_on_outlined,
@@ -239,7 +239,7 @@ class _ProStripState extends State<ProStrip> {
         onTap: () => cameraStore.geotagEnabled.value = !on,
       );
     }),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final on = cameraStore.micEnabled.value;
       return _ProPill(
         icon: on ? Icons.mic_none_rounded : Icons.mic_off_rounded,
@@ -249,7 +249,7 @@ class _ProStripState extends State<ProStrip> {
         onTap: () => cameraStore.micEnabled.value = !on,
       );
     }),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final on = cameraStore.slowMoEnabled.value;
       final fps = cameraStore.slowMoFps.value;
       return _ProPill(
@@ -270,7 +270,7 @@ class _ProStripState extends State<ProStrip> {
         },
       );
     }),
-    Watch((context) {
+    SignalBuilder(builder: (context) {
       final on = cameraStore.showFpsGraph.value;
       return _ProPill(
         icon: Icons.show_chart_rounded,
@@ -288,7 +288,7 @@ class _ProStripState extends State<ProStrip> {
 
   /// Opens the on-preview interactive manual focus + exposure layer. Active
   /// while the layer is up or any manual value is engaged.
-  Widget _manualPill() => Watch((context) {
+  Widget _manualPill() => SignalBuilder(builder: (context) {
     final open = cameraStore.manualPanelOpen.value;
     final engaged =
         cameraStore.focusDistance.value >= 0 ||
@@ -303,7 +303,7 @@ class _ProStripState extends State<ProStrip> {
     );
   });
 
-  Widget _hdrPill() => Watch((context) {
+  Widget _hdrPill() => SignalBuilder(builder: (context) {
     final on = cameraStore.hdrEnabled.value;
     return _ProPill(
       icon: Icons.hdr_on_rounded,
@@ -314,7 +314,7 @@ class _ProStripState extends State<ProStrip> {
     );
   });
 
-  Widget _evPill() => Watch((context) {
+  Widget _evPill() => SignalBuilder(builder: (context) {
     final ev = cameraStore.exposure.value;
     return _ProPill(
       icon: Icons.exposure_rounded,
@@ -325,7 +325,7 @@ class _ProStripState extends State<ProStrip> {
     );
   });
 
-  Widget _torchPill() => Watch((context) {
+  Widget _torchPill() => SignalBuilder(builder: (context) {
     final on = cameraStore.torch.value;
     final level = cameraStore.torchLevel.value;
     return _ProPill(
@@ -345,7 +345,7 @@ class _ProStripState extends State<ProStrip> {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       final mode = cameraStore.mode.value;
       final pills = switch (mode) {
         'VIDEO' => _videoPills(),
@@ -366,7 +366,7 @@ class _ProStripState extends State<ProStrip> {
               _Bubble.exposure => _SliderBubble(
                 key: const ValueKey('bubble_ev'),
                 label: 'EV',
-                child: Watch((context) {
+                child: SignalBuilder(builder: (context) {
                   final ev = cameraStore.exposure.value;
                   return _BubbleSlider(
                     value: ev,
@@ -390,7 +390,7 @@ class _ProStripState extends State<ProStrip> {
               _Bubble.torch => _SliderBubble(
                 key: const ValueKey('bubble_torch'),
                 label: 'TORCH',
-                child: Watch((context) {
+                child: SignalBuilder(builder: (context) {
                   final level = cameraStore.torchLevel.value;
                   return _BubbleSlider(
                     value: level,

@@ -15,7 +15,7 @@ class DecodeReadoutBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(12),
-      child: Watch((context) {
+      child: SignalBuilder(builder: (context) {
         final c = bench.camera.value;
         final ro = bench.readout.value;
         final running = bench.running.value;

@@ -30,7 +30,7 @@ class TrayLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Watch((context) {
+    return SignalBuilder(builder: (context) {
       // SCANNER mode has its own dedicated overlay (code-type chips, 1×/2×/3×
       // zoom, torch, one-shot) plus the top-left stats card and the bottom-right
       // flip button — so the general camera trays here are redundant AND their

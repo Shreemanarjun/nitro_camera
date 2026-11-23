@@ -106,7 +106,7 @@ class ProControlsBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Exposure
-        Watch((_) {
+        SignalBuilder(builder: (_) {
           final dev = s.currentDevice.value;
           return _SliderRow(
             label: 'EXPOSURE',
@@ -127,7 +127,7 @@ class ProControlsBody extends StatelessWidget {
         // ManualControlsLayer — instead of raw sliders here.
 
         // White balance
-        Watch((_) {
+        SignalBuilder(builder: (_) {
           final k = s.whiteBalanceKelvin.value;
           return _SliderRow(
             label: 'WHITE BALANCE',
@@ -151,7 +151,7 @@ class ProControlsBody extends StatelessWidget {
         }),
 
         // Torch level
-        Watch(
+        SignalBuilder(builder: 
           (_) => _SliderRow(
             label: 'TORCH LEVEL',
             value: s.torchLevel.value,
@@ -165,7 +165,7 @@ class ProControlsBody extends StatelessWidget {
         const Divider(color: Colors.white12, height: 28),
 
         // Auto-focus mode
-        Watch(
+        SignalBuilder(builder: 
           (_) => _SegmentRow<AutoFocusMode>(
             label: 'AUTO FOCUS',
             value: s.autoFocusMode.value,
@@ -183,7 +183,7 @@ class ProControlsBody extends StatelessWidget {
         ),
 
         // Video stabilization
-        Watch(
+        SignalBuilder(builder: 
           (_) => _SegmentRow<int>(
             label: 'STABILIZATION',
             value: s.videoStabilization.value,
@@ -193,7 +193,7 @@ class ProControlsBody extends StatelessWidget {
         ),
 
         // Photo quality
-        Watch(
+        SignalBuilder(builder: 
           (_) => _SegmentRow<QualityPrioritization>(
             label: 'PHOTO QUALITY',
             value: s.photoQuality.value,
@@ -207,7 +207,7 @@ class ProControlsBody extends StatelessWidget {
         ),
 
         // Target orientation (-1 = follow device rotation)
-        Watch(
+        SignalBuilder(builder: 
           (_) => _SegmentRow<int>(
             label: 'ORIENTATION',
             value: s.targetOrientation.value,
@@ -225,21 +225,21 @@ class ProControlsBody extends StatelessWidget {
         const Divider(color: Colors.white12, height: 28),
 
         // Toggles
-        Watch(
+        SignalBuilder(builder: 
           (_) => _ToggleRow(
             label: 'HDR',
             value: s.hdrEnabled.value,
             onChanged: s.setHdr,
           ),
         ),
-        Watch(
+        SignalBuilder(builder: 
           (_) => _ToggleRow(
             label: 'LOW-LIGHT BOOST',
             value: s.lowLightBoost.value,
             onChanged: s.setLowLightBoost,
           ),
         ),
-        Watch(
+        SignalBuilder(builder: 
           (_) => _ToggleRow(
             label: 'TORCH',
             value: s.torch.value,

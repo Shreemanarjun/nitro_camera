@@ -34,7 +34,7 @@ class _DecodeBenchScreenState extends State<DecodeBenchScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Watch((context) {
+      body: SignalBuilder(builder: (context) {
         final device = _bench.device.value;
         if (device == null) {
           return Center(
