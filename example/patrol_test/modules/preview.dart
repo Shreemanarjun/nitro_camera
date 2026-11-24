@@ -99,14 +99,19 @@ final class Preview extends Module {
     // ignore: avoid_print
     print('config storm: $r');
 
+    // The storm toggles low-light boost, which iOS honours by lengthening
+    // exposures — in a near-black room that legitimately drops to ~1-2 fps
+    // (measured on iPhone 12 at mean luma 14-30). Only a lit scene can hold
+    // the strict cadence; a dark one must still keep frames flowing.
+    final dark = r.meanLuma < 40;
     expect(
       r.frameCount,
-      greaterThan(10),
+      greaterThan(dark ? 3 : 10),
       reason: 'preview stalled during a config storm ($r)',
     );
     expect(
       r.maxGapMs,
-      lessThan(1500),
+      lessThan(dark ? 2500 : 1500),
       reason: 'long preview stall during config storm — ${r.maxGapMs}ms ($r)',
     );
     expect(
