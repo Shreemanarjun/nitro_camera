@@ -153,7 +153,7 @@ class CameraPreview extends StatelessWidget {
 
         return Stack(
           fit: StackFit.expand,
-          children: [preview, ?child],
+          children: [preview, if (child case final c?) c],
         );
       },
     );

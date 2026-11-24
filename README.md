@@ -32,7 +32,7 @@ A high-performance, [vision-camera](https://github.com/mrousavy/react-native-vis
 
 ```yaml
 dependencies:
-  nitro_camera: ^0.0.1
+  nitro_camera: ^0.0.4
 ```
 
 Or from the terminal:
@@ -40,6 +40,8 @@ Or from the terminal:
 ```bash
 flutter pub add nitro_camera
 ```
+
+Requires Flutter 3.29+ (Dart 3.7+).
 
 ### 2. iOS setup
 

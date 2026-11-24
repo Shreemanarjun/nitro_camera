@@ -50,3 +50,9 @@
 # — do not duplicate those here; doing so would only prevent R8 from
 # applying the coroutine-specific optimizations that library's own rules are
 # tuned to allow.
+
+# ML Kit is compileOnly (optional detectors, see NitraDetectors): an app that
+# doesn't add it has none of these classes, and R8 would otherwise fail the
+# release build on the plugin's references to them.
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.tasks.**

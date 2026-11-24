@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert' show jsonDecode;
 import 'package:flutter/foundation.dart';
+// Flutter 3.29 does not re-export @internal from foundation.
+// ignore: unnecessary_import
+import 'package:meta/meta.dart' show internal;
 import '../configuration/configuration.dart';
 import '../models/models.dart';
 import '../nitro_camera.native.dart';

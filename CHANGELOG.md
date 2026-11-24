@@ -38,6 +38,7 @@
 
 * Requires nitro ^0.9.1 (regenerated bridges); every Nitro plugin in an app
   must move to 0.9 together.
+* Works with Flutter 3.29+ (Dart 3.7+); was Dart 3.11+.
 * `startRecording` takes typed named parameters — `codec`, `fileType`,
   `bitRate`, `maxDuration`, `maxFileSize`, `location`, `persistent` —
   instead of raw `RecordingOptions` int codes (`options:` is deprecated,
@@ -47,6 +48,8 @@
 
 ### Fixed
 
+* Android: release builds of apps without ML Kit no longer fail in R8 on the
+  optional detectors' references.
 * Android: a persistent recording no longer reports the device's sleep time
   as its duration after a camera switch (its frames now use MediaRecorder's
   monotonic clock); GL-path `startRecording` resolves once video reaches the

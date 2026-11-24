@@ -15,8 +15,8 @@ topics:
   - barcode-scanner
 
 environment:
-  sdk: ^3.11.3
-  flutter: '>=3.3.0'
+  sdk: ^3.7.0
+  flutter: '>=3.29.0'
 
 dependencies:
   flutter:
